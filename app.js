@@ -11,6 +11,7 @@ const state = {
   queueNeedsScrollIntoView: false,
   overviewPage: 1,
   matchPage: 1,
+  showClosedNeeds: false,
   overviewFilters: {
     metric: [],
     pipeline: [],
@@ -252,7 +253,7 @@ function pipelineMatchesNeed(pipelineId, need) {
 }
 
 function buildOverviewCases() {
-  const needCases = state.data.needs.map((need) => ({ type: "need", need }));
+  const needCases = getDisplayNeeds().map((need) => ({ type: "need", need }));
   const pendingNeedCases = (state.data.pendingNeeds || []).map((need) => ({ type: "pendingNeed", need }));
   const pendingUpdateCases = (state.data.pendingUpdates || []).map((request) => ({
     type: "pendingUpdate",
@@ -679,12 +680,16 @@ function getCuratorById(id) {
   return state.data.curators.find((curator) => curator.id === id) || null;
 }
 
+function getDisplayNeeds() {
+  return state.data.needs.filter((need) => state.showClosedNeeds || need.status !== "Closed");
+}
+
 function getNeedById(id) {
-  return state.data.needs.find((need) => need.id === id) || null;
+  return getDisplayNeeds().find((need) => need.id === id) || null;
 }
 
 function getVisibleNeeds() {
-  return [...state.data.needs]
+  return [...getDisplayNeeds()]
     .filter((need) => state.filters.status === "all" || need.status === state.filters.status)
     .filter((need) => state.filters.curator === "all" || (need.curator_id || "unassigned") === state.filters.curator)
     .filter((need) => state.filters.state === "all" || normalizeText(need.state) === state.filters.state)
@@ -722,7 +727,7 @@ function topEntries(mapLike, limit = 6) {
 function renderMetrics() {
   const metricsGrid = byId("metricsGrid");
   if (!metricsGrid) return;
-  const needs = state.data.needs;
+  const needs = getDisplayNeeds();
   const metrics = [
     ["approved", "Approved Needs", needs.length, "Live inbound needs currently visible in the MIS."],
     ["in_progress", "In Progress", needs.filter((need) => need.status === "In progress").length, "Needs under active curation or provider search."],
@@ -747,11 +752,13 @@ function renderMetrics() {
 
 function renderOverview() {
   if (!byId("overviewView")) return;
-  const needs = state.data.needs;
+  const needs = getDisplayNeeds();
   const headline = byId("datasetHeadline");
   const subline = byId("datasetSubline");
-  if (headline) headline.textContent = `${needs.length} approved inbound needs loaded from GRE operations data`;
-  if (subline) subline.textContent = `${state.data.pendingNeeds.length} intake records and ${state.data.pendingUpdates.length} curator updates are waiting for admin action.`;
+  if (headline) headline.textContent = `${needs.length} active inbound needs loaded from GRE operations data`;
+  if (subline) subline.textContent = `${state.data.pendingNeeds.length} intake records and ${state.data.pendingUpdates.length} curator updates are waiting for admin action.${state.showClosedNeeds ? " Closed needs are currently visible." : " Closed needs are currently hidden."}`;
+  const closedToggleBtn = byId("closedToggleBtn");
+  if (closedToggleBtn) closedToggleBtn.textContent = `Show Closed: ${state.showClosedNeeds ? "On" : "Off"}`;
 
   const stageData = PIPELINE_SEGMENTS.map((segment) => [
     segment.id,
@@ -856,8 +863,9 @@ function renderBarList(targetId, items, tone) {
 
 function renderFilters() {
   if (!byId("statusFilter")) return;
-  const statusOptions = ["all", ...new Set(state.data.needs.map((need) => need.status).filter(Boolean))];
-  const stateOptions = ["all", ...new Set(state.data.needs.map((need) => normalizeText(need.state)).filter(Boolean))];
+  const displayNeeds = getDisplayNeeds();
+  const statusOptions = ["all", ...new Set(displayNeeds.map((need) => need.status).filter(Boolean))];
+  const stateOptions = ["all", ...new Set(displayNeeds.map((need) => normalizeText(need.state)).filter(Boolean))];
 
   document.getElementById("statusFilter").innerHTML = statusOptions
     .map((value) => `<option value="${esc(value)}">${esc(value === "all" ? "All statuses" : value)}</option>`)
@@ -1274,8 +1282,29 @@ async function refreshAll() {
     state.data.pendingNeeds = [];
     state.data.pendingUpdates = [];
   });
-  if (!state.selectedNeedId && state.data.needs[0]) state.selectedNeedId = state.data.needs[0].id;
+  const displayNeeds = getDisplayNeeds();
+  if (!displayNeeds.find((need) => need.id === state.selectedNeedId)) {
+    state.selectedNeedId = displayNeeds[0]?.id || null;
+  }
   await rerender();
+}
+
+function resetDashboardSelections() {
+  state.overviewFilters = {
+    metric: [],
+    pipeline: [],
+    curator: [],
+    state: [],
+    category: [],
+  };
+  state.overviewPage = 1;
+  state.matchPage = 1;
+  state.filters = {
+    status: "all",
+    curator: "all",
+    state: "all",
+    search: "",
+  };
 }
 
 function bindStaticEvents() {
@@ -1353,7 +1382,23 @@ function bindStaticEvents() {
     }
   }));
 
-  byId("refreshBtn")?.addEventListener("click", refreshAll);
+  byId("refreshBtn")?.addEventListener("click", safeAsync(async () => {
+    const isOverviewDashboard = Boolean(byId("overviewView"));
+    resetDashboardSelections();
+    await refreshAll();
+    toast(isOverviewDashboard ? "Dashboard refreshed and selections reset." : "Data refreshed.");
+  }));
+
+  byId("closedToggleBtn")?.addEventListener("click", safeAsync(async () => {
+    state.showClosedNeeds = !state.showClosedNeeds;
+    state.overviewPage = 1;
+    state.matchPage = 1;
+    const displayNeeds = getDisplayNeeds();
+    if (!displayNeeds.find((need) => need.id === state.selectedNeedId)) {
+      state.selectedNeedId = displayNeeds[0]?.id || null;
+    }
+    await rerender();
+  }));
 
   const dialog = byId("needDialog");
   byId("newNeedBtn")?.addEventListener("click", () => dialog?.showModal());
