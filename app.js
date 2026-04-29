@@ -9,6 +9,7 @@ const state = {
   view: "overview",
   selectedNeedId: null,
   overviewPage: 1,
+  matchPage: 1,
   overviewFilters: {
     metric: [],
     pipeline: [],
@@ -604,7 +605,7 @@ class GreMisStore {
             config: "simple",
             type: "websearch",
           })
-          .limit(18),
+          .limit(48),
       );
     }
 
@@ -616,12 +617,12 @@ class GreMisStore {
           .from("offerings")
           .select(offeringSelect)
           .or(`offering_name.ilike.%${safeTerm}%,offering_category.ilike.%${safeTerm}%,about_offering_text.ilike.%${safeTerm}%`)
-          .limit(12),
+          .limit(30),
       );
     });
 
     if (!queries.length) {
-      queries.push(client.from("offerings").select(offeringSelect).limit(18));
+      queries.push(client.from("offerings").select(offeringSelect).limit(48));
     }
 
     const responses = await Promise.all(queries);
@@ -667,8 +668,7 @@ class GreMisStore {
         };
       })
       .filter((item) => item.matchScore >= 6)
-      .sort((a, b) => b.matchScore - a.matchScore)
-      .slice(0, 6);
+      .sort((a, b) => b.matchScore - a.matchScore);
   }
 }
 
@@ -987,9 +987,14 @@ async function renderMatches() {
 
   matchesEl.innerHTML = `<div class="empty-state">Searching live GRE offerings and solution providers…</div>`;
   const matches = await store.searchMatchesForNeed(need);
+  const pageSize = 6;
+  const totalPages = Math.max(1, Math.ceil(matches.length / pageSize));
+  if (state.matchPage > totalPages) state.matchPage = totalPages;
+  const pageStart = (state.matchPage - 1) * pageSize;
+  const visibleMatches = matches.slice(pageStart, pageStart + pageSize);
 
   matchesEl.innerHTML = matches.length
-    ? matches
+    ? visibleMatches
         .map((match) => {
           const email = match.trader?.email || "";
           return `
@@ -1023,7 +1028,15 @@ async function renderMatches() {
             </article>
           `;
         })
-        .join("")
+        .join("") + `
+      <div class="pipeline-pagination">
+        <span class="meta-text">Showing ${esc(pageStart + 1)}-${esc(Math.min(pageStart + pageSize, matches.length))} of ${esc(matches.length)} matches</span>
+        <div class="pipeline-pagination-actions">
+          <button class="btn btn-secondary" data-match-page-action="prev" ${state.matchPage <= 1 ? "disabled" : ""}>Prev</button>
+          <span class="meta-text">Page ${esc(state.matchPage)} of ${esc(totalPages)}</span>
+          <button class="btn btn-secondary" data-match-page-action="next" ${state.matchPage >= totalPages ? "disabled" : ""}>Next</button>
+        </div>
+      </div>`
     : `<div class="empty-state">No direct live catalog match was found for this need yet. Try refining categories or curator notes.</div>`;
 }
 
@@ -1285,6 +1298,7 @@ function bindStaticEvents() {
     const card = event.target.closest("[data-need-id]");
     if (!card) return;
     state.selectedNeedId = card.dataset.needId;
+    state.matchPage = 1;
     renderQueue();
     renderNeedDetail();
     renderWorkbench();
@@ -1310,12 +1324,23 @@ function bindStaticEvents() {
     const button = event.target.closest("[data-open-need-id]");
     if (!button) return;
     state.selectedNeedId = button.dataset.openNeedId;
+    state.matchPage = 1;
     switchView("operations");
     renderQueue();
     renderNeedDetail();
     renderWorkbench();
     await renderMatches();
   });
+
+  byId("matchResults")?.addEventListener("click", safeAsync(async (event) => {
+    const pageButton = event.target.closest("[data-match-page-action]");
+    if (pageButton) {
+      if (pageButton.dataset.matchPageAction === "prev" && state.matchPage > 1) state.matchPage -= 1;
+      if (pageButton.dataset.matchPageAction === "next") state.matchPage += 1;
+      await renderMatches();
+      return;
+    }
+  }));
 
   byId("refreshBtn")?.addEventListener("click", refreshAll);
 
