@@ -89,6 +89,17 @@ function toast(message) {
   window.alert(message);
 }
 
+function safeAsync(handler) {
+  return async (...args) => {
+    try {
+      await handler(...args);
+    } catch (error) {
+      console.error(error);
+      toast(error?.message || "Something went wrong. Please try again.");
+    }
+  };
+}
+
 function normalizeText(value) {
   return String(value ?? "").trim();
 }
@@ -1152,7 +1163,7 @@ function bindStaticEvents() {
   byId("newNeedBtn")?.addEventListener("click", () => dialog?.showModal());
   byId("closeNeedDialog")?.addEventListener("click", () => dialog?.close());
 
-  byId("needForm")?.addEventListener("submit", async (event) => {
+  byId("needForm")?.addEventListener("submit", safeAsync(async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
     await store.createNeed(Object.fromEntries(form.entries()));
@@ -1160,9 +1171,9 @@ function bindStaticEvents() {
     dialog?.close();
     await refreshAll();
     toast("Need submitted to the admin approval queue.");
-  });
+  }));
 
-  byId("adminLoginForm")?.addEventListener("submit", async (event) => {
+  byId("adminLoginForm")?.addEventListener("submit", safeAsync(async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
     await store.adminLogin(form.get("username"), form.get("password"));
@@ -1170,15 +1181,15 @@ function bindStaticEvents() {
     await refreshAll();
     if (byId("adminView")) switchView("admin");
     toast("Admin access unlocked.");
-  });
+  }));
 
-  byId("adminLogoutBtn")?.addEventListener("click", async () => {
+  byId("adminLogoutBtn")?.addEventListener("click", safeAsync(async () => {
     await store.adminLogout();
     await refreshAll();
     toast("Admin session closed.");
-  });
+  }));
 
-  byId("saveOptionBtn")?.addEventListener("click", async () => {
+  byId("saveOptionBtn")?.addEventListener("click", safeAsync(async () => {
     if (!state.adminToken) {
       toast("Login as admin to manage taxonomy options.");
       return;
@@ -1193,9 +1204,9 @@ function bindStaticEvents() {
     byId("optionLabel").value = "";
     await refreshAll();
     toast("Option saved.");
-  });
+  }));
 
-  byId("actionWorkbench")?.addEventListener("click", async (event) => {
+  byId("actionWorkbench")?.addEventListener("click", safeAsync(async (event) => {
     const button = event.target.closest("button");
     if (!button) return;
 
@@ -1208,9 +1219,9 @@ function bindStaticEvents() {
       await refreshAll();
       toast("Curator assignment updated.");
     }
-  });
+  }));
 
-  byId("actionWorkbench")?.addEventListener("submit", async (event) => {
+  byId("actionWorkbench")?.addEventListener("submit", safeAsync(async (event) => {
     if (event.target.id !== "updateRequestForm") return;
     event.preventDefault();
     const need = getNeedById(state.selectedNeedId);
@@ -1236,9 +1247,9 @@ function bindStaticEvents() {
     event.target.reset();
     await refreshAll();
     toast("Curator update submitted for admin approval.");
-  });
+  }));
 
-  byId("adminView")?.addEventListener("click", async (event) => {
+  byId("adminView")?.addEventListener("click", safeAsync(async (event) => {
     const button = event.target.closest("[data-action]");
     if (!button) return;
     if (!state.adminToken) {
@@ -1265,9 +1276,9 @@ function bindStaticEvents() {
       await refreshAll();
       toast("Curator update rejected.");
     }
-  });
+  }));
 
-  byId("matchResults")?.addEventListener("click", async (event) => {
+  byId("matchResults")?.addEventListener("click", safeAsync(async (event) => {
     const button = event.target.closest("[data-action='email-provider']");
     if (!button) return;
     if (!state.adminToken) {
@@ -1276,7 +1287,7 @@ function bindStaticEvents() {
     }
     const result = await store.sendProviderIntro(state.selectedNeedId, button.dataset.providerEmail);
     toast(result.message || "Provider outreach email triggered.");
-  });
+  }));
 }
 
 async function init() {
