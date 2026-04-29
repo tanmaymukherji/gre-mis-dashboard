@@ -8,7 +8,13 @@ const FALLBACK_CURATORS = [
 const state = {
   view: "overview",
   selectedNeedId: null,
-  overviewFocus: { kind: "pipeline", id: "stuck" },
+  overviewFilters: {
+    metric: [],
+    pipeline: [],
+    curator: [],
+    state: [],
+    category: [],
+  },
   adminToken: localStorage.getItem("gre-mis-admin-token") || "",
   adminSession: null,
   filters: {
@@ -197,15 +203,59 @@ function getPipelineSegmentNeeds(segmentId) {
 }
 
 function isOverviewFocus(kind, id) {
-  return state.overviewFocus?.kind === kind && state.overviewFocus?.id === id;
+  return (state.overviewFilters?.[kind] || []).includes(id);
 }
 
 function setOverviewFocus(kind, id) {
-  state.overviewFocus = { kind, id };
+  const active = new Set(state.overviewFilters?.[kind] || []);
+  if (active.has(id)) {
+    active.delete(id);
+  } else {
+    active.add(id);
+  }
+  state.overviewFilters[kind] = [...active];
 }
 
 function sortNeedsByUrgency(needs) {
   return [...needs].sort((a, b) => Number(b.curation_age_days || 0) - Number(a.curation_age_days || 0));
+}
+
+function getCaseNeed(item) {
+  if (item.type === "need" || item.type === "pendingNeed") return item.need;
+  if (item.type === "pendingUpdate") return item.need;
+  return null;
+}
+
+function metricMatchesNeed(metricId, need) {
+  if (!need) return false;
+  if (metricId === "approved") return need.approval_status === "approved";
+  if (metricId === "in_progress") return need.status === "In progress";
+  if (metricId === "need_providers") return need.internal_status === "Need solution providers";
+  if (metricId === "connection_made") return need.internal_status === "Connection made";
+  if (metricId === "stuck") return Number(need.curation_age_days || 0) >= 7;
+  return false;
+}
+
+function metricMatchesItem(metricId, item) {
+  if (metricId === "admin_queue") return item.type === "pendingNeed" || item.type === "pendingUpdate";
+  return metricMatchesNeed(metricId, getCaseNeed(item));
+}
+
+function pipelineMatchesNeed(pipelineId, need) {
+  if (!need) return false;
+  const segment = PIPELINE_SEGMENTS.find((item) => item.id === pipelineId);
+  return segment ? segment.match(need) : false;
+}
+
+function buildOverviewCases() {
+  const needCases = state.data.needs.map((need) => ({ type: "need", need }));
+  const pendingNeedCases = (state.data.pendingNeeds || []).map((need) => ({ type: "pendingNeed", need }));
+  const pendingUpdateCases = (state.data.pendingUpdates || []).map((request) => ({
+    type: "pendingUpdate",
+    request,
+    need: getNeedById(request.need_id) || null,
+  }));
+  return [...needCases, ...pendingNeedCases, ...pendingUpdateCases];
 }
 
 function buildNeedCaseCard(need, extraMeta = "") {
@@ -245,92 +295,64 @@ function buildPendingRequestCaseCard(request) {
 }
 
 function getOverviewFocusPayload() {
-  const focus = state.overviewFocus || { kind: "pipeline", id: "stuck" };
-  switch (focus.kind) {
-    case "metric":
-      if (focus.id === "approved") {
-        return { label: "Approved Needs", tone: "good", cards: sortNeedsByUrgency(state.data.needs).map((need) => buildNeedCaseCard(need)) };
-      }
-      if (focus.id === "in_progress") {
-        return { label: "In Progress", tone: "info", cards: sortNeedsByUrgency(state.data.needs.filter((need) => need.status === "In progress")).map((need) => buildNeedCaseCard(need)) };
-      }
-      if (focus.id === "need_providers") {
-        return {
-          label: "Need Providers",
-          tone: "warn",
-          cards: sortNeedsByUrgency(state.data.needs.filter((need) => need.internal_status === "Need solution providers")).map((need) => buildNeedCaseCard(need)),
-        };
-      }
-      if (focus.id === "connection_made") {
-        return {
-          label: "Connection Made",
-          tone: "good",
-          cards: sortNeedsByUrgency(state.data.needs.filter((need) => need.internal_status === "Connection made")).map((need) => buildNeedCaseCard(need)),
-        };
-      }
-      if (focus.id === "stuck") {
-        return {
-          label: "Stuck 7+ Days",
-          tone: "bad",
-          cards: sortNeedsByUrgency(state.data.needs.filter((need) => Number(need.curation_age_days || 0) >= 7)).map((need) => buildNeedCaseCard(need)),
-        };
-      }
-      if (focus.id === "admin_queue") {
-        const pendingNeedCards = (state.data.pendingNeeds || []).map((need) => buildNeedCaseCard(need, "Pending intake"));
-        const pendingUpdateCards = (state.data.pendingUpdates || []).map((request) => buildPendingRequestCaseCard(request));
-        return {
-          label: "Admin Queue",
-          tone: "warn",
-          cards: [...pendingNeedCards, ...pendingUpdateCards],
-          emptyText: state.adminToken
-            ? "No pending admin queue cases are available right now."
-            : "Sign in through Admin Sync to inspect pending approvals and curator requests.",
-        };
-      }
-      break;
-    case "pipeline": {
-      const segment = PIPELINE_SEGMENTS.find((item) => item.id === focus.id) || PIPELINE_SEGMENTS[0];
-      const tone = focus.id === "stuck" ? "bad" : focus.id === "broadcast" ? "warn" : "info";
-      return {
-        label: segment.label,
-        tone,
-        cards: getPipelineSegmentNeeds(segment.id).map((need) => buildNeedCaseCard(need)),
-      };
-    }
-    case "curator": {
-      const curator = getCuratorById(focus.id);
-      const needs = sortNeedsByUrgency(state.data.needs.filter((need) => need.curator_id === focus.id));
-      return {
-        label: `Curator: ${curator?.display_name || "Unknown"}`,
-        tone: "good",
-        cards: needs.map((need) => buildNeedCaseCard(need)),
-      };
-    }
-    case "state": {
-      const needs = sortNeedsByUrgency(state.data.needs.filter((need) => normalizeText(need.state) === focus.id));
-      return {
-        label: `State: ${focus.id}`,
-        tone: "info",
-        cards: needs.map((need) => buildNeedCaseCard(need)),
-      };
-    }
-    case "category": {
-      const needs = sortNeedsByUrgency(state.data.needs.filter((need) => parseArray(need.curated_need).includes(focus.id)));
-      return {
-        label: `Category: ${focus.id}`,
-        tone: "good",
-        cards: needs.map((need) => buildNeedCaseCard(need)),
-      };
-    }
-    default:
-      break;
-  }
+  const filters = state.overviewFilters || {};
+  const activeMetrics = filters.metric || [];
+  const activePipelines = filters.pipeline || [];
+  const activeCurators = filters.curator || [];
+  const activeStates = filters.state || [];
+  const activeCategories = filters.category || [];
+  const activeFilterCount = [activeMetrics, activePipelines, activeCurators, activeStates, activeCategories].reduce((sum, list) => sum + list.length, 0);
+
+  const allCases = buildOverviewCases();
+  const filteredCases = allCases.filter((item) => {
+    const need = getCaseNeed(item);
+    if (activeMetrics.length && !activeMetrics.some((metricId) => metricMatchesItem(metricId, item))) return false;
+    if (activePipelines.length && !activePipelines.some((pipelineId) => pipelineMatchesNeed(pipelineId, need))) return false;
+    if (activeCurators.length && !activeCurators.includes(need?.curator_id || "")) return false;
+    if (activeStates.length && !activeStates.includes(normalizeText(need?.state))) return false;
+    if (activeCategories.length && !activeCategories.some((category) => parseArray(need?.curated_need).includes(category))) return false;
+    return true;
+  });
+
+  const orderedCases = filteredCases.sort((left, right) => {
+    const leftNeed = getCaseNeed(left);
+    const rightNeed = getCaseNeed(right);
+    return Number(rightNeed?.curation_age_days || 0) - Number(leftNeed?.curation_age_days || 0);
+  });
+
+  const cards = orderedCases.map((item) => {
+    if (item.type === "pendingNeed") return buildNeedCaseCard(item.need, "Pending intake");
+    if (item.type === "pendingUpdate") return buildPendingRequestCaseCard(item.request);
+    return buildNeedCaseCard(item.need);
+  });
+
+  const labels = [];
+  activeMetrics.forEach((metricId) => {
+    const metricLabels = {
+      approved: "Approved Needs",
+      in_progress: "In Progress",
+      need_providers: "Need Providers",
+      connection_made: "Connection Made",
+      stuck: "Stuck 7+ Days",
+      admin_queue: "Admin Queue",
+    };
+    labels.push(metricLabels[metricId] || metricId);
+  });
+  activePipelines.forEach((pipelineId) => {
+    const segment = PIPELINE_SEGMENTS.find((item) => item.id === pipelineId);
+    labels.push(segment?.label || pipelineId);
+  });
+  activeCurators.forEach((curatorId) => labels.push(`Curator: ${getCuratorById(curatorId)?.display_name || curatorId}`));
+  activeStates.forEach((stateName) => labels.push(`State: ${stateName}`));
+  activeCategories.forEach((category) => labels.push(`Category: ${category}`));
 
   return {
-    label: "Focused Cases",
-    tone: "info",
-    cards: [],
-    emptyText: "No cases are available for this selection right now.",
+    label: activeFilterCount ? labels.join(" | ") : "All Cases",
+    tone: activeMetrics.includes("stuck") || activePipelines.includes("stuck") ? "bad" : activeMetrics.includes("admin_queue") ? "warn" : "info",
+    cards,
+    emptyText: activeMetrics.includes("admin_queue") && !state.adminToken
+      ? "Sign in through Admin Sync to inspect pending approvals and curator requests."
+      : "No cases match the current combination of filters.",
   };
 }
 

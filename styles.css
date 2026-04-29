@@ -154,10 +154,13 @@ h2 { font-size: 1.35rem; }
   box-shadow: 0 16px 30px rgba(24, 50, 30, 0.08);
 }
 .metric-card.active {
-  border-color: var(--green);
-  box-shadow: 0 16px 30px rgba(46, 106, 60, 0.12);
-  background: linear-gradient(180deg, #ffffff, #eef6ec);
+  border-color: #244f2f;
+  box-shadow: 0 16px 30px rgba(36, 79, 47, 0.18);
+  background: linear-gradient(180deg, #2f6840, #254f31);
+  color: #fff;
 }
+.metric-card.active .eyebrow,
+.metric-card.active p:last-child { color: rgba(255, 255, 255, 0.84); }
 .metric-card strong { display: block; margin-top: 8px; font-size: 2rem; line-height: 1; }
 .metric-card p:last-child { margin-top: 8px; color: var(--muted); font-size: 0.88rem; line-height: 1.45; }
 
@@ -195,10 +198,13 @@ h2 { font-size: 1.35rem; }
   box-shadow: 0 16px 30px rgba(24, 50, 30, 0.08);
 }
 .stage-card.active {
-  border-color: var(--green);
-  box-shadow: 0 16px 30px rgba(46, 106, 60, 0.12);
-  background: linear-gradient(180deg, #ffffff, #eef6ec);
+  border-color: #244f2f;
+  box-shadow: 0 16px 30px rgba(36, 79, 47, 0.18);
+  background: linear-gradient(180deg, #2f6840, #254f31);
+  color: #fff;
 }
+.stage-card.active .eyebrow,
+.stage-card.active .helper-text { color: rgba(255, 255, 255, 0.84); }
 .stage-card strong { display: block; margin-top: 8px; font-size: 1.8rem; }
 .pipeline-drilldown {
   margin-top: 14px;
@@ -231,10 +237,14 @@ h2 { font-size: 1.35rem; }
   box-shadow: 0 12px 24px rgba(24, 50, 30, 0.08);
 }
 .bar-row-button.active {
-  border-color: var(--green);
-  background: linear-gradient(180deg, #ffffff, #eef6ec);
-  box-shadow: 0 12px 24px rgba(46, 106, 60, 0.1);
+  border-color: #244f2f;
+  background: linear-gradient(180deg, #2f6840, #254f31);
+  box-shadow: 0 12px 24px rgba(36, 79, 47, 0.18);
+  color: #fff;
 }
+.bar-row-button.active span,
+.bar-row-button.active strong { color: #fff; }
+.bar-row-button.active .bar-track { background: rgba(255, 255, 255, 0.18); }
 
 .stack-list,
 .queue-list,
@@ -308,8 +318,9 @@ h2 { font-size: 1.35rem; }
   font: inherit;
 }
 .tag-cloud button.active {
-  border-color: var(--green);
-  background: #eef6ec;
+  border-color: #244f2f;
+  background: #2f6840;
+  color: #fff;
 }
 
 .operations-grid {
