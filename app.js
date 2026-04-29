@@ -8,6 +8,7 @@ const FALLBACK_CURATORS = [
 const state = {
   view: "overview",
   selectedNeedId: null,
+  queueNeedsScrollIntoView: false,
   overviewPage: 1,
   matchPage: 1,
   overviewFilters: {
@@ -898,6 +899,14 @@ function renderQueue() {
       `;
     })
     .join("");
+
+  if (state.queueNeedsScrollIntoView) {
+    const activeCard = queue.querySelector(`[data-need-id="${CSS.escape(String(state.selectedNeedId || ""))}"]`);
+    if (activeCard) {
+      activeCard.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+    state.queueNeedsScrollIntoView = false;
+  }
 }
 
 function renderNeedDetail() {
@@ -1298,6 +1307,7 @@ function bindStaticEvents() {
     const card = event.target.closest("[data-need-id]");
     if (!card) return;
     state.selectedNeedId = card.dataset.needId;
+    state.queueNeedsScrollIntoView = true;
     state.matchPage = 1;
     renderQueue();
     renderNeedDetail();
@@ -1324,6 +1334,7 @@ function bindStaticEvents() {
     const button = event.target.closest("[data-open-need-id]");
     if (!button) return;
     state.selectedNeedId = button.dataset.openNeedId;
+    state.queueNeedsScrollIntoView = true;
     state.matchPage = 1;
     switchView("operations");
     renderQueue();

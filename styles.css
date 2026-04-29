@@ -359,7 +359,11 @@ textarea { resize: vertical; }
 
 .queue-list { max-height: 860px; overflow: auto; padding-right: 2px; }
 .queue-item { cursor: pointer; }
-.queue-item.active { border-color: var(--green); box-shadow: 0 14px 28px rgba(46, 106, 60, 0.12); }
+.queue-item.active {
+  border-color: #244f2f;
+  box-shadow: 0 16px 30px rgba(36, 79, 47, 0.18);
+  background: linear-gradient(180deg, #eef6ec, #dfeedd);
+}
 .queue-item h4,
 .stack-card h4,
 .match-card h4 { margin: 10px 0 6px; font-size: 1rem; }
