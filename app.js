@@ -8,6 +8,7 @@ const FALLBACK_CURATORS = [
 const state = {
   view: "overview",
   selectedNeedId: null,
+  pipelineFocus: "stuck",
   adminToken: localStorage.getItem("gre-mis-admin-token") || "",
   adminSession: null,
   filters: {
@@ -26,6 +27,52 @@ const state = {
   },
 };
 
+const MATCH_STOPWORDS = new Set([
+  "about", "across", "after", "also", "been", "being", "between", "could", "does", "from", "have", "into",
+  "more", "need", "needs", "only", "other", "problem", "seeker", "should", "solution", "solutions", "their",
+  "there", "these", "they", "this", "through", "under", "want", "where", "which", "with", "would", "rural",
+  "green", "economy", "help", "looking", "support", "required", "request",
+]);
+
+const PIPELINE_SEGMENTS = [
+  {
+    id: "new",
+    label: "New",
+    note: "Fresh approved needs waiting for assignment.",
+    match: (need) => need.status === "New",
+  },
+  {
+    id: "accepted",
+    label: "Accepted",
+    note: "Needs allocated but still waiting for movement.",
+    match: (need) => need.status === "Accepted",
+  },
+  {
+    id: "in_progress",
+    label: "In progress",
+    note: "Needs in live curation and matching flow.",
+    match: (need) => need.status === "In progress",
+  },
+  {
+    id: "closed",
+    label: "Closed",
+    note: "Resolved or completed needs.",
+    match: (need) => need.status === "Closed",
+  },
+  {
+    id: "stuck",
+    label: "Blocked / Stalled",
+    note: "Needs requiring escalation.",
+    match: (need) => ["Blocked", "Stalled"].includes(need.internal_status),
+  },
+  {
+    id: "broadcast",
+    label: "Broadcast Suggested",
+    note: "Needs that could benefit from wider ecosystem response.",
+    match: (need) => Boolean(need.demand_broadcast_needed),
+  },
+];
+
 function esc(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -43,7 +90,15 @@ function normalizeText(value) {
 }
 
 function parseArray(value) {
-  return Array.isArray(value) ? value.filter(Boolean) : [];
+  if (Array.isArray(value)) return value.filter(Boolean).map((item) => normalizeText(item)).filter(Boolean);
+  if (typeof value === "string") {
+    return value
+      .replace(/^[\[\{"]+|[\]\}"]+$/g, "")
+      .split(/[;,|]/)
+      .map((item) => normalizeText(item))
+      .filter(Boolean);
+  }
+  return [];
 }
 
 function formatDate(value) {
@@ -62,6 +117,123 @@ function badgeTone(value) {
   if (["blocked", "stalled", "rejected", "overdue"].includes(text)) return "bad";
   if (["pending_admin", "need solution providers", "new", "pending"].includes(text)) return "warn";
   return "info";
+}
+
+function tokenizeText(value, minimumLength = 4) {
+  return normalizeText(value)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= minimumLength && !MATCH_STOPWORDS.has(token));
+}
+
+function uniq(items) {
+  return [...new Set(items.filter(Boolean))];
+}
+
+function clipText(value, length = 180) {
+  const text = normalizeText(value);
+  return text.length > length ? `${text.slice(0, length)}...` : text;
+}
+
+function buildNeedMatchProfile(need) {
+  const categories = uniq(parseArray(need.curated_need).map((item) => item.toLowerCase()));
+  const categoryTokens = categories.flatMap((item) => tokenizeText(item, 3));
+  const problemTokens = tokenizeText(need.problem_statement, 5);
+  const notesTokens = tokenizeText(need.curation_notes, 5);
+  const geographyTokens = tokenizeText(`${need.state || ""} ${need.district || ""}`, 3);
+  const primaryTerms = uniq([...categoryTokens, ...problemTokens.slice(0, 8), ...notesTokens.slice(0, 4)]);
+  const phrases = uniq(
+    categories
+      .filter((item) => item.includes(" "))
+      .concat(
+        normalizeText(need.problem_statement)
+          .split(/[.;]/)
+          .map((item) => item.trim())
+          .filter((item) => item.split(/\s+/).length <= 5 && item.length >= 12)
+          .slice(0, 2)
+          .map((item) => item.toLowerCase()),
+      ),
+  );
+
+  return {
+    categories,
+    categoryTokens: uniq(categoryTokens),
+    problemTokens,
+    notesTokens,
+    geographyTokens,
+    phrases,
+    primaryTerms,
+  };
+}
+
+function getPipelineSegmentNeeds(segmentId) {
+  const segment = PIPELINE_SEGMENTS.find((item) => item.id === segmentId) || PIPELINE_SEGMENTS[0];
+  return state.data.needs
+    .filter(segment.match)
+    .sort((a, b) => Number(b.curation_age_days || 0) - Number(a.curation_age_days || 0));
+}
+
+function scoreOfferingMatch(need, profile, offering) {
+  const tags = parseArray(offering.tags).map((item) => item.toLowerCase());
+  const geographies = parseArray(offering.geographies).map((item) => item.toLowerCase());
+  const category = normalizeText(offering.offering_category).toLowerCase();
+  const name = normalizeText(offering.offering_name).toLowerCase();
+  const about = normalizeText(offering.about_offering_text || offering.solution?.about_solution_text).toLowerCase();
+  const solutionName = normalizeText(offering.solution?.solution_name).toLowerCase();
+  const joined = [name, category, about, solutionName, tags.join(" "), geographies.join(" ")].join(" ");
+
+  let score = 0;
+  const reasons = [];
+
+  profile.categories.forEach((phrase) => {
+    if (joined.includes(phrase)) {
+      score += 10;
+      reasons.push(phrase);
+    }
+  });
+
+  profile.categoryTokens.forEach((token) => {
+    if (tags.some((tag) => tag.includes(token))) {
+      score += 7;
+      reasons.push(token);
+    } else if (category.includes(token)) {
+      score += 6;
+      reasons.push(token);
+    } else if (name.includes(token) || solutionName.includes(token)) {
+      score += 5;
+      reasons.push(token);
+    } else if (about.includes(token)) {
+      score += 3;
+      reasons.push(token);
+    }
+  });
+
+  profile.problemTokens.slice(0, 8).forEach((token) => {
+    if (tags.some((tag) => tag.includes(token)) || name.includes(token) || solutionName.includes(token)) {
+      score += 4;
+      reasons.push(token);
+    } else if (about.includes(token)) {
+      score += 2;
+      reasons.push(token);
+    }
+  });
+
+  profile.geographyTokens.forEach((token) => {
+    if (geographies.some((item) => item.includes(token)) || about.includes(token)) {
+      score += 2;
+      reasons.push(token);
+    }
+  });
+
+  if (!profile.categoryTokens.length && !profile.problemTokens.length) score += 1;
+  if (!reasons.length) score -= 8;
+  if (profile.categoryTokens.length && !profile.categoryTokens.some((token) => joined.includes(token))) score -= 4;
+
+  return {
+    score,
+    reasons: uniq(reasons).slice(0, 4),
+  };
 }
 
 class GreMisStore {
@@ -230,36 +402,53 @@ class GreMisStore {
   async searchMatchesForNeed(need) {
     const client = this.getClient();
     if (!client || !need) return [];
+    const profile = buildNeedMatchProfile(need);
+    const offeringSelect = "offering_id,solution_id,trader_id,offering_name,offering_category,tags,geographies,about_offering_text,contact_details,gre_link";
+    const searchTerms = uniq([...profile.categories, ...profile.phrases, ...profile.primaryTerms]).slice(0, 6);
+    const queries = [];
 
-    const terms = [
-      ...parseArray(need.curated_need).flatMap((item) => item.split(/[,\s]+/)),
-      ...normalizeText(need.problem_statement).split(/[^A-Za-z]+/).filter((token) => token.length > 5).slice(0, 6),
-    ]
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    const query = [...new Set(terms)].slice(0, 8).join(" | ");
-    let offeringsResponse = await client
-      .from("offerings")
-      .select("offering_id,solution_id,trader_id,offering_name,offering_category,tags,geographies,about_offering_text,contact_details,gre_link")
-      .textSearch("search_document", query || normalizeText(need.organization_name), {
-        config: "simple",
-        type: "websearch",
-      })
-      .limit(8);
-
-    if (offeringsResponse.error || !offeringsResponse.data?.length) {
-      const fallbackToken = terms[0] || normalizeText(need.state);
-      offeringsResponse = await client
-        .from("offerings")
-        .select("offering_id,solution_id,trader_id,offering_name,offering_category,tags,geographies,about_offering_text,contact_details,gre_link")
-        .ilike("offering_name", `%${fallbackToken}%`)
-        .limit(8);
+    if (searchTerms.length) {
+      queries.push(
+        client
+          .from("offerings")
+          .select(offeringSelect)
+          .textSearch("search_document", searchTerms.join(" | "), {
+            config: "simple",
+            type: "websearch",
+          })
+          .limit(18),
+      );
     }
 
-    if (offeringsResponse.error) return [];
+    searchTerms.slice(0, 3).forEach((term) => {
+      const safeTerm = term.replaceAll("%", "").replaceAll(",", " ").trim();
+      if (!safeTerm) return;
+      queries.push(
+        client
+          .from("offerings")
+          .select(offeringSelect)
+          .or(`offering_name.ilike.%${safeTerm}%,offering_category.ilike.%${safeTerm}%,about_offering_text.ilike.%${safeTerm}%`)
+          .limit(12),
+      );
+    });
 
-    const offerings = offeringsResponse.data || [];
+    if (!queries.length) {
+      queries.push(client.from("offerings").select(offeringSelect).limit(18));
+    }
+
+    const responses = await Promise.all(queries);
+    const offerings = [];
+    const seenOfferingIds = new Set();
+    responses.forEach((response) => {
+      (response.data || []).forEach((row) => {
+        if (!seenOfferingIds.has(row.offering_id)) {
+          seenOfferingIds.add(row.offering_id);
+          offerings.push(row);
+        }
+      });
+    });
+
+    if (!offerings.length) return [];
     const traderIds = [...new Set(offerings.map((item) => item.trader_id).filter(Boolean))];
     const solutionIds = [...new Set(offerings.map((item) => item.solution_id).filter(Boolean))];
 
@@ -275,11 +464,23 @@ class GreMisStore {
     const traderMap = new Map((tradersRes.data || []).map((row) => [row.trader_id, row]));
     const solutionMap = new Map((solutionsRes.data || []).map((row) => [row.solution_id, row]));
 
-    return offerings.map((offering) => ({
-      ...offering,
-      trader: traderMap.get(offering.trader_id) || null,
-      solution: solutionMap.get(offering.solution_id) || null,
-    }));
+    return offerings
+      .map((offering) => {
+        const enriched = {
+          ...offering,
+          trader: traderMap.get(offering.trader_id) || null,
+          solution: solutionMap.get(offering.solution_id) || null,
+        };
+        const matchMeta = scoreOfferingMatch(need, profile, enriched);
+        return {
+          ...enriched,
+          matchScore: matchMeta.score,
+          matchReasons: matchMeta.reasons,
+        };
+      })
+      .filter((item) => item.matchScore >= 6)
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .slice(0, 6);
   }
 }
 
@@ -358,19 +559,17 @@ function renderOverview() {
   document.getElementById("datasetHeadline").textContent = `${needs.length} approved inbound needs loaded from GRE operations data`;
   document.getElementById("datasetSubline").textContent = `${state.data.pendingNeeds.length} intake records and ${state.data.pendingUpdates.length} curator updates are waiting for admin action.`;
 
-  const stageData = [
-    ["New", needs.filter((need) => need.status === "New").length, "Fresh approved needs waiting for assignment."],
-    ["Accepted", needs.filter((need) => need.status === "Accepted").length, "Needs allocated but still waiting for movement."],
-    ["In progress", needs.filter((need) => need.status === "In progress").length, "Needs in live curation and matching flow."],
-    ["Closed", needs.filter((need) => need.status === "Closed").length, "Resolved or completed needs."],
-    ["Blocked / Stalled", needs.filter((need) => ["Blocked", "Stalled"].includes(need.internal_status)).length, "Needs requiring escalation."],
-    ["Broadcast Suggested", needs.filter((need) => need.demand_broadcast_needed).length, "Needs that could benefit from wider ecosystem response."],
-  ];
+  const stageData = PIPELINE_SEGMENTS.map((segment) => [
+    segment.id,
+    segment.label,
+    needs.filter(segment.match).length,
+    segment.note,
+  ]);
 
   document.getElementById("pipelineBoard").innerHTML = stageData
     .map(
-      ([label, value, note]) => `
-        <article class="stage-card">
+      ([id, label, value, note]) => `
+        <article class="stage-card ${state.pipelineFocus === id ? "active" : ""}" data-pipeline-segment="${esc(id)}">
           <p class="eyebrow">${esc(label)}</p>
           <strong>${esc(value)}</strong>
           <p class="helper-text">${esc(note)}</p>
@@ -378,6 +577,43 @@ function renderOverview() {
       `,
     )
     .join("");
+
+  const pipelineNeeds = getPipelineSegmentNeeds(state.pipelineFocus);
+  const focusMeta = PIPELINE_SEGMENTS.find((segment) => segment.id === state.pipelineFocus) || PIPELINE_SEGMENTS[0];
+  const focusTone = state.pipelineFocus === "stuck" ? "bad" : state.pipelineFocus === "broadcast" ? "warn" : "info";
+  document.getElementById("pipelineDrilldown").innerHTML = `
+    <div class="pipeline-drilldown-head">
+      <div>
+        <p class="eyebrow">Category Cases</p>
+        <h4>${esc(focusMeta.label)}</h4>
+      </div>
+      <span class="status-pill ${focusTone}">${esc(pipelineNeeds.length)} cases</span>
+    </div>
+    <div class="pipeline-drilldown-list">
+      ${pipelineNeeds.length
+        ? pipelineNeeds
+            .slice(0, 8)
+            .map(
+              (need) => `
+                <article class="stack-card">
+                  <div class="status-row">
+                    <span class="status-pill ${badgeTone(need.status)}">${esc(need.status)}</span>
+                    <span class="status-pill ${badgeTone(need.internal_status)}">${esc(need.internal_status)}</span>
+                    <span class="status-pill info">${esc(need.curation_age_days || 0)} days</span>
+                  </div>
+                  <h4>${esc(need.organization_name)}</h4>
+                  <p class="helper-text">${esc(clipText(need.problem_statement, 165))}</p>
+                  <div class="card-actions">
+                    <span class="meta-text">${esc(`${need.state || "Unknown state"}${need.district ? ` / ${need.district}` : ""}`)}</span>
+                    <button class="btn btn-secondary" data-open-need-id="${esc(need.id)}">Open Need</button>
+                  </div>
+                </article>
+              `,
+            )
+            .join("")
+        : `<div class="empty-state">No cases are currently sitting in this pipeline category.</div>`}
+    </div>
+  `;
 
   const priorityNeeds = needs
     .filter((need) => Number(need.curation_age_days || 0) >= 7 || ["Blocked", "Stalled"].includes(need.internal_status))
@@ -512,7 +748,8 @@ function renderNeedDetail() {
     { label: need.approval_status, tone: badgeTone(need.approval_status) },
   ];
   detailEl.innerHTML = `
-    <section class="need-overview-card">
+    <div class="need-detail-stack">
+      <section class="need-overview-card">
       <div class="need-overview-head">
         <div>
           <p class="eyebrow">Need #${esc(need.id)}</p>
@@ -527,11 +764,13 @@ function renderNeedDetail() {
         <h4>Problem Statement</h4>
         <p>${esc(need.problem_statement || "No problem statement provided.")}</p>
       </div>
-    </section>
+      </section>
 
-    <div class="detail-grid detail-grid-structured">
-      <article class="detail-card">
-        <h4>Seeker Details</h4>
+      <article class="detail-card detail-stack-card">
+        <div class="detail-card-subhead">
+          <h4>Seeker Details</h4>
+          <span class="status-pill info">${esc(formatDate(need.requested_on))}</span>
+        </div>
         <div class="kv-grid">
           <div><span>Contact Person</span><strong>${esc(need.contact_person || "Not set")}</strong></div>
           <div><span>Email</span><strong>${esc(need.seeker_email || "Not set")}</strong></div>
@@ -542,7 +781,7 @@ function renderNeedDetail() {
         </div>
       </article>
 
-      <article class="detail-card">
+      <article class="detail-card detail-stack-card">
         <h4>Curation Snapshot</h4>
         <div class="kv-grid">
           <div><span>Assigned Curator</span><strong>${esc(curator?.display_name || "Unassigned")}</strong></div>
@@ -553,42 +792,41 @@ function renderNeedDetail() {
           <div><span>Invited Providers</span><strong>${esc(need.invited_providers_count || 0)}</strong></div>
         </div>
       </article>
-    </div>
 
-    <div class="detail-grid detail-grid-split">
-      <article class="detail-card">
+      <article class="detail-card detail-stack-card">
         <h4>Categories</h4>
         <div class="tag-row">${parseArray(need.curated_need).map((item) => `<span>${esc(item)}</span>`).join("") || `<span>Unclassified</span>`}</div>
       </article>
-      <article class="detail-card">
+
+      <article class="detail-card detail-stack-card">
         <h4>Curation Notes</h4>
         <p class="detail-note">${esc(need.curation_notes || "No curation notes have been recorded yet.")}</p>
       </article>
-    </div>
 
-    <article class="detail-card timeline-shell">
-      <h4>Timeline</h4>
-      <div class="timeline-list">
-        ${updates.length
-          ? updates
-              .map(
-                (update) => `
-                  <div class="timeline-item">
-                    <div class="timeline-marker"></div>
-                    <div class="timeline-content">
-                      <div class="timeline-top">
-                        <strong>${esc(update.update_type.replaceAll("_", " "))}</strong>
-                        <span class="meta-text">${esc(formatDate(update.created_at))}</span>
+      <article class="detail-card timeline-shell">
+        <h4>Timeline</h4>
+        <div class="timeline-list">
+          ${updates.length
+            ? updates
+                .map(
+                  (update) => `
+                    <div class="timeline-item">
+                      <div class="timeline-marker"></div>
+                      <div class="timeline-content">
+                        <div class="timeline-top">
+                          <strong>${esc(update.update_type.replaceAll("_", " "))}</strong>
+                          <span class="meta-text">${esc(formatDate(update.created_at))}</span>
+                        </div>
+                        <p class="helper-text">${esc(update.note || "No note")}</p>
                       </div>
-                      <p class="helper-text">${esc(update.note || "No note")}</p>
                     </div>
-                  </div>
-                `,
-              )
-              .join("")
-          : `<p class="helper-text">No timeline updates yet.</p>`}
-      </div>
-    </article>
+                  `,
+                )
+                .join("")
+            : `<p class="helper-text">No timeline updates yet.</p>`}
+        </div>
+      </article>
+    </div>
   `;
 }
 
@@ -614,10 +852,20 @@ async function renderMatches() {
                   <p class="eyebrow">${esc(match.offering_category || "GRE Offering")}</p>
                   <h4>${esc(match.offering_name || match.solution?.solution_name || "Unnamed match")}</h4>
                 </div>
-                <span class="status-pill info">${esc(match.trader?.organisation_name || match.trader?.trader_name || "Provider")}</span>
+                <span class="status-pill match-score-pill">${esc(`Match ${match.matchScore}`)}</span>
               </div>
               <div class="tag-row">
                 ${parseArray(match.tags).slice(0, 5).map((tag) => `<span>${esc(tag)}</span>`).join("")}
+              </div>
+              <div class="match-meta-grid">
+                <div>
+                  <span>Provider</span>
+                  <strong>${esc(match.trader?.organisation_name || match.trader?.trader_name || "Provider not mapped")}</strong>
+                </div>
+                <div>
+                  <span>Why This Match</span>
+                  <strong>${esc(match.matchReasons?.length ? match.matchReasons.join(", ") : "Closest live GRE keyword overlap")}</strong>
+                </div>
               </div>
               <p>${esc((match.about_offering_text || match.solution?.about_solution_text || "").slice(0, 320))}${(match.about_offering_text || match.solution?.about_solution_text || "").length > 320 ? "..." : ""}</p>
               <p class="meta-text">${esc(parseArray(match.geographies).slice(0, 3).join(", ") || "Geography not listed")}</p>
@@ -869,6 +1117,24 @@ function bindStaticEvents() {
     const card = event.target.closest("[data-need-id]");
     if (!card) return;
     state.selectedNeedId = card.dataset.needId;
+    renderQueue();
+    renderNeedDetail();
+    renderWorkbench();
+    await renderMatches();
+  });
+
+  document.getElementById("pipelineBoard").addEventListener("click", (event) => {
+    const card = event.target.closest("[data-pipeline-segment]");
+    if (!card) return;
+    state.pipelineFocus = card.dataset.pipelineSegment;
+    renderOverview();
+  });
+
+  document.getElementById("pipelineDrilldown").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-open-need-id]");
+    if (!button) return;
+    state.selectedNeedId = button.dataset.openNeedId;
+    switchView("operations");
     renderQueue();
     renderNeedDetail();
     renderWorkbench();
