@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GRE MIS Admin Sync</title>
+  <link rel="icon" href="data:," />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="admin-page">
+  <div class="shell">
+    <header class="masthead masthead-admin">
+      <div class="brand-block">
+        <img src="./assets/gre-logo.png" alt="GRE logo" class="brand-logo" />
+        <div>
+          <p class="eyebrow">Green Rural Economy</p>
+          <h1>Admin Sync</h1>
+          <p class="lede">Approval workspace for intake review, curator-submitted updates, and taxonomy maintenance.</p>
+        </div>
+      </div>
+      <aside class="access-card">
+        <div class="access-head">
+          <div>
+            <p class="eyebrow">Admin Access</p>
+            <h2>Approval Gate</h2>
+          </div>
+          <span id="adminStatusChip" class="chip muted">Locked</span>
+        </div>
+        <form id="adminLoginForm" class="access-form">
+          <label>
+            <span>Username</span>
+            <input name="username" value="admin" />
+          </label>
+          <label>
+            <span>Password</span>
+            <input name="password" type="password" placeholder="Enter admin password" />
+          </label>
+          <div class="access-actions">
+            <button type="submit" class="btn btn-primary">Unlock Admin Sync</button>
+            <button type="button" id="adminLogoutBtn" class="btn btn-secondary hidden">Logout</button>
+          </div>
+        </form>
+        <p id="adminStatusText" class="helper-text">Admin approval is required for new intake records and curator-submitted status updates.</p>
+      </aside>
+    </header>
+
+    <section class="hero-strip">
+      <article class="hero-summary">
+        <p class="eyebrow">Admin Workspace</p>
+        <h2 id="datasetHeadline">Loading GRE approval queues…</h2>
+        <p id="datasetSubline" class="helper-text"></p>
+      </article>
+      <div class="hero-actions">
+        <a href="./index.html" class="btn btn-secondary">Back to Dashboard</a>
+        <button id="refreshBtn" class="btn btn-primary">Refresh</button>
+      </div>
+    </section>
+
+    <main>
+      <section id="adminView" class="view active">
+        <div id="metricsGrid" class="metrics-grid"></div>
+        <div class="admin-grid">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Pending Intake</p>
+                <h3>Needs Awaiting Admin Approval</h3>
+              </div>
+            </div>
+            <div id="pendingNeedsList" class="stack-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Curator Requests</p>
+                <h3>Status Updates Awaiting Approval</h3>
+              </div>
+            </div>
+            <div id="pendingUpdatesList" class="stack-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Taxonomy</p>
+                <h3>Manage Missing Options</h3>
+              </div>
+            </div>
+            <div class="taxonomy-grid">
+              <label>
+                <span>Option Type</span>
+                <select id="optionType">
+                  <option value="status">Status</option>
+                  <option value="internal_status">Internal Status</option>
+                  <option value="category">Problem Category</option>
+                  <option value="next_action">Next Best Action</option>
+                </select>
+              </label>
+              <label>
+                <span>Label</span>
+                <input id="optionLabel" type="text" placeholder="Add a missing option" />
+              </label>
+              <button id="saveOptionBtn" class="btn btn-secondary">Save Option</button>
+            </div>
+            <div id="optionsList" class="option-list"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

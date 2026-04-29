@@ -20,30 +20,6 @@
           <p class="lede">Live operating dashboard for inbound needs, curator action, admin approvals, solution matching, and closure tracking.</p>
         </div>
       </div>
-      <aside class="access-card">
-        <div class="access-head">
-          <div>
-            <p class="eyebrow">Admin Access</p>
-            <h2>Approval Gate</h2>
-          </div>
-          <span id="adminStatusChip" class="chip muted">Locked</span>
-        </div>
-        <form id="adminLoginForm" class="access-form">
-          <label>
-            <span>Username</span>
-            <input name="username" value="admin" />
-          </label>
-          <label>
-            <span>Password</span>
-            <input name="password" type="password" placeholder="Enter admin password" />
-          </label>
-          <div class="access-actions">
-            <button type="submit" class="btn btn-primary">Unlock Admin Queue</button>
-            <button type="button" id="adminLogoutBtn" class="btn btn-secondary hidden">Logout</button>
-          </div>
-        </form>
-        <p id="adminStatusText" class="helper-text">Admin approval is required for new intake records and curator-submitted status updates.</p>
-      </aside>
     </header>
 
     <section class="hero-strip">
@@ -61,7 +37,6 @@
     <nav class="view-tabs">
       <button class="tab active" data-view="overview">Overview</button>
       <button class="tab" data-view="operations">Operations Desk</button>
-      <button class="tab" data-view="admin">Admin Queue</button>
     </nav>
 
     <main>
@@ -168,7 +143,7 @@
                 <h3>Journey Detail</h3>
               </div>
             </div>
-            <div id="needDetail" class="empty-state">Choose a need from the queue to inspect timeline, current status, notes, and next actions.</div>
+            <div id="needDetail" class="empty-state">Choose a need from the queue to inspect the current status, notes, problem statement, and next actions.</div>
           </section>
 
           <section class="panel">
@@ -192,58 +167,9 @@
           </section>
         </div>
       </section>
-
-      <section id="adminView" class="view">
-        <div class="admin-grid">
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Pending Intake</p>
-                <h3>Needs Awaiting Admin Approval</h3>
-              </div>
-            </div>
-            <div id="pendingNeedsList" class="stack-list"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Curator Requests</p>
-                <h3>Status Updates Awaiting Approval</h3>
-              </div>
-            </div>
-            <div id="pendingUpdatesList" class="stack-list"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Taxonomy</p>
-                <h3>Manage Missing Options</h3>
-              </div>
-            </div>
-            <div class="taxonomy-grid">
-              <label>
-                <span>Option Type</span>
-                <select id="optionType">
-                  <option value="status">Status</option>
-                  <option value="internal_status">Internal Status</option>
-                  <option value="category">Problem Category</option>
-                  <option value="next_action">Next Best Action</option>
-                </select>
-              </label>
-              <label>
-                <span>Label</span>
-                <input id="optionLabel" type="text" placeholder="Add a missing option" />
-              </label>
-              <button id="saveOptionBtn" class="btn btn-secondary">Save Option</button>
-            </div>
-            <div id="optionsList" class="option-list"></div>
-          </section>
-        </div>
-      </section>
     </main>
   </div>
+  <a href="./admin.html" class="admin-sync-link">Admin Sync</a>
 
   <dialog id="needDialog" class="modal">
     <form id="needForm" class="modal-card">

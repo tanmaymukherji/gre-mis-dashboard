@@ -81,6 +81,10 @@ function esc(value) {
     .replaceAll('"', "&quot;");
 }
 
+function byId(id) {
+  return document.getElementById(id);
+}
+
 function toast(message) {
   window.alert(message);
 }
@@ -531,6 +535,8 @@ function topEntries(mapLike, limit = 6) {
 }
 
 function renderMetrics() {
+  const metricsGrid = byId("metricsGrid");
+  if (!metricsGrid) return;
   const needs = state.data.needs;
   const metrics = [
     ["Approved Needs", needs.length, "Live inbound needs currently visible in the MIS."],
@@ -541,7 +547,7 @@ function renderMetrics() {
     ["Admin Queue", state.data.pendingNeeds.length + state.data.pendingUpdates.length, "Pending intake approvals and curator change requests."],
   ];
 
-  document.getElementById("metricsGrid").innerHTML = metrics
+  metricsGrid.innerHTML = metrics
     .map(
       ([label, value, note]) => `
         <article class="metric-card">
@@ -555,9 +561,12 @@ function renderMetrics() {
 }
 
 function renderOverview() {
+  if (!byId("overviewView")) return;
   const needs = state.data.needs;
-  document.getElementById("datasetHeadline").textContent = `${needs.length} approved inbound needs loaded from GRE operations data`;
-  document.getElementById("datasetSubline").textContent = `${state.data.pendingNeeds.length} intake records and ${state.data.pendingUpdates.length} curator updates are waiting for admin action.`;
+  const headline = byId("datasetHeadline");
+  const subline = byId("datasetSubline");
+  if (headline) headline.textContent = `${needs.length} approved inbound needs loaded from GRE operations data`;
+  if (subline) subline.textContent = `${state.data.pendingNeeds.length} intake records and ${state.data.pendingUpdates.length} curator updates are waiting for admin action.`;
 
   const stageData = PIPELINE_SEGMENTS.map((segment) => [
     segment.id,
@@ -566,7 +575,7 @@ function renderOverview() {
     segment.note,
   ]);
 
-  document.getElementById("pipelineBoard").innerHTML = stageData
+  byId("pipelineBoard").innerHTML = stageData
     .map(
       ([id, label, value, note]) => `
         <article class="stage-card ${state.pipelineFocus === id ? "active" : ""}" data-pipeline-segment="${esc(id)}">
@@ -581,7 +590,7 @@ function renderOverview() {
   const pipelineNeeds = getPipelineSegmentNeeds(state.pipelineFocus);
   const focusMeta = PIPELINE_SEGMENTS.find((segment) => segment.id === state.pipelineFocus) || PIPELINE_SEGMENTS[0];
   const focusTone = state.pipelineFocus === "stuck" ? "bad" : state.pipelineFocus === "broadcast" ? "warn" : "info";
-  document.getElementById("pipelineDrilldown").innerHTML = `
+  byId("pipelineDrilldown").innerHTML = `
     <div class="pipeline-drilldown-head">
       <div>
         <p class="eyebrow">Category Cases</p>
@@ -620,7 +629,7 @@ function renderOverview() {
     .sort((a, b) => Number(b.curation_age_days || 0) - Number(a.curation_age_days || 0))
     .slice(0, 8);
 
-  document.getElementById("priorityList").innerHTML = priorityNeeds.length
+  byId("priorityList").innerHTML = priorityNeeds.length
     ? priorityNeeds
         .map(
           (need) => `
@@ -657,11 +666,11 @@ function renderOverview() {
     }),
   );
 
-  document.getElementById("categoryChart").innerHTML = topEntries(categoryCounts, 12)
+  byId("categoryChart").innerHTML = topEntries(categoryCounts, 12)
     .map(([label, value]) => `<span>${esc(label)} (${esc(value)})</span>`)
     .join("");
 
-  document.getElementById("approvalSummary").innerHTML = `
+  byId("approvalSummary").innerHTML = `
     <article class="stack-card">
       <div class="status-row">
         <span class="status-pill warn">${esc(state.data.pendingNeeds.length)} pending needs</span>
@@ -673,8 +682,10 @@ function renderOverview() {
 }
 
 function renderBarList(targetId, items, tone) {
+  const target = byId(targetId);
+  if (!target) return;
   const max = Math.max(...items.map((item) => Number(item.value || 0)), 1);
-  document.getElementById(targetId).innerHTML = items
+  target.innerHTML = items
     .map(
       (item) => `
         <div class="bar-row">
@@ -688,6 +699,7 @@ function renderBarList(targetId, items, tone) {
 }
 
 function renderFilters() {
+  if (!byId("statusFilter")) return;
   const statusOptions = ["all", ...new Set(state.data.needs.map((need) => need.status).filter(Boolean))];
   const stateOptions = ["all", ...new Set(state.data.needs.map((need) => normalizeText(need.state)).filter(Boolean))];
 
@@ -710,10 +722,12 @@ function renderFilters() {
 }
 
 function renderQueue() {
+  const queue = byId("needsQueue");
+  if (!queue) return;
   const visible = getVisibleNeeds();
   if (!state.selectedNeedId && visible[0]) state.selectedNeedId = visible[0].id;
 
-  document.getElementById("needsQueue").innerHTML = visible
+  queue.innerHTML = visible
     .map((need) => {
       const curator = getCuratorById(need.curator_id);
       return `
@@ -733,14 +747,14 @@ function renderQueue() {
 
 function renderNeedDetail() {
   const need = getNeedById(state.selectedNeedId);
-  const detailEl = document.getElementById("needDetail");
+  const detailEl = byId("needDetail");
+  if (!detailEl) return;
   if (!need) {
     detailEl.innerHTML = `<div class="empty-state">No need selected.</div>`;
     return;
   }
 
   const curator = getCuratorById(need.curator_id);
-  const updates = getNeedUpdates(need.id).slice(0, 8);
   const summaryBadges = [
     { label: need.status, tone: badgeTone(need.status) },
     { label: need.internal_status, tone: badgeTone(need.internal_status) },
@@ -803,36 +817,14 @@ function renderNeedDetail() {
         <p class="detail-note">${esc(need.curation_notes || "No curation notes have been recorded yet.")}</p>
       </article>
 
-      <article class="detail-card timeline-shell">
-        <h4>Timeline</h4>
-        <div class="timeline-list">
-          ${updates.length
-            ? updates
-                .map(
-                  (update) => `
-                    <div class="timeline-item">
-                      <div class="timeline-marker"></div>
-                      <div class="timeline-content">
-                        <div class="timeline-top">
-                          <strong>${esc(update.update_type.replaceAll("_", " "))}</strong>
-                          <span class="meta-text">${esc(formatDate(update.created_at))}</span>
-                        </div>
-                        <p class="helper-text">${esc(update.note || "No note")}</p>
-                      </div>
-                    </div>
-                  `,
-                )
-                .join("")
-            : `<p class="helper-text">No timeline updates yet.</p>`}
-        </div>
-      </article>
     </div>
   `;
 }
 
 async function renderMatches() {
   const need = getNeedById(state.selectedNeedId);
-  const matchesEl = document.getElementById("matchResults");
+  const matchesEl = byId("matchResults");
+  if (!matchesEl) return;
   if (!need) {
     matchesEl.innerHTML = `<div class="empty-state">Select a need to search the GRE solutions and providers catalog.</div>`;
     return;
@@ -882,7 +874,8 @@ async function renderMatches() {
 
 function renderWorkbench() {
   const need = getNeedById(state.selectedNeedId);
-  const workbench = document.getElementById("actionWorkbench");
+  const workbench = byId("actionWorkbench");
+  if (!workbench) return;
   if (!need) {
     workbench.innerHTML = `<div class="empty-state">Select a need to take action.</div>`;
     return;
@@ -972,7 +965,12 @@ function renderWorkbench() {
 }
 
 function renderAdminQueue() {
-  document.getElementById("pendingNeedsList").innerHTML = state.adminToken
+  const pendingNeedsList = byId("pendingNeedsList");
+  const pendingUpdatesList = byId("pendingUpdatesList");
+  const optionsList = byId("optionsList");
+  if (!pendingNeedsList || !pendingUpdatesList || !optionsList) return;
+
+  pendingNeedsList.innerHTML = state.adminToken
     ? state.data.pendingNeeds.length
       ? state.data.pendingNeeds
           .map(
@@ -996,7 +994,7 @@ function renderAdminQueue() {
       : `<div class="empty-state">No intake records are waiting for admin approval.</div>`
     : `<div class="empty-state">Login as admin to view the intake approval queue.</div>`;
 
-  document.getElementById("pendingUpdatesList").innerHTML = state.adminToken
+  pendingUpdatesList.innerHTML = state.adminToken
     ? state.data.pendingUpdates.length
       ? state.data.pendingUpdates
           .map(
@@ -1030,7 +1028,7 @@ function renderAdminQueue() {
     return acc;
   }, {});
 
-  document.getElementById("optionsList").innerHTML = Object.entries(grouped)
+  optionsList.innerHTML = Object.entries(grouped)
     .map(
       ([type, items]) => `
         <article class="stack-card">
@@ -1043,9 +1041,10 @@ function renderAdminQueue() {
 }
 
 function renderAdminState() {
-  const chip = document.getElementById("adminStatusChip");
-  const text = document.getElementById("adminStatusText");
-  const logout = document.getElementById("adminLogoutBtn");
+  const chip = byId("adminStatusChip");
+  const text = byId("adminStatusText");
+  const logout = byId("adminLogoutBtn");
+  if (!chip || !text || !logout) return;
 
   if (state.adminSession) {
     chip.textContent = "Unlocked";
@@ -1075,6 +1074,12 @@ async function rerender() {
   renderWorkbench();
   renderAdminQueue();
   renderAdminState();
+  if (!byId("overviewView") && byId("adminView")) {
+    const headline = byId("datasetHeadline");
+    const subline = byId("datasetSubline");
+    if (headline) headline.textContent = "Admin sync workspace for approval and taxonomy maintenance";
+    if (subline) subline.textContent = `${state.data.pendingNeeds.length} intake records and ${state.data.pendingUpdates.length} curator updates are waiting for review.`;
+  }
   await renderMatches();
 }
 
@@ -1093,27 +1098,27 @@ function bindStaticEvents() {
     button.addEventListener("click", () => switchView(button.dataset.view));
   });
 
-  document.getElementById("statusFilter").addEventListener("change", (event) => {
+  byId("statusFilter")?.addEventListener("change", (event) => {
     state.filters.status = event.target.value;
     renderQueue();
     renderNeedDetail();
     renderWorkbench();
     renderMatches();
   });
-  document.getElementById("curatorFilter").addEventListener("change", (event) => {
+  byId("curatorFilter")?.addEventListener("change", (event) => {
     state.filters.curator = event.target.value;
     renderQueue();
   });
-  document.getElementById("stateFilter").addEventListener("change", (event) => {
+  byId("stateFilter")?.addEventListener("change", (event) => {
     state.filters.state = event.target.value;
     renderQueue();
   });
-  document.getElementById("searchFilter").addEventListener("input", (event) => {
+  byId("searchFilter")?.addEventListener("input", (event) => {
     state.filters.search = event.target.value.trim();
     renderQueue();
   });
 
-  document.getElementById("needsQueue").addEventListener("click", async (event) => {
+  byId("needsQueue")?.addEventListener("click", async (event) => {
     const card = event.target.closest("[data-need-id]");
     if (!card) return;
     state.selectedNeedId = card.dataset.needId;
@@ -1123,14 +1128,14 @@ function bindStaticEvents() {
     await renderMatches();
   });
 
-  document.getElementById("pipelineBoard").addEventListener("click", (event) => {
+  byId("pipelineBoard")?.addEventListener("click", (event) => {
     const card = event.target.closest("[data-pipeline-segment]");
     if (!card) return;
     state.pipelineFocus = card.dataset.pipelineSegment;
     renderOverview();
   });
 
-  document.getElementById("pipelineDrilldown").addEventListener("click", async (event) => {
+  byId("pipelineDrilldown")?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-open-need-id]");
     if (!button) return;
     state.selectedNeedId = button.dataset.openNeedId;
@@ -1141,57 +1146,56 @@ function bindStaticEvents() {
     await renderMatches();
   });
 
-  document.getElementById("refreshBtn").addEventListener("click", refreshAll);
+  byId("refreshBtn")?.addEventListener("click", refreshAll);
 
-  const dialog = document.getElementById("needDialog");
-  document.getElementById("newNeedBtn").addEventListener("click", () => dialog.showModal());
-  document.getElementById("closeNeedDialog").addEventListener("click", () => dialog.close());
+  const dialog = byId("needDialog");
+  byId("newNeedBtn")?.addEventListener("click", () => dialog?.showModal());
+  byId("closeNeedDialog")?.addEventListener("click", () => dialog?.close());
 
-  document.getElementById("needForm").addEventListener("submit", async (event) => {
+  byId("needForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
     await store.createNeed(Object.fromEntries(form.entries()));
     event.target.reset();
-    dialog.close();
+    dialog?.close();
     await refreshAll();
-    switchView("admin");
     toast("Need submitted to the admin approval queue.");
   });
 
-  document.getElementById("adminLoginForm").addEventListener("submit", async (event) => {
+  byId("adminLoginForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
     await store.adminLogin(form.get("username"), form.get("password"));
     event.target.reset();
     await refreshAll();
-    switchView("admin");
+    if (byId("adminView")) switchView("admin");
     toast("Admin access unlocked.");
   });
 
-  document.getElementById("adminLogoutBtn").addEventListener("click", async () => {
+  byId("adminLogoutBtn")?.addEventListener("click", async () => {
     await store.adminLogout();
     await refreshAll();
     toast("Admin session closed.");
   });
 
-  document.getElementById("saveOptionBtn").addEventListener("click", async () => {
+  byId("saveOptionBtn")?.addEventListener("click", async () => {
     if (!state.adminToken) {
       toast("Login as admin to manage taxonomy options.");
       return;
     }
-    const optionType = document.getElementById("optionType").value;
-    const optionLabel = document.getElementById("optionLabel").value.trim();
+    const optionType = byId("optionType").value;
+    const optionLabel = byId("optionLabel").value.trim();
     if (!optionLabel) {
       toast("Enter an option label.");
       return;
     }
     await store.upsertOption(optionType, optionLabel);
-    document.getElementById("optionLabel").value = "";
+    byId("optionLabel").value = "";
     await refreshAll();
     toast("Option saved.");
   });
 
-  document.getElementById("actionWorkbench").addEventListener("click", async (event) => {
+  byId("actionWorkbench")?.addEventListener("click", async (event) => {
     const button = event.target.closest("button");
     if (!button) return;
 
@@ -1200,13 +1204,13 @@ function bindStaticEvents() {
         toast("Login as admin to assign curators.");
         return;
       }
-      await store.assignCurator(state.selectedNeedId, document.getElementById("assignCuratorSelect").value || null);
+      await store.assignCurator(state.selectedNeedId, byId("assignCuratorSelect").value || null);
       await refreshAll();
       toast("Curator assignment updated.");
     }
   });
 
-  document.getElementById("actionWorkbench").addEventListener("submit", async (event) => {
+  byId("actionWorkbench")?.addEventListener("submit", async (event) => {
     if (event.target.id !== "updateRequestForm") return;
     event.preventDefault();
     const need = getNeedById(state.selectedNeedId);
@@ -1231,11 +1235,10 @@ function bindStaticEvents() {
     });
     event.target.reset();
     await refreshAll();
-    switchView("admin");
     toast("Curator update submitted for admin approval.");
   });
 
-  document.getElementById("adminView").addEventListener("click", async (event) => {
+  byId("adminView")?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-action]");
     if (!button) return;
     if (!state.adminToken) {
@@ -1264,7 +1267,7 @@ function bindStaticEvents() {
     }
   });
 
-  document.getElementById("matchResults").addEventListener("click", async (event) => {
+  byId("matchResults")?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-action='email-provider']");
     if (!button) return;
     if (!state.adminToken) {
