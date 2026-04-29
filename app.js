@@ -505,55 +505,83 @@ function renderNeedDetail() {
 
   const curator = getCuratorById(need.curator_id);
   const updates = getNeedUpdates(need.id).slice(0, 8);
+  const summaryBadges = [
+    { label: need.status, tone: badgeTone(need.status) },
+    { label: need.internal_status, tone: badgeTone(need.internal_status) },
+    { label: `${need.curation_age_days || 0} days old`, tone: Number(need.curation_age_days || 0) >= 7 ? "bad" : "info" },
+    { label: need.approval_status, tone: badgeTone(need.approval_status) },
+  ];
   detailEl.innerHTML = `
-    <div class="status-row">
-      <span class="status-pill ${badgeTone(need.status)}">${esc(need.status)}</span>
-      <span class="status-pill ${badgeTone(need.internal_status)}">${esc(need.internal_status)}</span>
-      <span class="status-pill ${badgeTone(need.approval_status)}">${esc(need.approval_status)}</span>
-    </div>
-    <div class="detail-card">
-      <h4>${esc(need.organization_name)}</h4>
-      <p class="helper-text">${esc(need.problem_statement)}</p>
-    </div>
-    <div class="detail-grid">
+    <section class="need-overview-card">
+      <div class="need-overview-head">
+        <div>
+          <p class="eyebrow">Need #${esc(need.id)}</p>
+          <h3>${esc(need.organization_name)}</h3>
+          <p class="helper-text">${esc(`${need.state || "Unknown state"}${need.district ? ` / ${need.district}` : ""}`)}${curator ? ` • ${esc(curator.display_name)}` : " • Unassigned curator"}</p>
+        </div>
+        <div class="status-row">
+          ${summaryBadges.map((badge) => `<span class="status-pill ${badge.tone}">${esc(badge.label)}</span>`).join("")}
+        </div>
+      </div>
+      <div class="need-statement">
+        <h4>Problem Statement</h4>
+        <p>${esc(need.problem_statement || "No problem statement provided.")}</p>
+      </div>
+    </section>
+
+    <div class="detail-grid detail-grid-structured">
       <article class="detail-card">
-        <h4>Request Snapshot</h4>
-        <div class="detail-list">
-          <div><strong>Contact:</strong> ${esc(need.contact_person || "Not set")}</div>
-          <div><strong>Email:</strong> ${esc(need.seeker_email || "Not set")}</div>
-          <div><strong>Phone:</strong> ${esc(need.seeker_phone || "Not set")}</div>
-          <div><strong>Location:</strong> ${esc(`${need.state || ""}${need.district ? ` / ${need.district}` : ""}` || "Not set")}</div>
-          <div><strong>Requested on:</strong> ${esc(formatDate(need.requested_on))}</div>
-          <div><strong>Curator:</strong> ${esc(curator?.display_name || "Unassigned")}</div>
+        <h4>Seeker Details</h4>
+        <div class="kv-grid">
+          <div><span>Contact Person</span><strong>${esc(need.contact_person || "Not set")}</strong></div>
+          <div><span>Email</span><strong>${esc(need.seeker_email || "Not set")}</strong></div>
+          <div><span>Phone</span><strong>${esc(need.seeker_phone || "Not set")}</strong></div>
+          <div><span>Website</span><strong>${esc(need.website || "Not set")}</strong></div>
+          <div><span>Designation</span><strong>${esc(need.designation || "Not set")}</strong></div>
+          <div><span>Requested On</span><strong>${esc(formatDate(need.requested_on))}</strong></div>
         </div>
       </article>
+
       <article class="detail-card">
-        <h4>Curation State</h4>
-        <div class="detail-list">
-          <div><strong>Next action:</strong> ${esc(need.next_action || "Not set")}</div>
-          <div><strong>Broadcast needed:</strong> ${need.demand_broadcast_needed ? "Yes" : "No"}</div>
-          <div><strong>Solutions shared:</strong> ${esc(need.solutions_shared_count || 0)}</div>
-          <div><strong>Invited providers:</strong> ${esc(need.invited_providers_count || 0)}</div>
-          <div><strong>Curation call:</strong> ${esc(need.curation_call_date || "Not set")}</div>
-          <div><strong>Age:</strong> ${esc(need.curation_age_days || 0)} days</div>
+        <h4>Curation Snapshot</h4>
+        <div class="kv-grid">
+          <div><span>Assigned Curator</span><strong>${esc(curator?.display_name || "Unassigned")}</strong></div>
+          <div><span>Next Action</span><strong>${esc(need.next_action || "Not set")}</strong></div>
+          <div><span>Curation Call</span><strong>${esc(need.curation_call_date || "Not set")}</strong></div>
+          <div><span>Broadcast Needed</span><strong>${need.demand_broadcast_needed ? "Yes" : "No"}</strong></div>
+          <div><span>Solutions Shared</span><strong>${esc(need.solutions_shared_count || 0)}</strong></div>
+          <div><span>Invited Providers</span><strong>${esc(need.invited_providers_count || 0)}</strong></div>
         </div>
       </article>
     </div>
-    <article class="detail-card">
-      <h4>Need Categories</h4>
-      <div class="tag-row">${parseArray(need.curated_need).map((item) => `<span>${esc(item)}</span>`).join("") || `<span>Unclassified</span>`}</div>
-    </article>
-    <article class="detail-card">
-      <h4>Latest Notes and Timeline</h4>
-      <div class="stack-list">
+
+    <div class="detail-grid detail-grid-split">
+      <article class="detail-card">
+        <h4>Categories</h4>
+        <div class="tag-row">${parseArray(need.curated_need).map((item) => `<span>${esc(item)}</span>`).join("") || `<span>Unclassified</span>`}</div>
+      </article>
+      <article class="detail-card">
+        <h4>Curation Notes</h4>
+        <p class="detail-note">${esc(need.curation_notes || "No curation notes have been recorded yet.")}</p>
+      </article>
+    </div>
+
+    <article class="detail-card timeline-shell">
+      <h4>Timeline</h4>
+      <div class="timeline-list">
         ${updates.length
           ? updates
               .map(
                 (update) => `
-                  <div>
-                    <strong>${esc(update.update_type.replaceAll("_", " "))}</strong>
-                    <p class="helper-text">${esc(update.note || "No note")}</p>
-                    <p class="meta-text">${esc(formatDate(update.created_at))}</p>
+                  <div class="timeline-item">
+                    <div class="timeline-marker"></div>
+                    <div class="timeline-content">
+                      <div class="timeline-top">
+                        <strong>${esc(update.update_type.replaceAll("_", " "))}</strong>
+                        <span class="meta-text">${esc(formatDate(update.created_at))}</span>
+                      </div>
+                      <p class="helper-text">${esc(update.note || "No note")}</p>
+                    </div>
                   </div>
                 `,
               )
