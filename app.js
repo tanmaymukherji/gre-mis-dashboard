@@ -8,6 +8,7 @@ const FALLBACK_CURATORS = [
 const state = {
   view: "overview",
   selectedNeedId: null,
+  overviewPage: 1,
   overviewFilters: {
     metric: [],
     pipeline: [],
@@ -214,6 +215,7 @@ function setOverviewFocus(kind, id) {
     active.add(id);
   }
   state.overviewFilters[kind] = [...active];
+  state.overviewPage = 1;
 }
 
 function sortNeedsByUrgency(needs) {
@@ -799,6 +801,11 @@ function renderOverview() {
     .join("");
 
   const focusPayload = getOverviewFocusPayload();
+  const pageSize = 12;
+  const totalPages = Math.max(1, Math.ceil(focusPayload.cards.length / pageSize));
+  if (state.overviewPage > totalPages) state.overviewPage = totalPages;
+  const pageStart = (state.overviewPage - 1) * pageSize;
+  const visibleCards = focusPayload.cards.slice(pageStart, pageStart + pageSize);
   byId("pipelineDrilldown").innerHTML = `
     <div class="pipeline-drilldown-head">
       <div>
@@ -809,9 +816,21 @@ function renderOverview() {
     </div>
     <div class="pipeline-drilldown-list">
       ${focusPayload.cards.length
-        ? focusPayload.cards.slice(0, 12).join("")
+        ? visibleCards.join("")
         : `<div class="empty-state">${esc(focusPayload.emptyText || "No cases are currently sitting in this selection.")}</div>`}
     </div>
+    ${
+      focusPayload.cards.length
+        ? `<div class="pipeline-pagination">
+            <span class="meta-text">Showing ${esc(pageStart + 1)}-${esc(Math.min(pageStart + pageSize, focusPayload.cards.length))} of ${esc(focusPayload.cards.length)}</span>
+            <div class="pipeline-pagination-actions">
+              <button class="btn btn-secondary" data-page-action="prev" ${state.overviewPage <= 1 ? "disabled" : ""}>Prev</button>
+              <span class="meta-text">Page ${esc(state.overviewPage)} of ${esc(totalPages)}</span>
+              <button class="btn btn-secondary" data-page-action="next" ${state.overviewPage >= totalPages ? "disabled" : ""}>Next</button>
+            </div>
+          </div>`
+        : ""
+    }
   `;
 }
 
@@ -1281,6 +1300,13 @@ function bindStaticEvents() {
   });
 
   byId("pipelineDrilldown")?.addEventListener("click", async (event) => {
+    const pageButton = event.target.closest("[data-page-action]");
+    if (pageButton) {
+      if (pageButton.dataset.pageAction === "prev" && state.overviewPage > 1) state.overviewPage -= 1;
+      if (pageButton.dataset.pageAction === "next") state.overviewPage += 1;
+      renderOverview();
+      return;
+    }
     const button = event.target.closest("[data-open-need-id]");
     if (!button) return;
     state.selectedNeedId = button.dataset.openNeedId;

@@ -221,6 +221,18 @@ h2 { font-size: 1.35rem; }
   display: grid;
   gap: 12px;
 }
+.pipeline-pagination {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding-top: 6px;
+}
+.pipeline-pagination-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
 .bar-row-button {
   border: 1px solid var(--line);
   background: #fff;
