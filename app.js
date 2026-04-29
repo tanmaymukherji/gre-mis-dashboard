@@ -8,7 +8,7 @@ const FALLBACK_CURATORS = [
 const state = {
   view: "overview",
   selectedNeedId: null,
-  pipelineFocus: "stuck",
+  overviewFocus: { kind: "pipeline", id: "stuck" },
   adminToken: localStorage.getItem("gre-mis-admin-token") || "",
   adminSession: null,
   filters: {
@@ -194,6 +194,144 @@ function getPipelineSegmentNeeds(segmentId) {
   return state.data.needs
     .filter(segment.match)
     .sort((a, b) => Number(b.curation_age_days || 0) - Number(a.curation_age_days || 0));
+}
+
+function isOverviewFocus(kind, id) {
+  return state.overviewFocus?.kind === kind && state.overviewFocus?.id === id;
+}
+
+function setOverviewFocus(kind, id) {
+  state.overviewFocus = { kind, id };
+}
+
+function sortNeedsByUrgency(needs) {
+  return [...needs].sort((a, b) => Number(b.curation_age_days || 0) - Number(a.curation_age_days || 0));
+}
+
+function buildNeedCaseCard(need, extraMeta = "") {
+  return `
+    <article class="stack-card">
+      <div class="status-row">
+        <span class="status-pill ${badgeTone(need.status)}">${esc(need.status)}</span>
+        <span class="status-pill ${badgeTone(need.internal_status)}">${esc(need.internal_status)}</span>
+        <span class="status-pill info">${esc(need.curation_age_days || 0)} days</span>
+      </div>
+      <h4>${esc(need.organization_name)}</h4>
+      <p class="helper-text">${esc(clipText(need.problem_statement, 165))}</p>
+      <div class="card-actions">
+        <span class="meta-text">${esc(`${need.state || "Unknown state"}${need.district ? ` / ${need.district}` : ""}${extraMeta ? ` • ${extraMeta}` : ""}`)}</span>
+        <button class="btn btn-secondary" data-open-need-id="${esc(need.id)}">Open Need</button>
+      </div>
+    </article>
+  `;
+}
+
+function buildPendingRequestCaseCard(request) {
+  const linkedNeed = getNeedById(request.need_id);
+  return `
+    <article class="stack-card">
+      <div class="status-row">
+        <span class="status-pill warn">Pending update</span>
+        <span class="status-pill info">${esc(request.submitted_by_curator_name || request.submitted_by_curator_email || "Curator")}</span>
+      </div>
+      <h4>${esc(linkedNeed?.organization_name || `Need #${request.need_id}`)}</h4>
+      <p class="helper-text">${esc(clipText(request.proposed_curation_notes || request.proposed_next_action || "Curator update waiting for admin review.", 165))}</p>
+      <div class="card-actions">
+        <span class="meta-text">${esc(linkedNeed ? `${linkedNeed.state || "Unknown state"}${linkedNeed.district ? ` / ${linkedNeed.district}` : ""}` : `Need #${request.need_id}`)}</span>
+        ${linkedNeed ? `<button class="btn btn-secondary" data-open-need-id="${esc(linkedNeed.id)}">Open Need</button>` : `<span></span>`}
+      </div>
+    </article>
+  `;
+}
+
+function getOverviewFocusPayload() {
+  const focus = state.overviewFocus || { kind: "pipeline", id: "stuck" };
+  switch (focus.kind) {
+    case "metric":
+      if (focus.id === "approved") {
+        return { label: "Approved Needs", tone: "good", cards: sortNeedsByUrgency(state.data.needs).map((need) => buildNeedCaseCard(need)) };
+      }
+      if (focus.id === "in_progress") {
+        return { label: "In Progress", tone: "info", cards: sortNeedsByUrgency(state.data.needs.filter((need) => need.status === "In progress")).map((need) => buildNeedCaseCard(need)) };
+      }
+      if (focus.id === "need_providers") {
+        return {
+          label: "Need Providers",
+          tone: "warn",
+          cards: sortNeedsByUrgency(state.data.needs.filter((need) => need.internal_status === "Need solution providers")).map((need) => buildNeedCaseCard(need)),
+        };
+      }
+      if (focus.id === "connection_made") {
+        return {
+          label: "Connection Made",
+          tone: "good",
+          cards: sortNeedsByUrgency(state.data.needs.filter((need) => need.internal_status === "Connection made")).map((need) => buildNeedCaseCard(need)),
+        };
+      }
+      if (focus.id === "stuck") {
+        return {
+          label: "Stuck 7+ Days",
+          tone: "bad",
+          cards: sortNeedsByUrgency(state.data.needs.filter((need) => Number(need.curation_age_days || 0) >= 7)).map((need) => buildNeedCaseCard(need)),
+        };
+      }
+      if (focus.id === "admin_queue") {
+        const pendingNeedCards = (state.data.pendingNeeds || []).map((need) => buildNeedCaseCard(need, "Pending intake"));
+        const pendingUpdateCards = (state.data.pendingUpdates || []).map((request) => buildPendingRequestCaseCard(request));
+        return {
+          label: "Admin Queue",
+          tone: "warn",
+          cards: [...pendingNeedCards, ...pendingUpdateCards],
+          emptyText: state.adminToken
+            ? "No pending admin queue cases are available right now."
+            : "Sign in through Admin Sync to inspect pending approvals and curator requests.",
+        };
+      }
+      break;
+    case "pipeline": {
+      const segment = PIPELINE_SEGMENTS.find((item) => item.id === focus.id) || PIPELINE_SEGMENTS[0];
+      const tone = focus.id === "stuck" ? "bad" : focus.id === "broadcast" ? "warn" : "info";
+      return {
+        label: segment.label,
+        tone,
+        cards: getPipelineSegmentNeeds(segment.id).map((need) => buildNeedCaseCard(need)),
+      };
+    }
+    case "curator": {
+      const curator = getCuratorById(focus.id);
+      const needs = sortNeedsByUrgency(state.data.needs.filter((need) => need.curator_id === focus.id));
+      return {
+        label: `Curator: ${curator?.display_name || "Unknown"}`,
+        tone: "good",
+        cards: needs.map((need) => buildNeedCaseCard(need)),
+      };
+    }
+    case "state": {
+      const needs = sortNeedsByUrgency(state.data.needs.filter((need) => normalizeText(need.state) === focus.id));
+      return {
+        label: `State: ${focus.id}`,
+        tone: "info",
+        cards: needs.map((need) => buildNeedCaseCard(need)),
+      };
+    }
+    case "category": {
+      const needs = sortNeedsByUrgency(state.data.needs.filter((need) => parseArray(need.curated_need).includes(focus.id)));
+      return {
+        label: `Category: ${focus.id}`,
+        tone: "good",
+        cards: needs.map((need) => buildNeedCaseCard(need)),
+      };
+    }
+    default:
+      break;
+  }
+
+  return {
+    label: "Focused Cases",
+    tone: "info",
+    cards: [],
+    emptyText: "No cases are available for this selection right now.",
+  };
 }
 
 function scoreOfferingMatch(need, profile, offering) {
@@ -561,18 +699,18 @@ function renderMetrics() {
   if (!metricsGrid) return;
   const needs = state.data.needs;
   const metrics = [
-    ["Approved Needs", needs.length, "Live inbound needs currently visible in the MIS."],
-    ["In Progress", needs.filter((need) => need.status === "In progress").length, "Needs under active curation or provider search."],
-    ["Need Providers", needs.filter((need) => need.internal_status === "Need solution providers").length, "Needs waiting on live solution/provider matching."],
-    ["Connection Made", needs.filter((need) => need.internal_status === "Connection made").length, "Needs where the solution side has begun to move."],
-    ["Stuck 7+ Days", needs.filter((need) => Number(need.curation_age_days || 0) >= 7).length, "Aging needs that need intervention during the day."],
-    ["Admin Queue", state.data.pendingNeeds.length + state.data.pendingUpdates.length, "Pending intake approvals and curator change requests."],
+    ["approved", "Approved Needs", needs.length, "Live inbound needs currently visible in the MIS."],
+    ["in_progress", "In Progress", needs.filter((need) => need.status === "In progress").length, "Needs under active curation or provider search."],
+    ["need_providers", "Need Providers", needs.filter((need) => need.internal_status === "Need solution providers").length, "Needs waiting on live solution/provider matching."],
+    ["connection_made", "Connection Made", needs.filter((need) => need.internal_status === "Connection made").length, "Needs where the solution side has begun to move."],
+    ["stuck", "Stuck 7+ Days", needs.filter((need) => Number(need.curation_age_days || 0) >= 7).length, "Aging needs that need intervention during the day."],
+    ["admin_queue", "Admin Queue", state.data.pendingNeeds.length + state.data.pendingUpdates.length, "Pending intake approvals and curator change requests."],
   ];
 
   metricsGrid.innerHTML = metrics
     .map(
-      ([label, value, note]) => `
-        <article class="metric-card">
+      ([id, label, value, note]) => `
+        <article class="metric-card ${isOverviewFocus("metric", id) ? "active" : ""}" data-overview-kind="metric" data-overview-id="${esc(id)}">
           <p class="eyebrow">${esc(label)}</p>
           <strong>${esc(value)}</strong>
           <p>${esc(note)}</p>
@@ -600,7 +738,7 @@ function renderOverview() {
   byId("pipelineBoard").innerHTML = stageData
     .map(
       ([id, label, value, note]) => `
-        <article class="stage-card ${state.pipelineFocus === id ? "active" : ""}" data-pipeline-segment="${esc(id)}">
+        <article class="stage-card ${isOverviewFocus("pipeline", id) ? "active" : ""}" data-overview-kind="pipeline" data-overview-id="${esc(id)}">
           <p class="eyebrow">${esc(label)}</p>
           <strong>${esc(value)}</strong>
           <p class="helper-text">${esc(note)}</p>
@@ -609,75 +747,18 @@ function renderOverview() {
     )
     .join("");
 
-  const pipelineNeeds = getPipelineSegmentNeeds(state.pipelineFocus);
-  const focusMeta = PIPELINE_SEGMENTS.find((segment) => segment.id === state.pipelineFocus) || PIPELINE_SEGMENTS[0];
-  const focusTone = state.pipelineFocus === "stuck" ? "bad" : state.pipelineFocus === "broadcast" ? "warn" : "info";
-  byId("pipelineDrilldown").innerHTML = `
-    <div class="pipeline-drilldown-head">
-      <div>
-        <p class="eyebrow">Category Cases</p>
-        <h4>${esc(focusMeta.label)}</h4>
-      </div>
-      <span class="status-pill ${focusTone}">${esc(pipelineNeeds.length)} cases</span>
-    </div>
-    <div class="pipeline-drilldown-list">
-      ${pipelineNeeds.length
-        ? pipelineNeeds
-            .slice(0, 8)
-            .map(
-              (need) => `
-                <article class="stack-card">
-                  <div class="status-row">
-                    <span class="status-pill ${badgeTone(need.status)}">${esc(need.status)}</span>
-                    <span class="status-pill ${badgeTone(need.internal_status)}">${esc(need.internal_status)}</span>
-                    <span class="status-pill info">${esc(need.curation_age_days || 0)} days</span>
-                  </div>
-                  <h4>${esc(need.organization_name)}</h4>
-                  <p class="helper-text">${esc(clipText(need.problem_statement, 165))}</p>
-                  <div class="card-actions">
-                    <span class="meta-text">${esc(`${need.state || "Unknown state"}${need.district ? ` / ${need.district}` : ""}`)}</span>
-                    <button class="btn btn-secondary" data-open-need-id="${esc(need.id)}">Open Need</button>
-                  </div>
-                </article>
-              `,
-            )
-            .join("")
-        : `<div class="empty-state">No cases are currently sitting in this pipeline category.</div>`}
-    </div>
-  `;
-
-  const priorityNeeds = needs
-    .filter((need) => Number(need.curation_age_days || 0) >= 7 || ["Blocked", "Stalled"].includes(need.internal_status))
-    .sort((a, b) => Number(b.curation_age_days || 0) - Number(a.curation_age_days || 0))
-    .slice(0, 8);
-
-  byId("priorityList").innerHTML = priorityNeeds.length
-    ? priorityNeeds
-        .map(
-          (need) => `
-            <article class="stack-card">
-              <div class="status-row">
-                <span class="status-pill ${badgeTone(need.internal_status)}">${esc(need.internal_status)}</span>
-                <span class="status-pill bad">${esc(need.curation_age_days || 0)} days</span>
-              </div>
-              <h4>${esc(need.organization_name)}</h4>
-              <p class="helper-text">${esc(need.problem_statement.slice(0, 170))}${need.problem_statement.length > 170 ? "..." : ""}</p>
-            </article>
-          `,
-        )
-        .join("")
-    : `<div class="empty-state">No urgent aging needs right now.</div>`;
-
   const workload = state.data.curators.map((curator) => ({
     label: curator.display_name,
     value: needs.filter((need) => need.curator_id === curator.id).length,
+    focusKind: "curator",
+    focusId: curator.id,
   }));
   renderBarList("workloadChart", workload, "good");
 
   const stateCounts = topEntries(countBy(needs, (need) => normalizeText(need.state) || "Unknown"));
   renderBarList(
     "stateChart",
-    stateCounts.map(([label, value]) => ({ label, value })),
+    stateCounts.map(([label, value]) => ({ label, value, focusKind: "state", focusId: label })),
     "info",
   );
 
@@ -689,17 +770,26 @@ function renderOverview() {
   );
 
   byId("categoryChart").innerHTML = topEntries(categoryCounts, 12)
-    .map(([label, value]) => `<span>${esc(label)} (${esc(value)})</span>`)
+    .map(
+      ([label, value]) =>
+        `<button class="${isOverviewFocus("category", label) ? "active" : ""}" data-overview-kind="category" data-overview-id="${esc(label)}">${esc(label)} (${esc(value)})</button>`,
+    )
     .join("");
 
-  byId("approvalSummary").innerHTML = `
-    <article class="stack-card">
-      <div class="status-row">
-        <span class="status-pill warn">${esc(state.data.pendingNeeds.length)} pending needs</span>
-        <span class="status-pill info">${esc(state.data.pendingUpdates.length)} pending updates</span>
+  const focusPayload = getOverviewFocusPayload();
+  byId("pipelineDrilldown").innerHTML = `
+    <div class="pipeline-drilldown-head">
+      <div>
+        <p class="eyebrow">Category Cases</p>
+        <h4>${esc(focusPayload.label)}</h4>
       </div>
-      <p class="helper-text">New submissions go to admin approval first. Assigned curators submit status updates that are only applied after admin review.</p>
-    </article>
+      <span class="status-pill ${focusPayload.tone}">${esc(focusPayload.cards.length)} cases</span>
+    </div>
+    <div class="pipeline-drilldown-list">
+      ${focusPayload.cards.length
+        ? focusPayload.cards.slice(0, 12).join("")
+        : `<div class="empty-state">${esc(focusPayload.emptyText || "No cases are currently sitting in this selection.")}</div>`}
+    </div>
   `;
 }
 
@@ -710,11 +800,13 @@ function renderBarList(targetId, items, tone) {
   target.innerHTML = items
     .map(
       (item) => `
-        <div class="bar-row">
+        <button class="bar-row bar-row-button ${item.focusKind && isOverviewFocus(item.focusKind, item.focusId) ? "active" : ""}" ${
+          item.focusKind ? `data-overview-kind="${esc(item.focusKind)}" data-overview-id="${esc(item.focusId)}"` : ""
+        }>
           <span>${esc(item.label)}</span>
           <div class="bar-track"><div class="bar-fill ${tone === "warn" ? "warn" : tone === "bad" ? "bad" : ""}" style="width:${(Number(item.value || 0) / max) * 100}%"></div></div>
           <strong>${esc(item.value)}</strong>
-        </div>
+        </button>
       `,
     )
     .join("");
@@ -1158,10 +1250,10 @@ function bindStaticEvents() {
     await renderMatches();
   });
 
-  byId("pipelineBoard")?.addEventListener("click", (event) => {
-    const card = event.target.closest("[data-pipeline-segment]");
+  byId("overviewView")?.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-overview-kind]");
     if (!card) return;
-    state.pipelineFocus = card.dataset.pipelineSegment;
+    setOverviewFocus(card.dataset.overviewKind, card.dataset.overviewId);
     renderOverview();
   });
 

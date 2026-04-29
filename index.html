@@ -41,69 +41,60 @@
 
     <main>
       <section id="overviewView" class="view active">
-        <div id="metricsGrid" class="metrics-grid"></div>
-        <div class="overview-grid">
-          <section class="panel panel-large">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Pipeline Health</p>
-                <h3>Need Status and Bottlenecks</h3>
+        <div class="overview-top-stack">
+          <div id="metricsGrid" class="metrics-grid"></div>
+          <div class="overview-insight-grid">
+            <section class="panel panel-large">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Pipeline Health</p>
+                  <h3>Need Status and Bottlenecks</h3>
+                </div>
               </div>
-            </div>
-            <div id="pipelineBoard" class="pipeline-board"></div>
-            <div id="pipelineDrilldown" class="pipeline-drilldown"></div>
-          </section>
+              <div id="pipelineBoard" class="pipeline-board"></div>
+            </section>
 
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Immediate Attention</p>
-                <h3>Stuck and Aging Needs</h3>
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Curator Allocation</p>
+                  <h3>Workload Distribution</h3>
+                </div>
               </div>
-            </div>
-            <div id="priorityList" class="stack-list"></div>
-          </section>
+              <div id="workloadChart" class="bar-list"></div>
+            </section>
 
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Curator Allocation</p>
-                <h3>Workload Distribution</h3>
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">State Demand</p>
+                  <h3>Where Needs Are Concentrated</h3>
+                </div>
               </div>
-            </div>
-            <div id="workloadChart" class="bar-list"></div>
-          </section>
+              <div id="stateChart" class="bar-list"></div>
+            </section>
 
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">State Demand</p>
-                <h3>Where Needs Are Concentrated</h3>
+            <section class="panel panel-large">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Category Signals</p>
+                  <h3>Most Common Problem Themes</h3>
+                </div>
               </div>
-            </div>
-            <div id="stateChart" class="bar-list"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Category Signals</p>
-                <h3>Most Common Problem Themes</h3>
-              </div>
-            </div>
-            <div id="categoryChart" class="tag-cloud"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Approval Watch</p>
-                <h3>Admin-Controlled Inflow</h3>
-              </div>
-            </div>
-            <div id="approvalSummary" class="stack-list"></div>
-          </section>
+              <div id="categoryChart" class="tag-cloud"></div>
+            </section>
+          </div>
         </div>
+
+        <section class="panel overview-drilldown-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Category Cases</p>
+              <h3>Focused Case List</h3>
+            </div>
+          </div>
+          <div id="pipelineDrilldown" class="pipeline-drilldown"></div>
+        </section>
       </section>
 
       <section id="operationsView" class="view">
