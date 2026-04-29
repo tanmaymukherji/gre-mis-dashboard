@@ -20,46 +20,61 @@
           <p class="lede">Approval workspace for intake review, curator-submitted updates, and taxonomy maintenance.</p>
         </div>
       </div>
-      <aside class="access-card">
-        <div class="access-head">
-          <div>
-            <p class="eyebrow">Admin Access</p>
-            <h2>Approval Gate</h2>
-          </div>
-          <span id="adminStatusChip" class="chip muted">Locked</span>
-        </div>
-        <form id="adminLoginForm" class="access-form">
-          <label>
-            <span>Username</span>
-            <input name="username" value="admin" />
-          </label>
-          <label>
-            <span>Password</span>
-            <input name="password" type="password" placeholder="Enter admin password" />
-          </label>
-          <div class="access-actions">
-            <button type="submit" class="btn btn-primary">Unlock Admin Sync</button>
-            <button type="button" id="adminLogoutBtn" class="btn btn-secondary hidden">Logout</button>
-          </div>
-        </form>
-        <p id="adminStatusText" class="helper-text">Admin approval is required for new intake records and curator-submitted status updates.</p>
-      </aside>
-    </header>
-
-    <section class="hero-strip">
-      <article class="hero-summary">
-        <p class="eyebrow">Admin Workspace</p>
-        <h2 id="datasetHeadline">Loading GRE approval queues…</h2>
-        <p id="datasetSubline" class="helper-text"></p>
-      </article>
       <div class="hero-actions">
         <a href="./index.html" class="btn btn-secondary">Back to Dashboard</a>
-        <button id="refreshBtn" class="btn btn-primary">Refresh</button>
       </div>
-    </section>
+    </header>
 
     <main>
       <section id="adminView" class="view active">
+        <div class="admin-grid">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Admin Login</p>
+                <h3>Admin Sync</h3>
+              </div>
+              <span id="adminStatusChip" class="chip muted">Locked</span>
+            </div>
+            <form id="adminLoginForm" class="action-form">
+              <label>
+                <span>Username</span>
+                <input name="username" value="admin" readonly />
+              </label>
+              <label>
+                <span>Admin Password</span>
+                <input name="password" type="password" placeholder="Enter admin password" required />
+              </label>
+              <div class="card-actions">
+                <button type="submit" class="btn btn-primary">Sign In</button>
+                <button type="button" id="adminLogoutBtn" class="btn btn-secondary hidden">Sign Out</button>
+                <button type="button" id="refreshBtn" class="btn btn-secondary">Refresh</button>
+              </div>
+              <p id="loginStatus" class="helper-text"></p>
+            </form>
+            <p id="adminStatusText" class="helper-text">Admin approval is required for new intake records and curator-submitted status updates.</p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Session</p>
+                <h3>Admin Controls</h3>
+              </div>
+            </div>
+            <div id="sessionPanel" class="stack-list hidden">
+              <article class="stack-card">
+                <div class="status-row">
+                  <span class="status-pill good">Signed in</span>
+                </div>
+                <p id="datasetHeadline" class="helper-text">Admin sync workspace for approval and taxonomy maintenance.</p>
+                <p id="datasetSubline" class="helper-text"></p>
+                <p id="sessionStatus" class="helper-text"></p>
+              </article>
+            </div>
+          </section>
+        </div>
+
         <div id="metricsGrid" class="metrics-grid"></div>
         <div class="admin-grid">
           <section class="panel">

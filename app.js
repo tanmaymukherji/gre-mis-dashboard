@@ -95,6 +95,13 @@ function safeAsync(handler) {
       await handler(...args);
     } catch (error) {
       console.error(error);
+      const loginStatus = byId("loginStatus");
+      const sessionStatus = byId("sessionStatus");
+      if (loginStatus && args[0]?.target?.id === "adminLoginForm") {
+        loginStatus.textContent = error?.message || "Admin login failed.";
+      } else if (sessionStatus) {
+        sessionStatus.textContent = error?.message || "Something went wrong.";
+      }
       toast(error?.message || "Something went wrong. Please try again.");
     }
   };
@@ -299,10 +306,10 @@ class GreMisStore {
   }
 
   async callAdmin(action, body = {}, requireAdmin = false) {
-    const client = this.getClient();
     const headers = {
       "Content-Type": "application/json",
-      apikey: this.config.SUPABASE_ANON_KEY,
+      apikey: String(this.config.SUPABASE_ANON_KEY || ""),
+      Authorization: `Bearer ${String(this.config.SUPABASE_ANON_KEY || "")}`,
     };
     if (state.adminToken) headers["x-gre-admin-session"] = state.adminToken;
     const response = await fetch(`${this.config.SUPABASE_URL}/functions/v1/${this.config.ADMIN_FUNCTION || "gre-mis-admin"}`, {
@@ -314,8 +321,12 @@ class GreMisStore {
         adminSessionToken: state.adminToken || undefined,
       }),
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || "Request failed.");
+    const rawText = await response.text().catch(() => "");
+    let data = {};
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch {}
+    if (!response.ok) throw new Error(data.error || rawText || `Request failed (${response.status}).`);
     if (requireAdmin && !state.adminToken) throw new Error("Admin login required.");
     return data;
   }
@@ -1055,6 +1066,8 @@ function renderAdminState() {
   const chip = byId("adminStatusChip");
   const text = byId("adminStatusText");
   const logout = byId("adminLogoutBtn");
+  const loginStatus = byId("loginStatus");
+  const sessionPanel = byId("sessionPanel");
   if (!chip || !text || !logout) return;
 
   if (state.adminSession) {
@@ -1062,11 +1075,17 @@ function renderAdminState() {
     chip.className = "chip good";
     text.textContent = `Admin session active for ${state.adminSession.username}. Intake approvals and curator update approvals are available below.`;
     logout.classList.remove("hidden");
+    sessionPanel?.classList.remove("hidden");
   } else {
     chip.textContent = "Locked";
     chip.className = "chip muted";
     text.textContent = "Admin approval is required for new intake records and curator-submitted status updates.";
     logout.classList.add("hidden");
+    sessionPanel?.classList.add("hidden");
+  }
+
+  if (loginStatus && !state.adminSession && !loginStatus.textContent) {
+    loginStatus.textContent = "";
   }
 }
 
@@ -1176,16 +1195,21 @@ function bindStaticEvents() {
   byId("adminLoginForm")?.addEventListener("submit", safeAsync(async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
+    const loginStatus = byId("loginStatus");
+    if (loginStatus) loginStatus.textContent = "Signing in...";
     await store.adminLogin(form.get("username"), form.get("password"));
     event.target.reset();
     await refreshAll();
     if (byId("adminView")) switchView("admin");
+    if (loginStatus) loginStatus.textContent = "Signed in successfully.";
     toast("Admin access unlocked.");
   }));
 
   byId("adminLogoutBtn")?.addEventListener("click", safeAsync(async () => {
     await store.adminLogout();
     await refreshAll();
+    const loginStatus = byId("loginStatus");
+    if (loginStatus) loginStatus.textContent = "";
     toast("Admin session closed.");
   }));
 

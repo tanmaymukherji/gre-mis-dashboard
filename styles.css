@@ -507,25 +507,25 @@ textarea { resize: vertical; }
 .modal-head,
 .modal-actions { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .modal-actions { margin-top: 18px; justify-content: end; }
-.admin-sync-link {
-  position: fixed;
-  right: 22px;
-  bottom: 22px;
-  z-index: 20;
+.page-end-actions { display: flex; justify-content: flex-end; padding: 1rem 0 0.35rem; }
+.admin-sync-end {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 16px;
+  padding: 0.38rem 0.72rem;
   border-radius: 999px;
-  border: 1px solid rgba(46, 106, 60, 0.18);
-  background: rgba(255, 255, 255, 0.94);
-  color: var(--green);
+  border: 1px solid #d7e0e7;
+  background: #f5f8fa;
+  color: #6a7785;
   text-decoration: none;
-  font-weight: 800;
-  box-shadow: 0 14px 30px rgba(24, 50, 30, 0.14);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
-.admin-sync-link:hover {
-  background: #fff;
+.admin-sync-end:hover {
+  color: #1f4b6e;
+  border-color: #bfd0db;
+  background: #eef4f7;
 }
 
 @media (max-width: 1280px) {
@@ -566,8 +566,5 @@ textarea { resize: vertical; }
   .hero-actions,
   .access-actions { width: 100%; }
   .brand-logo { width: 88px; }
-  .admin-sync-link {
-    right: 16px;
-    bottom: 16px;
-  }
+  .page-end-actions { padding: 0.85rem 0 0.2rem; }
 }
