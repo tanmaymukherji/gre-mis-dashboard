@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GRE MIS Dashboard</title>
+  <link rel="icon" href="data:," />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <img src="./assets/gre-logo.png" alt="GRE logo" class="brand-logo" />
+        <div>
+          <p class="eyebrow">Green Rural Economy</p>
+          <h1>GRE MIS Dashboard</h1>
+          <p class="subcopy">A role-based operating console for needs intake, curation, provider matching, outreach, and closure.</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <div class="role-switch" aria-label="Switch user role">
+          <button class="role-pill active" data-role="admin">Admin View</button>
+          <button class="role-pill" data-role="curator">Curator View</button>
+        </div>
+        <button id="refreshBtn" class="secondary-btn">Refresh Data</button>
+      </div>
+    </header>
+
+    <main class="dashboard-grid">
+      <section class="hero-panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Operational Control Tower</p>
+          <h2>One place to move needs forward every day</h2>
+          <p id="roleSummary" class="body-copy"></p>
+        </div>
+        <div class="hero-actions">
+          <button id="newNeedBtn" class="primary-btn">Log New Need</button>
+          <button id="seedDemoBtn" class="secondary-btn">Load Sample Data</button>
+        </div>
+      </section>
+
+      <section class="kpi-strip" id="kpiStrip"></section>
+
+      <section class="panel filters-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Smart Filters</p>
+            <h3>Need Radar</h3>
+          </div>
+        </div>
+        <div class="filters-grid">
+          <label>
+            <span>Status</span>
+            <select id="statusFilter"></select>
+          </label>
+          <label>
+            <span>Curator</span>
+            <select id="curatorFilter"></select>
+          </label>
+          <label>
+            <span>State</span>
+            <select id="stateFilter"></select>
+          </label>
+          <label>
+            <span>Search</span>
+            <input id="searchFilter" type="search" placeholder="Org, challenge, category..." />
+          </label>
+        </div>
+      </section>
+
+      <section class="panel list-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Action Queue</p>
+            <h3>Needs Requiring Movement</h3>
+          </div>
+          <div class="pill-group" id="queueSummary"></div>
+        </div>
+        <div id="needsList" class="needs-list"></div>
+      </section>
+
+      <section class="panel detail-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Work Console</p>
+            <h3>Selected Need</h3>
+          </div>
+        </div>
+        <div id="needDetail" class="detail-empty">Select a need from the queue to see timeline, assignments, matching, and next actions.</div>
+      </section>
+
+      <section class="panel insights-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Leadership View</p>
+            <h3>Allocation and Bottlenecks</h3>
+          </div>
+        </div>
+        <div id="allocationChart" class="mini-stack"></div>
+        <div id="agingChart" class="mini-stack"></div>
+        <div id="categoryChart" class="mini-stack"></div>
+      </section>
+
+      <section class="panel provider-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Knowledge and Matching</p>
+            <h3>Solution Search</h3>
+          </div>
+        </div>
+        <div id="providerSearch" class="detail-empty">Choose a need to search GRE solutions and solution providers based on its category, location, and curation notes.</div>
+      </section>
+
+      <section class="panel taxonomy-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Admin Utility</p>
+            <h3>Options and Taxonomy</h3>
+          </div>
+        </div>
+        <div class="taxonomy-grid">
+          <label>
+            <span>Option Type</span>
+            <select id="optionType">
+              <option value="status">Status</option>
+              <option value="internal_status">Internal Status</option>
+              <option value="category">Problem Category</option>
+              <option value="next_action">Next Best Action</option>
+            </select>
+          </label>
+          <label>
+            <span>Label</span>
+            <input id="optionLabel" type="text" placeholder="Add a missing option" />
+          </label>
+          <button id="saveOptionBtn" class="secondary-btn">Add / Update Option</button>
+        </div>
+        <div id="optionsList" class="options-list"></div>
+      </section>
+
+      <section class="panel future-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Long-term Roadmap</p>
+            <h3>Seeker Portal and Open Responses</h3>
+          </div>
+        </div>
+        <div class="future-grid">
+          <article>
+            <h4>Self-serve challenge intake</h4>
+            <p>Solution Seekers can log in, raise a challenge, attach supporting context, and track progress without waiting for manual intake.</p>
+          </article>
+          <article>
+            <h4>Open response board</h4>
+            <p>Approved needs can be published selectively so organizations and providers can react, express interest, and begin outreach.</p>
+          </article>
+          <article>
+            <h4>Admin approvals remain central</h4>
+            <p>Public responses, provider onboarding, and sensitive assignments still pass through admin approvals and curated workflows.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="needDialog" class="modal">
+    <form method="dialog" class="modal-card" id="needForm">
+      <div class="modal-head">
+        <h3>Log New Need</h3>
+        <button type="button" class="icon-btn" id="closeNeedDialog">Close</button>
+      </div>
+      <div class="modal-grid">
+        <label><span>Seeker Organisation</span><input name="organization_name" required /></label>
+        <label><span>Contact Person</span><input name="contact_person" required /></label>
+        <label><span>Email</span><input name="seeker_email" type="email" required /></label>
+        <label><span>Phone</span><input name="seeker_phone" /></label>
+        <label><span>State</span><input name="state" required /></label>
+        <label><span>District</span><input name="district" /></label>
+        <label class="wide"><span>Challenge / Need Statement</span><textarea name="problem_statement" rows="5" required></textarea></label>
+        <label class="wide"><span>Curated Need / Category Tags</span><input name="categories" placeholder="Capacity building, Training" /></label>
+      </div>
+      <div class="modal-actions">
+        <button type="submit" class="primary-btn">Save Need</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
+
