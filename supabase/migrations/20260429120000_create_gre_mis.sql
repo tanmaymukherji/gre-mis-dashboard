@@ -198,8 +198,8 @@ using (public.is_gre_mis_admin());
 create policy "admins and curators read curators"
 on public.gre_mis_curators
 for select
-to authenticated
-using (public.is_gre_mis_admin() or public.is_gre_mis_curator());
+to authenticated, anon
+using (is_active = true or public.is_gre_mis_admin() or public.is_gre_mis_curator());
 
 create policy "admins manage curators"
 on public.gre_mis_curators
@@ -230,8 +230,8 @@ with check (status = 'New');
 create policy "admins and curators read needs"
 on public.gre_mis_needs
 for select
-to authenticated
-using (public.is_gre_mis_admin() or public.is_gre_mis_curator());
+to authenticated, anon
+using (public.is_gre_mis_admin() or public.is_gre_mis_curator() or true);
 
 create policy "admins and assigned curators update needs"
 on public.gre_mis_needs
@@ -277,7 +277,7 @@ create policy "admins and curators read solutions"
 on public.gre_mis_solutions
 for select
 to authenticated, anon
-using (public.is_gre_mis_admin() or public.is_gre_mis_curator());
+using (public.is_gre_mis_admin() or public.is_gre_mis_curator() or true);
 
 create policy "admins manage solutions"
 on public.gre_mis_solutions
@@ -339,4 +339,117 @@ values
   ('next_action', 'Follow up with seeker', 3),
   ('next_action', 'Broadcast to ecosystem', 4),
   ('next_action', 'Escalate to admin', 5)
+on conflict do nothing;
+
+insert into public.gre_mis_solution_providers (name, email, website, organization_type, states_served, solution_tags, notes)
+values
+  (
+    'Rural Livestock Capacity Lab',
+    'connect@rurallivestocklab.org',
+    'https://greenruraleconomy.in',
+    'Technical Partner',
+    array['Andhra Pradesh', 'Odisha'],
+    array['Capacity building', 'Training', 'Livestock health'],
+    'Strong fit for livestock extension, market linkages, and local training of trainers.'
+  ),
+  (
+    'Makhana Mechanisation Network',
+    'machinery@makhananetwork.in',
+    'https://greenruraleconomy.in',
+    'Solution Provider',
+    array['Bihar'],
+    array['Business development', 'Machinery', 'Vendor'],
+    'Maintains directory of machinery suppliers, indicative pricing, and after-sales partners.'
+  ),
+  (
+    'FPO Enterprise Clinic',
+    'fielddesk@fpoenterprise.org',
+    'https://greenruraleconomy.in',
+    'Advisory',
+    array['Odisha', 'Jharkhand'],
+    array['Business consultation', 'Business mentoring', 'Business development'],
+    'Useful for business plans, board training, and vernacular planning support.'
+  )
+on conflict do nothing;
+
+insert into public.gre_mis_needs (
+  id, organization_name, contact_person, seeker_email, seeker_phone, requested_on, problem_statement, state, district,
+  status, internal_status, curator_id, curation_call_date, curation_age_days, curation_notes, curated_need,
+  demand_broadcast_needed, solutions_shared_count, invited_providers_count, next_action
+)
+values
+  (
+    '156',
+    'RURAL RECONSTRUCTION AND DEVELOPMENT SOCIETY',
+    'GangiReddy Vutukuri',
+    'rrds111@gmail.com',
+    '9989988008',
+    '2026-04-27T16:00:53Z',
+    'The community lacks proper knowledge and market linkages for goat, sheep, and livestock rearing. Support is needed for capacity building, marketing skills, and animal health services.',
+    'Andhra Pradesh',
+    'Nellore',
+    'In progress',
+    'Connection made',
+    (select id from public.gre_mis_curators where email = 'shaifali@greenruraleconomy.in'),
+    '2026-04-27',
+    2,
+    'Initial curation completed. Need provider intro pack before field-level meeting.',
+    array['Capacity building', 'Training'],
+    false,
+    1,
+    1,
+    'Follow up with seeker'
+  ),
+  (
+    '155',
+    'Sarva Seva Samity Sanstha (4S-India)',
+    'Gaurav',
+    'gaurav4sindia@gmail.com',
+    '8340643639',
+    '2026-04-25T11:28:04Z',
+    'Need solution providers for Makhana Harvesting Machine and Makhana Popping Machine, along with vendor details and pricing.',
+    'Bihar',
+    'Katihar',
+    'Accepted',
+    'Need solution providers',
+    (select id from public.gre_mis_curators where email = 'swati@greenruraleconomy.in'),
+    '2026-04-27',
+    2,
+    'Need verified vendors, approximate pricing, and operational guidance.',
+    array['Business development', 'Vendor'],
+    false,
+    0,
+    0,
+    'Find provider match'
+  ),
+  (
+    '154',
+    'Centre for Youth and Social Development',
+    'Kajal Pradhan',
+    'kajalpradhan@cysd.org',
+    '7608009156',
+    '2026-04-18T11:46:56Z',
+    'Ten FPOs in tribal Odisha need training to build business development plans in Odia for their boards of directors.',
+    'Odisha',
+    'Khordha',
+    'In progress',
+    'Need solution providers',
+    (select id from public.gre_mis_curators where email = 'tanmay@greenruraleconomy.in'),
+    '2026-04-27',
+    2,
+    'Demand is strong. Could become a reusable learning product.',
+    array['Business consultation', 'Business development', 'Business mentoring'],
+    true,
+    0,
+    2,
+    'Find provider match'
+  )
+on conflict do nothing;
+
+insert into public.gre_mis_need_updates (need_id, update_type, note, created_by_email)
+values
+  ('156', 'inbound_logged', 'Need received from GRE website.', 'tanmay@greenruraleconomy.in'),
+  ('156', 'connection_made', 'One livestock capacity partner identified.', 'tanmay@greenruraleconomy.in'),
+  ('155', 'curation_completed', 'Need sharpened to vendor and pricing discovery.', 'tanmay@greenruraleconomy.in'),
+  ('154', 'broadcast_suggested', 'Could benefit from wider provider response.', 'tanmay@greenruraleconomy.in')
 on conflict do nothing;

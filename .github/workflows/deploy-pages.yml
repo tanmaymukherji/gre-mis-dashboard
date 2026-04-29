@@ -27,8 +27,7 @@ jobs:
       - name: Prepare static site
         run: |
           mkdir _site
-          cp index.html styles.css app.js _site/
-          cp config.example.js _site/config.js
+          cp index.html styles.css app.js config.js _site/
           cp -R assets _site/assets
 
       - name: Configure Pages
@@ -42,4 +41,3 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
-
