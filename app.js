@@ -1276,6 +1276,7 @@ function bindStaticEvents() {
     const card = event.target.closest("[data-overview-kind]");
     if (!card) return;
     setOverviewFocus(card.dataset.overviewKind, card.dataset.overviewId);
+    renderMetrics();
     renderOverview();
   });
 
