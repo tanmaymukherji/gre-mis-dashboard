@@ -1484,6 +1484,12 @@ function renderOverview() {
     focusKind: "curator",
     focusId: curator.id,
   }));
+  workload.push({
+    label: "Unassigned",
+    value: needs.filter((need) => !need.curator_id).length,
+    focusKind: "curator",
+    focusId: "unassigned",
+  });
   renderBarList("workloadChart", workload, "good");
 
   const stateCounts = topEntries(countBy(needs, (need) => normalizeText(need.state) || "Unknown"));
