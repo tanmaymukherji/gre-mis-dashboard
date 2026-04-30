@@ -229,6 +229,148 @@ async function fetchGreReportWorkbook(reportName: string, limitRowCount: number,
   };
 }
 
+function normalizeComparable(value: unknown) {
+  return requireString(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+const greRefDataCache = new Map<string, Record<string, unknown>[]>();
+
+async function fetchGreJson(path: string) {
+  const sessionId = await loginToGre();
+  const response = await fetch(`${greLoginBaseUrl}${path}`, {
+    headers: {
+      "x-sessionid": sessionId,
+      Accept: "application/json, text/plain, */*",
+      Origin: greSiteOrigin,
+      Referer: `${greSiteOrigin}/`,
+    },
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(data?.error?.message || data?.message || `GRE request failed for ${path}.`);
+  }
+  return { sessionId, data };
+}
+
+async function patchGreJson(path: string, payload: unknown, sessionId?: string) {
+  const resolvedSessionId = sessionId || await loginToGre();
+  const response = await fetch(`${greLoginBaseUrl}${path}`, {
+    method: "PATCH",
+    headers: {
+      "x-sessionid": resolvedSessionId,
+      "Content-Type": "application/json",
+      Accept: "application/json, text/plain, */*",
+      Origin: greSiteOrigin,
+      Referer: `${greSiteOrigin}/`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(data?.error?.message || data?.message || `GRE patch failed for ${path}.`);
+  }
+  return data;
+}
+
+async function getGreRefData(classCode: string) {
+  if (greRefDataCache.has(classCode)) return greRefDataCache.get(classCode) || [];
+  const { data } = await fetchGreJson(
+    `/commons-request-management-service/api/v1/ref-data/class/${encodeURIComponent(classCode)}?direction=ASC&fetchContextDataOnly=false&languageCode=ENG&page=0&size=100`,
+  );
+  const elements = Array.isArray(data?.elements) ? data.elements : [];
+  greRefDataCache.set(classCode, elements);
+  return elements as Record<string, unknown>[];
+}
+
+function findGreRefDataOption(
+  options: Record<string, unknown>[],
+  value: string,
+  aliases: string[] = [],
+) {
+  const normalized = normalizeComparable(value);
+  const probes = [normalized, ...aliases.map((alias) => normalizeComparable(alias))].filter(Boolean);
+  return options.find((option) => {
+    const names = [
+      option?.name,
+      option?.code,
+      ...(Array.isArray(option?.labels) ? option.labels.map((label: { text?: string }) => label?.text || "") : []),
+    ].map((entry) => normalizeComparable(entry));
+    return probes.some((probe) => names.includes(probe));
+  }) || null;
+}
+
+function buildGreDateString(value: string) {
+  const normalized = requireString(value);
+  if (!normalized) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return `${normalized}T00:00:00.000+05:30`;
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
+  const needId = requireString(requestRow.need_id);
+  if (!needId) throw new Error("Need id is required for GRE sync.");
+
+  const { sessionId, data: greRequest } = await fetchGreJson(`/commons-request-management-service/api/v1/request?id=${encodeURIComponent(needId)}`);
+  const requestStatusOptions = await getGreRefData("CLASS.REQUEST_STATUS");
+  const internalStatusOptions = await getGreRefData("CLASS.REQUEST_INTERNAL_STATUS");
+  const demandBroadcastOptions = await getGreRefData("CLASS.DEMAND_BROADCAST_NEEDED");
+
+  const payload = structuredClone(greRequest);
+  const curationList = Array.isArray(payload.curationList) ? payload.curationList : [];
+  const primaryCuration = curationList[0] || {
+    requestId: Number(needId),
+    curatorUserId: null,
+    curatorUserName: null,
+    curatedNeedOfServiceSeekers: [],
+    demandBroadcastNeed: null,
+  };
+
+  const unsupportedFields: string[] = [];
+
+  if (requestRow.proposed_status) {
+    const mapped = findGreRefDataOption(requestStatusOptions, requestRow.proposed_status, [
+      requestRow.proposed_status === "Accepted" ? "Request Accepted" : "",
+      requestRow.proposed_status === "Closed" ? "Request Closed" : "",
+      requestRow.proposed_status === "New" ? "Request Submitted" : "",
+      requestRow.proposed_status === "In progress" ? "Work in Progress" : "",
+    ]);
+    if (!mapped) throw new Error(`Could not map GRE request status for "${requestRow.proposed_status}".`);
+    payload.status = mapped;
+  }
+
+  if (requestRow.proposed_internal_status) {
+    const mapped = findGreRefDataOption(internalStatusOptions, requestRow.proposed_internal_status);
+    if (!mapped) throw new Error(`Could not map GRE internal status for "${requestRow.proposed_internal_status}".`);
+    payload.internalStatus = mapped;
+  }
+
+  if (requestRow.proposed_curation_notes) {
+    primaryCuration.callDetails = requestRow.proposed_curation_notes;
+  }
+
+  if (requestRow.proposed_curation_call_date) {
+    primaryCuration.callDate = buildGreDateString(requestRow.proposed_curation_call_date);
+  }
+
+  if (typeof requestRow.proposed_demand_broadcast_needed === "boolean") {
+    const mapped = findGreRefDataOption(
+      demandBroadcastOptions,
+      requestRow.proposed_demand_broadcast_needed ? "Yes" : "No",
+    );
+    if (!mapped) throw new Error("Could not map GRE demand broadcast option.");
+    primaryCuration.demandBroadcastNeed = mapped;
+  }
+
+  if (requestRow.proposed_next_action) unsupportedFields.push("next_action");
+  if (Number.isInteger(requestRow.proposed_solutions_shared_count)) unsupportedFields.push("solutions_shared_count");
+  if (Number.isInteger(requestRow.proposed_invited_providers_count)) unsupportedFields.push("invited_providers_count");
+
+  payload.curationList = [primaryCuration, ...curationList.slice(1)];
+  await patchGreJson("/commons-request-management-service/api/v1/request", payload, sessionId);
+  return { ok: true, unsupportedFields };
+}
+
 function stableRowSignature(value: unknown) {
   return JSON.stringify(value, Object.keys(value as Record<string, unknown>).sort());
 }
@@ -1245,6 +1387,8 @@ async function reviewUpdateRequest(requestId: string, decision: string, reviewNo
     return { ok: true };
   }
 
+  const greSyncResult = await syncApprovedUpdateToGre(requestRow);
+
   const nextNeedPatch: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
   };
@@ -1297,11 +1441,23 @@ async function reviewUpdateRequest(requestId: string, decision: string, reviewNo
   await adminClient.from("gre_mis_need_updates").insert({
     need_id: requestRow.need_id,
     update_type: "curator_update_approved",
-    note: changeParts.join(" | ") || "Curator update approved.",
+    note: [
+      changeParts.join(" | ") || "Curator update approved.",
+      "Synced to GRE website.",
+      greSyncResult.unsupportedFields?.length
+        ? `Not synced to GRE: ${greSyncResult.unsupportedFields.join(", ")}.`
+        : "",
+    ].filter(Boolean).join(" "),
     created_by_email: actorEmail,
   });
 
-  return { ok: true };
+  return {
+    ok: true,
+    greSync: {
+      synced: true,
+      unsupportedFields: greSyncResult.unsupportedFields || [],
+    },
+  };
 }
 
 async function upsertOption(optionType: string, label: string) {
