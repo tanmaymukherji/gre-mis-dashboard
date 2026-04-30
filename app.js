@@ -50,17 +50,10 @@ const GENERIC_THEMATIC_TERMS = new Set([
   "infrastructure",
   "technology",
   "vendor",
-  "business development",
-  "business consultation",
-  "business mentoring",
-  "branding",
   "connect collaborate",
-  "capacity building",
-  "training",
   "finance",
   "funding",
   "investments",
-  "packaging",
 ]);
 const SIX_M_RULES = [
   { label: "Manpower", patterns: ["training", "capacity building"] },
@@ -326,9 +319,13 @@ function extractProblemPhrases(value) {
     .filter((token) => token.length >= 4 && !MATCH_STOPWORDS.has(token));
   const phrases = [];
   for (let index = 0; index < tokens.length - 1; index += 1) {
-    phrases.push(`${tokens[index]} ${tokens[index + 1]}`);
+    if (!MATCH_STOPWORDS.has(tokens[index]) && !MATCH_STOPWORDS.has(tokens[index + 1])) {
+      phrases.push(`${tokens[index]} ${tokens[index + 1]}`);
+    }
     if (index < tokens.length - 2) {
-      phrases.push(`${tokens[index]} ${tokens[index + 1]} ${tokens[index + 2]}`);
+      if (!MATCH_STOPWORDS.has(tokens[index + 2])) {
+        phrases.push(`${tokens[index]} ${tokens[index + 1]} ${tokens[index + 2]}`);
+      }
     }
   }
   return uniq(phrases).slice(0, 18);

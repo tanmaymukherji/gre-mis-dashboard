@@ -108,62 +108,80 @@ Return JSON with exactly:
 
 async function callAiJson(providerInput: string, prompt: string) {
   const provider = (providerInput || defaultAiProvider || "openrouter").toLowerCase();
+  const tryProvider = async (resolvedProvider: string) => {
+    if (resolvedProvider === "gemini") {
+      if (!geminiApiKey) throw new Error("GEMINI_API_KEY is not configured.");
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${defaultGeminiModel}:generateContent?key=${geminiApiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json" },
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      const text = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("") || "";
+      if (!response.ok || !text) throw new Error(data?.error?.message || "Gemini enrichment failed.");
+      return JSON.parse(text);
+    }
 
-  if (provider === "gemini") {
-    if (!geminiApiKey) throw new Error("GEMINI_API_KEY is not configured.");
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${defaultGeminiModel}:generateContent?key=${geminiApiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" },
-      }),
-    });
-    const data = await response.json().catch(() => null);
-    const text = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("") || "";
-    if (!response.ok || !text) throw new Error(data?.error?.message || "Gemini enrichment failed.");
-    return JSON.parse(text);
-  }
+    if (resolvedProvider === "deepseek") {
+      if (!deepSeekApiKey) throw new Error("DEEPSEEK_API_KEY is not configured.");
+      const response = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${deepSeekApiKey}`,
+        },
+        body: JSON.stringify({
+          model: defaultDeepSeekModel,
+          response_format: { type: "json_object" },
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      const text = data?.choices?.[0]?.message?.content || "";
+      if (!response.ok || !text) throw new Error(data?.error?.message || "DeepSeek enrichment failed.");
+      return JSON.parse(text);
+    }
 
-  if (provider === "deepseek") {
-    if (!deepSeekApiKey) throw new Error("DEEPSEEK_API_KEY is not configured.");
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
+    if (!openRouterApiKey) throw new Error("OPENROUTER_API_KEY is not configured.");
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${deepSeekApiKey}`,
+        Authorization: `Bearer ${openRouterApiKey}`,
+        "HTTP-Referer": "https://greenruraleconomy.in",
+        "X-Title": "GRE MIS Dashboard",
       },
       body: JSON.stringify({
-        model: defaultDeepSeekModel,
+        model: defaultOpenRouterModel,
         response_format: { type: "json_object" },
         messages: [{ role: "user", content: prompt }],
       }),
     });
     const data = await response.json().catch(() => null);
     const text = data?.choices?.[0]?.message?.content || "";
-    if (!response.ok || !text) throw new Error(data?.error?.message || "DeepSeek enrichment failed.");
+    if (!response.ok || !text) throw new Error(data?.error?.message || "OpenRouter enrichment failed.");
     return JSON.parse(text);
+  };
+
+  const fallbackOrder = provider === "gemini"
+    ? ["gemini", "openrouter", "deepseek"]
+    : provider === "deepseek"
+      ? ["deepseek", "openrouter", "gemini"]
+      : ["openrouter", "gemini", "deepseek"];
+
+  let lastError: unknown = null;
+  for (const candidate of fallbackOrder) {
+    try {
+      return await tryProvider(candidate);
+    } catch (error) {
+      lastError = error;
+    }
   }
 
-  if (!openRouterApiKey) throw new Error("OPENROUTER_API_KEY is not configured.");
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${openRouterApiKey}`,
-      "HTTP-Referer": "https://greenruraleconomy.in",
-      "X-Title": "GRE MIS Dashboard",
-    },
-    body: JSON.stringify({
-      model: defaultOpenRouterModel,
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  const data = await response.json().catch(() => null);
-  const text = data?.choices?.[0]?.message?.content || "";
-  if (!response.ok || !text) throw new Error(data?.error?.message || "OpenRouter enrichment failed.");
-  return JSON.parse(text);
+  throw lastError instanceof Error ? lastError : new Error("No AI provider could enrich the need.");
 }
 
 async function enrichNeedIntelligence(need: Record<string, unknown>, provider: string) {
