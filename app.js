@@ -182,6 +182,10 @@ function parseArray(value) {
   return [];
 }
 
+function ensureList(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function parseNumber(value, fallback = 0) {
   const normalized = String(value ?? "").replace(/[^0-9.-]/g, "").trim();
   if (!normalized) return fallback;
@@ -717,8 +721,8 @@ function pipelineMatchesNeed(pipelineId, need) {
 
 function buildOverviewCases() {
   const needCases = getDisplayNeeds().map((need) => ({ type: "need", need }));
-  const pendingNeedCases = (state.data.pendingNeeds || []).map((need) => ({ type: "pendingNeed", need }));
-  const pendingUpdateCases = (state.data.pendingUpdates || []).map((request) => ({
+  const pendingNeedCases = ensureList(state.data.pendingNeeds).map((need) => ({ type: "pendingNeed", need }));
+  const pendingUpdateCases = ensureList(state.data.pendingUpdates).map((request) => ({
     type: "pendingUpdate",
     request,
     need: getNeedById(request.need_id) || null,
@@ -764,11 +768,11 @@ function buildPendingRequestCaseCard(request) {
 
 function getOverviewFocusPayload() {
   const filters = state.overviewFilters || {};
-  const activeMetrics = filters.metric || [];
-  const activePipelines = filters.pipeline || [];
-  const activeCurators = filters.curator || [];
-  const activeStates = filters.state || [];
-  const activeCategories = filters.category || [];
+  const activeMetrics = ensureList(filters.metric);
+  const activePipelines = ensureList(filters.pipeline);
+  const activeCurators = ensureList(filters.curator);
+  const activeStates = ensureList(filters.state);
+  const activeCategories = ensureList(filters.category);
   const activeFilterCount = [activeMetrics, activePipelines, activeCurators, activeStates, activeCategories].reduce((sum, list) => sum + list.length, 0);
 
   const allCases = buildOverviewCases();
@@ -817,6 +821,7 @@ function getOverviewFocusPayload() {
   return {
     label: activeFilterCount ? labels.join(" | ") : "All Cases",
     tone: activeMetrics.includes("stuck") || activePipelines.includes("stuck") ? "bad" : activeMetrics.includes("admin_queue") ? "warn" : "info",
+    items: orderedCases,
     cards,
     emptyText: activeMetrics.includes("admin_queue") && !state.adminToken
       ? "Sign in through Admin Sync to inspect pending approvals and curator requests."
@@ -964,13 +969,13 @@ class GreMisStore {
       throw new Error(curators.error?.message || options.error?.message || needs.error?.message || updates.error?.message || "Could not load live dashboard data.");
     }
 
-    state.data.curators = curators.data || [];
-    state.data.options = options.data || [];
-    state.data.needs = (needs.data || []).map((need) => ({
+    state.data.curators = ensureList(curators.data);
+    state.data.options = ensureList(options.data);
+    state.data.needs = ensureList(needs.data).map((need) => ({
       ...need,
       curated_need: parseArray(need.curated_need),
     }));
-    state.data.needUpdates = updates.data || [];
+    state.data.needUpdates = ensureList(updates.data);
     state.matchCache.clear();
   }
 
@@ -1038,8 +1043,8 @@ class GreMisStore {
       return;
     }
     const data = await this.callAdmin("adminSnapshot", {}, true);
-    state.data.pendingNeeds = data.pendingNeeds || [];
-    state.data.pendingUpdates = data.pendingUpdates || [];
+    state.data.pendingNeeds = ensureList(data.pendingNeeds);
+    state.data.pendingUpdates = ensureList(data.pendingUpdates);
   }
 
   async createNeed(payload) {
@@ -1195,7 +1200,7 @@ function getCuratorById(id) {
 }
 
 function getDisplayNeeds() {
-  return state.data.needs.filter((need) => state.showClosedNeeds || need.status !== "Closed");
+  return ensureList(state.data.needs).filter((need) => state.showClosedNeeds || need.status !== "Closed");
 }
 
 function getNeedById(id) {
@@ -1307,7 +1312,7 @@ function renderOverview() {
     )
     .join("");
 
-  const workload = state.data.curators.map((curator) => ({
+  const workload = ensureList(state.data.curators).map((curator) => ({
     label: curator.display_name,
     value: needs.filter((need) => need.curator_id === curator.id).length,
     focusKind: "curator",
@@ -1398,8 +1403,9 @@ function renderOverview() {
 function renderBarList(targetId, items, tone) {
   const target = byId(targetId);
   if (!target) return;
-  const max = Math.max(...items.map((item) => Number(item.value || 0)), 1);
-  target.innerHTML = items
+  const safeItems = ensureList(items);
+  const max = Math.max(...safeItems.map((item) => Number(item.value || 0)), 1);
+  target.innerHTML = safeItems
     .map(
       (item) => `
         <button class="bar-row bar-row-button ${item.focusKind && isOverviewFocus(item.focusKind, item.focusId) ? "active" : ""}" ${
@@ -1426,7 +1432,7 @@ function renderFilters() {
   document.getElementById("curatorFilter").innerHTML = [
     `<option value="all">All curators</option>`,
     `<option value="unassigned">Unassigned</option>`,
-    ...state.data.curators.map((curator) => `<option value="${esc(curator.id)}">${esc(curator.display_name)}</option>`),
+    ...ensureList(state.data.curators).map((curator) => `<option value="${esc(curator.id)}">${esc(curator.display_name)}</option>`),
   ].join("");
   document.getElementById("stateFilter").innerHTML = stateOptions
     .map((value) => `<option value="${esc(value)}">${esc(value === "all" ? "All states" : value)}</option>`)
@@ -1782,7 +1788,7 @@ function renderAdminQueue() {
       : `<div class="empty-state">No curator update requests are waiting for approval.</div>`
     : `<div class="empty-state">Login as admin to view curator-submitted status changes.</div>`;
 
-  const grouped = state.data.options.reduce((acc, option) => {
+  const grouped = ensureList(state.data.options).reduce((acc, option) => {
     acc[option.option_type] ||= [];
     acc[option.option_type].push(option);
     return acc;
