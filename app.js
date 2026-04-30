@@ -13,6 +13,7 @@ const state = {
   matchPage: 1,
   matchCache: new Map(),
   mapplsSdkLoaded: false,
+  mapplsLoadPromise: null,
   caseMap: null,
   caseMapMarkers: [],
   activeMapGroupKey: "",
@@ -485,31 +486,52 @@ function sortNeedsByUrgency(needs) {
 }
 
 async function ensureMapplsSdk() {
-  if (window.mappls && state.mapplsSdkLoaded) return true;
-  const key = window.APP_CONFIG?.MAPPLS_MAP_KEY;
+  if (window.mappls?.Map && state.mapplsSdkLoaded) return true;
+  if (state.mapplsLoadPromise) return state.mapplsLoadPromise;
+  const key = String(window.APP_CONFIG?.MAPPLS_MAP_KEY || window.APP_CONFIG?.MAPMYINDIA_MAP_KEY || "").trim();
   if (!key) return false;
-  const existingScript = document.getElementById("mappls-sdk-script");
-  if (existingScript) {
-    await new Promise((resolve) => {
-      if (window.mappls) resolve(true);
-      existingScript.addEventListener("load", () => resolve(true), { once: true });
-      existingScript.addEventListener("error", () => resolve(false), { once: true });
-    });
-    state.mapplsSdkLoaded = Boolean(window.mappls);
-    return state.mapplsSdkLoaded;
+
+  if (!document.getElementById("mappls-web-sdk-css")) {
+    const link = document.createElement("link");
+    link.id = "mappls-web-sdk-css";
+    link.rel = "stylesheet";
+    link.href = "https://apis.mappls.com/vector_map/assets/v3.5/mappls-glob.css";
+    document.head.appendChild(link);
   }
 
-  const script = document.createElement("script");
-  script.id = "mappls-sdk-script";
-  script.src = `https://sdk.mappls.com/map/sdk/web?v=3.0&access_token=${encodeURIComponent(key)}`;
-  script.async = true;
-  document.head.appendChild(script);
-  const loaded = await new Promise((resolve) => {
-    script.addEventListener("load", () => resolve(true), { once: true });
-    script.addEventListener("error", () => resolve(false), { once: true });
-  });
-  state.mapplsSdkLoaded = Boolean(loaded && window.mappls);
-  return state.mapplsSdkLoaded;
+  const urls = [
+    `https://sdk.mappls.com/map/sdk/web?v=3.0&access_token=${encodeURIComponent(key)}`,
+    `https://sdk.mappls.com/map/sdk/web?v=3.0&layer=vector&access_token=${encodeURIComponent(key)}`,
+    `https://apis.mappls.com/advancedmaps/api/${encodeURIComponent(key)}/map_sdk?layer=vector&v=3.0`,
+  ];
+
+  state.mapplsLoadPromise = (async () => {
+    for (const src of urls) {
+      try {
+        await new Promise((resolve, reject) => {
+          document.querySelectorAll("script[data-mappls-sdk='true']").forEach((node) => node.remove());
+          const script = document.createElement("script");
+          script.src = src;
+          script.async = true;
+          script.defer = true;
+          script.dataset.mapplsSdk = "true";
+          script.onload = () => (window.mappls?.Map ? resolve(true) : reject(new Error("Mappls SDK unavailable")));
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+        state.mapplsSdkLoaded = true;
+        return true;
+      } catch (error) {
+        console.warn("Mappls SDK load failed for", src, error);
+      }
+    }
+    state.mapplsSdkLoaded = false;
+    return false;
+  })();
+
+  const loaded = await state.mapplsLoadPromise;
+  if (!loaded) state.mapplsLoadPromise = null;
+  return loaded;
 }
 
 function getNeedMapLocationLabel(need) {
@@ -609,33 +631,61 @@ async function renderCaseMap(needs) {
     return;
   }
 
-  mapCanvas.innerHTML = `<div id="categoryCasesMapCanvas" class="case-map-canvas"></div>`;
-  state.caseMap = new window.mappls.Map("categoryCasesMapCanvas", {
-    center: { lat: groups[0].lat, lng: groups[0].lng },
-    zoom: groups.length > 1 ? 4 : 7,
-  });
-  state.caseMapMarkers = [];
+  try {
+    state.caseMapMarkers.forEach((marker) => marker?.remove?.());
+    state.caseMapMarkers = [];
+    state.caseMap?.remove?.();
+    state.caseMap = null;
 
-  groups.forEach((group) => {
-    const markerHtml = group.needs.length > 1
-      ? `<div class="case-map-marker-ring" data-count="${escAttr(group.needs.length)}"></div>`
-      : `<div class="case-map-marker"></div>`;
-    const marker = new window.mappls.Marker({
-      map: state.caseMap,
-      position: { lat: group.lat, lng: group.lng },
-      html: markerHtml,
-      popupHtml: `<div><strong>${esc(group.label)}</strong><br/>${esc(group.needs.length)} cases</div>`,
-      popupOptions: { autoClose: true },
+    mapCanvas.innerHTML = `<div id="categoryCasesMapCanvas" class="case-map-canvas"></div>`;
+    state.caseMap = new window.mappls.Map("categoryCasesMapCanvas", {
+      center: { lat: groups[0].lat, lng: groups[0].lng },
+      zoom: groups.length > 1 ? 4 : 7,
+      zoomControl: true,
+      geolocation: false,
+      location: false,
     });
-    marker.addListener("click", async () => {
-      if (group.needs.length === 1) {
-        await focusNeedFromMap(group.needs[0].id);
-      } else {
-        renderCaseMapLocationPanel(group);
-      }
+
+    groups.forEach((group) => {
+      const markerHtml = group.needs.length > 1
+        ? `<div class="case-map-marker-ring" data-count="${escAttr(group.needs.length)}"></div>`
+        : `<div class="case-map-marker"></div>`;
+      const marker = new window.mappls.Marker({
+        map: state.caseMap,
+        position: { lat: group.lat, lng: group.lng },
+        html: markerHtml,
+        popupHtml: `<div><strong>${esc(group.label)}</strong><br/>${esc(group.needs.length)} cases</div>`,
+        popupOptions: { autoClose: true },
+        fitbounds: false,
+      });
+      marker?.on?.("click", async () => {
+        if (group.needs.length === 1) {
+          await focusNeedFromMap(group.needs[0].id);
+        } else {
+          renderCaseMapLocationPanel(group);
+        }
+      });
+      marker?.addListener?.("click", async () => {
+        if (group.needs.length === 1) {
+          await focusNeedFromMap(group.needs[0].id);
+        } else {
+          renderCaseMapLocationPanel(group);
+        }
+      });
+      state.caseMapMarkers.push(marker);
     });
-    state.caseMapMarkers.push(marker);
-  });
+
+    if (groups.length > 1 && state.caseMap?.fitBounds) {
+      const bounds = groups.map((group) => [group.lat, group.lng]);
+      state.caseMap.fitBounds(bounds, { padding: 50, maxZoom: 7 });
+    }
+  } catch (error) {
+    console.error("Case map could not be rendered.", error);
+    mapCanvas.innerHTML = `<div class="case-map-empty">The MapmyIndia map could not be loaded on this page yet.</div>`;
+    renderCaseMapLocationPanel(null);
+    state.caseMap = null;
+    state.caseMapMarkers = [];
+  }
 }
 
 function getCaseNeed(item) {
