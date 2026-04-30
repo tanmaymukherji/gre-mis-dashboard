@@ -11,6 +11,7 @@ const state = {
   queueNeedsScrollIntoView: false,
   overviewPage: 1,
   matchPage: 1,
+  matchCache: new Map(),
   showClosedNeeds: false,
   overviewFilters: {
     metric: [],
@@ -43,6 +44,28 @@ const MATCH_STOPWORDS = new Set([
   "there", "these", "they", "this", "through", "under", "want", "where", "which", "with", "would", "rural",
   "green", "economy", "help", "looking", "support", "required", "request",
 ]);
+
+const SIX_M_LABELS = ["Manpower", "Method", "Machine", "Material", "Market", "Money"];
+const SERVICE_PHRASES = [
+  "market linkage",
+  "capacity building",
+  "knowledge product",
+  "consulting",
+  "consultancy",
+  "training",
+  "advisory",
+  "service",
+  "services",
+  "product",
+  "products",
+  "finance",
+  "financing",
+  "credit",
+  "equipment",
+  "machinery",
+  "technology",
+  "knowledge",
+];
 
 const PIPELINE_SEGMENTS = [
   {
@@ -168,15 +191,59 @@ function clipText(value, length = 180) {
   return text.length > length ? `${text.slice(0, length)}...` : text;
 }
 
+function extractUrls(value) {
+  return String(value || "").match(/https?:\/\/[^\s)]+/gi) || [];
+}
+
+function stripUrls(value) {
+  return String(value || "").replace(/https?:\/\/[^\s)]+/gi, "").replace(/\s{2,}/g, " ").trim();
+}
+
+function extractCategoryParts(value) {
+  const raw = normalizeText(value).toLowerCase();
+  if (!raw) return { raw: "", thematic: "", service: "" };
+  const matchedService = [...SERVICE_PHRASES].sort((a, b) => b.length - a.length).find((phrase) => raw.endsWith(phrase));
+  if (!matchedService) return { raw, thematic: raw, service: "" };
+  const thematic = raw.slice(0, raw.length - matchedService.length).trim();
+  return {
+    raw,
+    thematic: thematic || raw,
+    service: matchedService,
+  };
+}
+
+function getNeedThemeSignals(need) {
+  const themes = [];
+  parseArray(need?.curated_need).forEach((item) => {
+    const parts = extractCategoryParts(item);
+    if (parts.thematic) themes.push(parts.thematic);
+  });
+  return uniq(themes);
+}
+
+function categoryFilterMatches(category, need) {
+  if (!need) return false;
+  const normalized = normalizeText(category).toLowerCase();
+  const curated = parseArray(need.curated_need);
+  if (SIX_M_LABELS.map((item) => item.toLowerCase()).includes(normalized)) {
+    return curated.some((item) => item.toLowerCase().includes(normalized));
+  }
+  return getNeedThemeSignals(need).includes(normalized) || curated.some((item) => item.toLowerCase() === normalized);
+}
+
 function buildNeedMatchProfile(need) {
   const categories = uniq(parseArray(need.curated_need).map((item) => item.toLowerCase()));
-  const categoryTokens = categories.flatMap((item) => tokenizeText(item, 3));
+  const categoryParts = categories.map((item) => extractCategoryParts(item));
+  const thematicAreas = uniq(categoryParts.map((item) => item.thematic).filter(Boolean));
+  const serviceTerms = uniq(categoryParts.map((item) => item.service).filter(Boolean));
+  const categoryTokens = thematicAreas.flatMap((item) => tokenizeText(item, 3));
   const problemTokens = tokenizeText(need.problem_statement, 5);
   const notesTokens = tokenizeText(need.curation_notes, 5);
   const geographyTokens = tokenizeText(`${need.state || ""} ${need.district || ""}`, 3);
-  const primaryTerms = uniq([...categoryTokens, ...problemTokens.slice(0, 8), ...notesTokens.slice(0, 4)]);
+  const serviceTokens = serviceTerms.flatMap((item) => tokenizeText(item, 3));
+  const primaryTerms = uniq([...categoryTokens, ...serviceTokens, ...problemTokens.slice(0, 8), ...notesTokens.slice(0, 4)]);
   const phrases = uniq(
-    categories
+    thematicAreas
       .filter((item) => item.includes(" "))
       .concat(
         normalizeText(need.problem_statement)
@@ -190,7 +257,11 @@ function buildNeedMatchProfile(need) {
 
   return {
     categories,
+    categoryParts,
+    thematicAreas,
+    serviceTerms,
     categoryTokens: uniq(categoryTokens),
+    serviceTokens: uniq(serviceTokens),
     problemTokens,
     notesTokens,
     geographyTokens,
@@ -315,7 +386,7 @@ function getOverviewFocusPayload() {
     if (activePipelines.length && !activePipelines.some((pipelineId) => pipelineMatchesNeed(pipelineId, need))) return false;
     if (activeCurators.length && !activeCurators.includes(need?.curator_id || "")) return false;
     if (activeStates.length && !activeStates.includes(normalizeText(need?.state))) return false;
-    if (activeCategories.length && !activeCategories.some((category) => parseArray(need?.curated_need).includes(category))) return false;
+    if (activeCategories.length && !activeCategories.some((category) => categoryFilterMatches(category, need))) return false;
     return true;
   });
 
@@ -372,35 +443,58 @@ function scoreOfferingMatch(need, profile, offering) {
 
   let score = 0;
   const reasons = [];
+  let thematicMatched = false;
+  let serviceMatched = false;
 
-  profile.categories.forEach((phrase) => {
+  profile.thematicAreas.forEach((phrase) => {
     if (joined.includes(phrase)) {
-      score += 10;
+      thematicMatched = true;
+      score += 18;
       reasons.push(phrase);
     }
   });
 
   profile.categoryTokens.forEach((token) => {
     if (tags.some((tag) => tag.includes(token))) {
-      score += 7;
+      thematicMatched = true;
+      score += 8;
       reasons.push(token);
     } else if (category.includes(token)) {
-      score += 6;
+      thematicMatched = true;
+      score += 7;
       reasons.push(token);
     } else if (name.includes(token) || solutionName.includes(token)) {
-      score += 5;
+      thematicMatched = true;
+      score += 6;
       reasons.push(token);
     } else if (about.includes(token)) {
-      score += 3;
+      thematicMatched = true;
+      score += 4;
+      reasons.push(token);
+    }
+  });
+
+  profile.serviceTerms.forEach((service) => {
+    if (joined.includes(service)) {
+      serviceMatched = true;
+      score += 10;
+      reasons.push(service);
+    }
+  });
+
+  profile.serviceTokens.forEach((token) => {
+    if (joined.includes(token)) {
+      serviceMatched = true;
+      score += 4;
       reasons.push(token);
     }
   });
 
   profile.problemTokens.slice(0, 8).forEach((token) => {
-    if (tags.some((tag) => tag.includes(token)) || name.includes(token) || solutionName.includes(token)) {
+    if (thematicMatched && (tags.some((tag) => tag.includes(token)) || name.includes(token) || solutionName.includes(token))) {
       score += 4;
       reasons.push(token);
-    } else if (about.includes(token)) {
+    } else if (thematicMatched && about.includes(token)) {
       score += 2;
       reasons.push(token);
     }
@@ -413,12 +507,15 @@ function scoreOfferingMatch(need, profile, offering) {
     }
   });
 
+  if (!thematicMatched) score -= 25;
+  if (profile.serviceTerms.length && !serviceMatched) score -= 12;
   if (!profile.categoryTokens.length && !profile.problemTokens.length) score += 1;
   if (!reasons.length) score -= 8;
-  if (profile.categoryTokens.length && !profile.categoryTokens.some((token) => joined.includes(token))) score -= 4;
 
   return {
     score,
+    thematicMatched,
+    serviceMatched,
     reasons: uniq(reasons).slice(0, 4),
   };
 }
@@ -447,6 +544,7 @@ class GreMisStore {
       state.data.options = [];
       state.data.needs = [];
       state.data.needUpdates = [];
+      state.matchCache.clear();
       return;
     }
 
@@ -468,6 +566,7 @@ class GreMisStore {
       curated_need: parseArray(need.curated_need),
     }));
     state.data.needUpdates = updates.data || [];
+    state.matchCache.clear();
   }
 
   async callAdmin(action, body = {}, requireAdmin = false) {
@@ -595,7 +694,7 @@ class GreMisStore {
     if (!client || !need) return [];
     const profile = buildNeedMatchProfile(need);
     const offeringSelect = "offering_id,solution_id,trader_id,offering_name,offering_category,tags,geographies,about_offering_text,contact_details,gre_link";
-    const searchTerms = uniq([...profile.categories, ...profile.phrases, ...profile.primaryTerms]).slice(0, 6);
+    const searchTerms = uniq([...profile.thematicAreas, ...profile.serviceTerms, ...profile.phrases, ...profile.primaryTerms]).slice(0, 8);
     const queries = [];
 
     if (searchTerms.length) {
@@ -666,10 +765,12 @@ class GreMisStore {
         return {
           ...enriched,
           matchScore: matchMeta.score,
+          thematicMatched: matchMeta.thematicMatched,
+          serviceMatched: matchMeta.serviceMatched,
           matchReasons: matchMeta.reasons,
         };
       })
-      .filter((item) => item.matchScore >= 6)
+      .filter((item) => item.thematicMatched && (profile.serviceTerms.length ? item.serviceMatched : true) && item.matchScore >= 12)
       .sort((a, b) => b.matchScore - a.matchScore);
   }
 }
@@ -686,6 +787,20 @@ function getDisplayNeeds() {
 
 function getNeedById(id) {
   return getDisplayNeeds().find((need) => need.id === id) || null;
+}
+
+function getNeedMatchCacheKey(need) {
+  if (!need) return "";
+  return [
+    need.id,
+    need.last_status_change_at,
+    need.updated_at,
+    parseArray(need.curated_need).join("|"),
+    normalizeText(need.problem_statement),
+    normalizeText(need.curation_notes),
+    need.state,
+    need.district,
+  ].join("::");
 }
 
 function getVisibleNeeds() {
@@ -794,19 +909,42 @@ function renderOverview() {
     "info",
   );
 
-  const categoryCounts = {};
-  needs.forEach((need) =>
+  const sixMCounts = Object.fromEntries(SIX_M_LABELS.map((label) => [label, 0]));
+  const themeCounts = {};
+  needs.forEach((need) => {
     parseArray(need.curated_need).forEach((item) => {
-      categoryCounts[item] = (categoryCounts[item] || 0) + 1;
-    }),
-  );
+      const lower = item.toLowerCase();
+      SIX_M_LABELS.forEach((label) => {
+        if (lower.includes(label.toLowerCase())) sixMCounts[label] += 1;
+      });
+    });
+    getNeedThemeSignals(need).forEach((theme) => {
+      themeCounts[theme] = (themeCounts[theme] || 0) + 1;
+    });
+  });
 
-  byId("categoryChart").innerHTML = topEntries(categoryCounts, 12)
-    .map(
-      ([label, value]) =>
-        `<button class="${isOverviewFocus("category", label) ? "active" : ""}" data-overview-kind="category" data-overview-id="${esc(label)}">${esc(label)} (${esc(value)})</button>`,
-    )
-    .join("");
+  byId("categoryChart").innerHTML = `
+    <div class="signal-section">
+      <p class="signal-heading">6M View</p>
+      <div class="tag-cloud">
+        ${SIX_M_LABELS.map(
+          (label) =>
+            `<button class="${isOverviewFocus("category", label) ? "active" : ""}" data-overview-kind="category" data-overview-id="${esc(label)}">${esc(label)} (${esc(sixMCounts[label] || 0)})</button>`,
+        ).join("")}
+      </div>
+    </div>
+    <div class="signal-section">
+      <p class="signal-heading">Most Common Problem Themes</p>
+      <div class="tag-cloud">
+        ${topEntries(themeCounts, 12)
+          .map(
+            ([label, value]) =>
+              `<button class="${isOverviewFocus("category", label) ? "active" : ""}" data-overview-kind="category" data-overview-id="${esc(label)}">${esc(label)} (${esc(value)})</button>`,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
 
   const focusPayload = getOverviewFocusPayload();
   const pageSize = 12;
@@ -927,6 +1065,8 @@ function renderNeedDetail() {
   }
 
   const curator = getCuratorById(need.curator_id);
+  const solutionLinks = extractUrls(need.curation_notes);
+  const noteText = stripUrls(need.curation_notes);
   const summaryBadges = [
     { label: need.status, tone: badgeTone(need.status) },
     { label: need.internal_status, tone: badgeTone(need.internal_status) },
@@ -986,7 +1126,22 @@ function renderNeedDetail() {
 
       <article class="detail-card detail-stack-card">
         <h4>Curation Notes</h4>
-        <p class="detail-note">${esc(need.curation_notes || "No curation notes have been recorded yet.")}</p>
+        ${noteText ? `<p class="detail-note">${esc(noteText)}</p>` : `<p class="detail-note">No curation notes have been recorded yet.</p>`}
+        ${
+          solutionLinks.length
+            ? `<div class="detail-links">
+                <p class="signal-heading">Solution Links Shared with Seeker</p>
+                <ol class="detail-link-list">
+                  ${solutionLinks
+                    .map(
+                      (link, index) =>
+                        `<li><a href="${esc(link)}" target="_blank" rel="noreferrer">Solution Link ${index + 1}</a></li>`,
+                    )
+                    .join("")}
+                </ol>
+              </div>`
+            : ""
+        }
       </article>
 
     </div>
@@ -1003,7 +1158,12 @@ async function renderMatches() {
   }
 
   matchesEl.innerHTML = `<div class="empty-state">Searching live GRE offerings and solution providers…</div>`;
-  const matches = await store.searchMatchesForNeed(need);
+  const cacheKey = getNeedMatchCacheKey(need);
+  let matches = state.matchCache.get(cacheKey);
+  if (!matches) {
+    matches = await store.searchMatchesForNeed(need);
+    state.matchCache.set(cacheKey, matches);
+  }
   const pageSize = 6;
   const totalPages = Math.max(1, Math.ceil(matches.length / pageSize));
   if (state.matchPage > totalPages) state.matchPage = totalPages;
@@ -1021,7 +1181,7 @@ async function renderMatches() {
                   <p class="eyebrow">${esc(match.offering_category || "GRE Offering")}</p>
                   <h4>${esc(match.offering_name || match.solution?.solution_name || "Unnamed match")}</h4>
                 </div>
-                <span class="status-pill match-score-pill">${esc(`Match ${match.matchScore}`)}</span>
+                <span class="status-pill match-score-pill">${esc(`Relevance Score ${match.matchScore}`)}</span>
               </div>
               <div class="tag-row">
                 ${parseArray(match.tags).slice(0, 5).map((tag) => `<span>${esc(tag)}</span>`).join("")}
@@ -1256,9 +1416,13 @@ function switchView(nextView) {
   state.view = nextView;
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.view === nextView));
   document.querySelectorAll(".view").forEach((section) => section.classList.toggle("active", section.id === `${nextView}View`));
+  if (nextView === "operations") {
+    renderMatches();
+  }
 }
 
-async function rerender() {
+async function rerender(options = {}) {
+  const { includeMatches = state.view === "operations" } = options;
   renderMetrics();
   renderOverview();
   renderFilters();
@@ -1273,15 +1437,24 @@ async function rerender() {
     if (headline) headline.textContent = "Admin sync workspace for approval and taxonomy maintenance";
     if (subline) subline.textContent = `${state.data.pendingNeeds.length} intake records and ${state.data.pendingUpdates.length} curator updates are waiting for review.`;
   }
-  await renderMatches();
+  if (includeMatches) {
+    await renderMatches();
+  }
 }
 
 async function refreshAll() {
-  await store.loadBaseData();
-  await store.loadAdminSnapshot().catch(() => {
-    state.data.pendingNeeds = [];
-    state.data.pendingUpdates = [];
-  });
+  await Promise.all([
+    store.loadBaseData(),
+    state.adminToken
+      ? store.loadAdminSnapshot().catch(() => {
+          state.data.pendingNeeds = [];
+          state.data.pendingUpdates = [];
+        })
+      : Promise.resolve().then(() => {
+          state.data.pendingNeeds = [];
+          state.data.pendingUpdates = [];
+        }),
+  ]);
   const displayNeeds = getDisplayNeeds();
   if (!displayNeeds.find((need) => need.id === state.selectedNeedId)) {
     state.selectedNeedId = displayNeeds[0]?.id || null;
@@ -1385,6 +1558,7 @@ function bindStaticEvents() {
   byId("refreshBtn")?.addEventListener("click", safeAsync(async () => {
     const isOverviewDashboard = Boolean(byId("overviewView"));
     resetDashboardSelections();
+    await rerender({ includeMatches: false });
     await refreshAll();
     toast(isOverviewDashboard ? "Dashboard refreshed and selections reset." : "Data refreshed.");
   }));

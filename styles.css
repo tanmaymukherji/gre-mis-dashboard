@@ -334,6 +334,36 @@ h2 { font-size: 1.35rem; }
   background: #2f6840;
   color: #fff;
 }
+.signal-section {
+  display: grid;
+  gap: 10px;
+}
+.signal-section + .signal-section {
+  margin-top: 14px;
+}
+.signal-heading {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.detail-links {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+.detail-link-list {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+}
+.detail-link-list a {
+  color: var(--green);
+  font-weight: 700;
+}
 
 .operations-grid {
   display: grid;
