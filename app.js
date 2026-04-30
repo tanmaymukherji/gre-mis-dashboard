@@ -12,8 +12,10 @@ const state = {
   overviewPage: 1,
   matchPage: 1,
   matchCache: new Map(),
+  mapGeocodeCache: new Map(),
   mapplsSdkLoaded: false,
   mapplsLoadPromise: null,
+  caseMapRequestToken: 0,
   caseMap: null,
   caseMapMarkers: [],
   activeMapGroupKey: "",
@@ -543,11 +545,70 @@ function getNeedMapLocationLabel(need) {
   return [normalizeText(need.district), normalizeText(need.state)].filter(Boolean).join(", ") || "Location pending";
 }
 
-function getNeedMapGroups(needs) {
+function getNeedMapQueries(need) {
+  const district = normalizeText(need?.district);
+  const stateName = normalizeText(need?.state);
+  const organization = normalizeText(need?.organization_name);
+  const queries = [
+    [district, stateName, "India"].filter(Boolean).join(", "),
+    [organization, district, stateName, "India"].filter(Boolean).join(", "),
+    [stateName, "India"].filter(Boolean).join(", "),
+  ];
+  return uniq(queries.filter(Boolean));
+}
+
+async function geocodeNeedForMap(need) {
+  const existingLat = parseCoordinate(need?.latitude);
+  const existingLng = parseCoordinate(need?.longitude);
+  if (existingLat !== null && existingLng !== null) {
+    return {
+      lat: existingLat,
+      lng: existingLng,
+      label: normalizeText(need?.geocoded_label) || getNeedMapLocationLabel(need),
+    };
+  }
+
+  const queries = getNeedMapQueries(need);
+  for (const query of queries) {
+    if (!state.mapGeocodeCache.has(query)) {
+      state.mapGeocodeCache.set(query, (async () => {
+        try {
+          const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`, {
+            headers: { Accept: "application/json" },
+          });
+          const data = await response.json().catch(() => null);
+          const match = Array.isArray(data) ? data[0] : null;
+          const lat = parseCoordinate(match?.lat);
+          const lng = parseCoordinate(match?.lon);
+          if (lat === null || lng === null) return null;
+          return {
+            lat,
+            lng,
+            label: normalizeText(match?.display_name) || query,
+          };
+        } catch (error) {
+          console.warn("Map geocode failed for", query, error);
+          return null;
+        }
+      })());
+    }
+    const point = await state.mapGeocodeCache.get(query);
+    if (point) return point;
+  }
+  return null;
+}
+
+async function getNeedMapGroups(needs) {
   const groups = new Map();
-  needs.forEach((need) => {
-    const lat = parseCoordinate(need.latitude);
-    const lng = parseCoordinate(need.longitude);
+  const resolvedNeeds = await Promise.all(
+    ensureList(needs).map(async (need) => ({
+      need,
+      point: await geocodeNeedForMap(need),
+    })),
+  );
+  resolvedNeeds.forEach(({ need, point }) => {
+    const lat = parseCoordinate(point?.lat);
+    const lng = parseCoordinate(point?.lng);
     if (lat === null || lng === null) return;
     const key = `${lat.toFixed(5)}|${lng.toFixed(5)}`;
     if (!groups.has(key)) {
@@ -555,7 +616,7 @@ function getNeedMapGroups(needs) {
         key,
         lat,
         lng,
-        label: getNeedMapLocationLabel(need),
+        label: normalizeText(point?.label) || getNeedMapLocationLabel(need),
         needs: [],
       });
     }
@@ -620,9 +681,13 @@ async function focusNeedFromMap(needId) {
 async function renderCaseMap(needs) {
   const mapCanvas = byId("categoryCasesMap");
   if (!mapCanvas) return;
-  const groups = getNeedMapGroups(needs);
+  const requestToken = Date.now();
+  state.caseMapRequestToken = requestToken;
+  mapCanvas.innerHTML = `<div class="case-map-empty">Mapping visible cases...</div>`;
+  const groups = await getNeedMapGroups(needs);
+  if (state.caseMapRequestToken !== requestToken) return;
   if (!groups.length) {
-    mapCanvas.innerHTML = `<div class="case-map-empty">Map will appear here once inbound needs have latitude and longitude.</div>`;
+    mapCanvas.innerHTML = `<div class="case-map-empty">No map points could be derived yet for the visible cases.</div>`;
     renderCaseMapLocationPanel(null);
     state.caseMap = null;
     state.caseMapMarkers = [];
@@ -630,6 +695,7 @@ async function renderCaseMap(needs) {
   }
 
   const sdkReady = await ensureMapplsSdk();
+  if (state.caseMapRequestToken !== requestToken) return;
   if (!sdkReady || !window.mappls) {
     mapCanvas.innerHTML = `<div class="case-map-empty">Mappls map is waiting for a valid SDK key in <code>config.js</code>.</div>`;
     renderCaseMapLocationPanel(null);
