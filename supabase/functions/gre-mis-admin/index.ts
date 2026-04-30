@@ -211,15 +211,6 @@ async function geocodeNeedLocation(input: {
   district?: string;
   state?: string;
 }) {
-  if (!mapplsAccessToken) {
-    return {
-      latitude: null,
-      longitude: null,
-      geocoded_label: "",
-      geocode_status: "mappls_key_missing",
-    };
-  }
-
   const query = [
     requireString(input.organization_name),
     requireString(input.district),
@@ -236,29 +227,68 @@ async function geocodeNeedLocation(input: {
     };
   }
 
+  const parseCoordinate = (value: unknown) => {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const fallbackGeocode = async () => {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "gre-mis-dashboard/1.0",
+        },
+      },
+    );
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      return {
+        latitude: null,
+        longitude: null,
+        geocoded_label: "",
+        geocode_status: "fallback_search_failed",
+      };
+    }
+    const first = Array.isArray(data) ? data[0] : null;
+    const latitude = parseCoordinate(first?.lat);
+    const longitude = parseCoordinate(first?.lon);
+    const label = requireString(first?.display_name || query);
+    return {
+      latitude,
+      longitude,
+      geocoded_label: label,
+      geocode_status: latitude !== null && longitude !== null ? "ready_fallback" : "fallback_not_found",
+    };
+  };
+
+  if (!mapplsAccessToken) {
+    return await fallbackGeocode();
+  }
+
   const response = await fetch(
     `https://search.mappls.com/search/places/textsearch/json?query=${encodeURIComponent(query)}&region=IND&access_token=${encodeURIComponent(mapplsAccessToken)}`,
   );
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return {
-      latitude: null,
-      longitude: null,
-      geocoded_label: "",
-      geocode_status: "search_failed",
-    };
+    return await fallbackGeocode();
   }
 
   const candidates = data?.suggestedLocations || data?.copResults || [];
   const first = Array.isArray(candidates) ? candidates[0] : candidates;
-  const latitude = typeof first?.latitude === "number" ? first.latitude : null;
-  const longitude = typeof first?.longitude === "number" ? first.longitude : null;
+  const latitude = parseCoordinate(first?.latitude);
+  const longitude = parseCoordinate(first?.longitude);
   const label = requireString(first?.placeAddress || first?.formattedAddress || query);
+  if (latitude === null || longitude === null) {
+    return await fallbackGeocode();
+  }
   return {
     latitude,
     longitude,
     geocoded_label: label,
-    geocode_status: latitude !== null && longitude !== null ? "ready" : "not_found",
+    geocode_status: "ready",
   };
 }
 
