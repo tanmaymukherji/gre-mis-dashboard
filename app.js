@@ -637,14 +637,18 @@ function renderCaseMapLocationPanel(group) {
   state.activeMapGroupKey = group.key;
   panel.classList.remove("hidden");
   panel.innerHTML = `
-    <div class="pipeline-drilldown-head">
-      <div>
-        <p class="eyebrow">Map Location</p>
-        <h4>${esc(group.label)}</h4>
+    <div class="case-map-location-panel-shell">
+      <div class="case-map-location-panel-head">
+        <div>
+          <p class="eyebrow">Map Summary</p>
+          <h4>${esc(group.label)}</h4>
+        </div>
+        <div class="case-map-location-panel-actions">
+          <span class="status-pill info">${esc(group.needs.length)} cases</span>
+          <button class="btn btn-secondary btn-small" type="button" data-close-map-panel="true">Close</button>
+        </div>
       </div>
-      <span class="status-pill info">${esc(group.needs.length)} cases</span>
-    </div>
-    <div class="case-map-location-grid">
+      <div class="case-map-location-grid">
       ${group.needs
         .map(
           (need) => `
@@ -663,8 +667,10 @@ function renderCaseMapLocationPanel(group) {
           `,
         )
         .join("")}
+      </div>
     </div>
   `;
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 async function focusNeedFromMap(needId) {
@@ -1443,7 +1449,10 @@ function renderOverview() {
           ? visibleCards.join("")
           : `<div class="empty-state">${esc(focusPayload.emptyText || "No cases are currently sitting in this selection.")}</div>`}
       </div>
-      <div id="categoryCasesMap" class="pipeline-drilldown-map"></div>
+      <div class="pipeline-drilldown-map-stack">
+        <div id="categoryCasesMap" class="pipeline-drilldown-map"></div>
+        <div id="caseMapLocationPanel" class="case-map-location-panel hidden"></div>
+      </div>
     </div>
     ${
       focusPayload.cards.length
@@ -2027,7 +2036,12 @@ function bindStaticEvents() {
     await renderMatches();
   });
 
-  byId("caseMapLocationPanel")?.addEventListener("click", async (event) => {
+  byId("pipelineDrilldown")?.addEventListener("click", async (event) => {
+    const closeButton = event.target.closest("[data-close-map-panel]");
+    if (closeButton) {
+      renderCaseMapLocationPanel(null);
+      return;
+    }
     const button = event.target.closest("[data-open-need-id]");
     if (!button) return;
     await focusNeedFromMap(button.dataset.openNeedId);

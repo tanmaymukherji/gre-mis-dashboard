@@ -217,6 +217,10 @@ h2 { font-size: 1.35rem; }
   gap: 16px;
   align-items: start;
 }
+.pipeline-drilldown-map-stack {
+  display: grid;
+  gap: 14px;
+}
 .pipeline-drilldown-map {
   min-height: 520px;
   border: 1px solid var(--line);
@@ -237,17 +241,38 @@ h2 { font-size: 1.35rem; }
   color: var(--muted);
 }
 .case-map-location-panel {
-  margin-top: 14px;
   display: grid;
   gap: 10px;
 }
 .case-map-location-panel.hidden {
   display: none;
 }
+.case-map-location-panel-shell {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff, #f4f8f1);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  max-height: 360px;
+  overflow: auto;
+}
+.case-map-location-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: start;
+}
+.case-map-location-panel-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
 .case-map-location-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: 1fr;
 }
 .case-map-location-card {
   border: 1px solid var(--line);
@@ -719,6 +744,7 @@ textarea { resize: vertical; }
   .panel-large,
   .panel-wide { grid-column: span 2; }
   .pipeline-drilldown-split { grid-template-columns: 1fr; }
+  .case-map-location-panel-shell { max-height: 320px; }
 }
 
 @media (max-width: 920px) {
