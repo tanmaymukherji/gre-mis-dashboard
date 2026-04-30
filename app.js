@@ -290,6 +290,25 @@ async function parseInboundWorkbookFile(file) {
   })).filter((row) => row.request_id);
 }
 
+function downloadBase64Workbook(download) {
+  if (!download?.base64 || !download?.fileName) throw new Error("Download payload is missing.");
+  const mimeType = download.mimeType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  const binary = atob(download.base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const blob = new Blob([bytes], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = download.fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function formatDate(value) {
   if (!value) return "Not set";
   const date = new Date(value);
@@ -1236,6 +1255,18 @@ class GreMisStore {
 
   async importInboundWorkbook(fileName, rows, aiProvider) {
     return this.callAdmin("importInboundWorkbook", { fileName, rows, aiProvider }, true);
+  }
+
+  async syncGreLiveInbounds(aiProvider) {
+    return this.callAdmin("syncGreLiveInbounds", { aiProvider }, true);
+  }
+
+  async syncGreChatbotData() {
+    return this.callAdmin("syncGreChatbotData", {}, true);
+  }
+
+  async downloadGreChatbotReport(reportKind) {
+    return this.callAdmin("downloadGreChatbotReport", { reportKind }, true);
   }
 
   async refreshNeedIntelligence(aiProvider) {
@@ -2220,6 +2251,23 @@ function bindStaticEvents() {
     toast("Inbound workbook synced.");
   }));
 
+  byId("syncGreInboundsBtn")?.addEventListener("click", safeAsync(async () => {
+    if (!state.adminToken) {
+      toast("Login as admin first.");
+      return;
+    }
+    const syncStatus = byId("syncStatus");
+    const provider = byId("aiProviderSelect")?.value || "openrouter";
+    if (syncStatus) syncStatus.textContent = "Fetching the latest inbound report from the GRE website...";
+    const result = await store.syncGreLiveInbounds(provider);
+    await refreshAll();
+    if (syncStatus) {
+      syncStatus.textContent =
+        `Live GRE sync complete. Imported ${result.insertedCount || 0} new needs, updated ${result.updatedCount || 0} existing needs, and refreshed AI for ${result.aiUpdatedCount || 0} needs.`;
+    }
+    toast("Latest GRE inbound data synced.");
+  }));
+
   byId("refreshAiBtn")?.addEventListener("click", safeAsync(async () => {
     if (!state.adminToken) {
       toast("Login as admin first.");
@@ -2232,6 +2280,45 @@ function bindStaticEvents() {
     await refreshAll();
     if (syncStatus) syncStatus.textContent = result.message || "AI need intelligence refreshed.";
     toast("AI signals refreshed.");
+  }));
+
+  byId("syncGreChatbotBtn")?.addEventListener("click", safeAsync(async () => {
+    if (!state.adminToken) {
+      toast("Login as admin first.");
+      return;
+    }
+    const statusEl = byId("chatbotSyncStatus");
+    if (statusEl) statusEl.textContent = "Fetching live trader and solution exports from GRE and updating the chatbot dataset...";
+    const result = await store.syncGreChatbotData();
+    if (statusEl) {
+      statusEl.textContent =
+        `Chatbot dataset refreshed. Traders: ${result.summary?.traders || 0}, solutions: ${result.summary?.solutions || 0}, offerings: ${result.summary?.offerings || 0}.`;
+    }
+    toast("GRE Chatbot dataset refreshed.");
+  }));
+
+  byId("downloadGreTraderBtn")?.addEventListener("click", safeAsync(async () => {
+    if (!state.adminToken) {
+      toast("Login as admin first.");
+      return;
+    }
+    const statusEl = byId("chatbotSyncStatus");
+    if (statusEl) statusEl.textContent = "Downloading live GRE trader workbook...";
+    const result = await store.downloadGreChatbotReport("trader");
+    downloadBase64Workbook(result.download);
+    if (statusEl) statusEl.textContent = `Downloaded ${result.download?.fileName || "trader workbook"}.`;
+  }));
+
+  byId("downloadGreSolutionBtn")?.addEventListener("click", safeAsync(async () => {
+    if (!state.adminToken) {
+      toast("Login as admin first.");
+      return;
+    }
+    const statusEl = byId("chatbotSyncStatus");
+    if (statusEl) statusEl.textContent = "Downloading live GRE solution workbook...";
+    const result = await store.downloadGreChatbotReport("solution");
+    downloadBase64Workbook(result.download);
+    if (statusEl) statusEl.textContent = `Downloaded ${result.download?.fileName || "solution workbook"}.`;
   }));
 
   byId("actionWorkbench")?.addEventListener("click", safeAsync(async (event) => {

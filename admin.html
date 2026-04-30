@@ -82,7 +82,7 @@
             <div class="panel-head">
               <div>
                 <p class="eyebrow">Inbound Sync</p>
-                <h3>Upload Website Workbook</h3>
+                <h3>Inbound Intake</h3>
               </div>
             </div>
             <div class="taxonomy-grid">
@@ -99,9 +99,25 @@
                 </select>
               </label>
               <button id="uploadInboundBtn" class="btn btn-primary">Upload and Sync</button>
+              <button id="syncGreInboundsBtn" class="btn btn-secondary">Sync Latest from GRE</button>
               <button id="refreshAiBtn" class="btn btn-secondary">Refresh AI Signals</button>
             </div>
             <p id="syncStatus" class="helper-text">Uploads add new inbounds, update changed rows for existing request IDs, and refresh AI need intelligence.</p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">GRE Chatbot Data</p>
+                <h3>Supplier and Solution Exports</h3>
+              </div>
+            </div>
+            <div class="taxonomy-grid">
+              <button id="syncGreChatbotBtn" class="btn btn-primary">Refresh Chatbot Dataset</button>
+              <button id="downloadGreTraderBtn" class="btn btn-secondary">Download Trader Data</button>
+              <button id="downloadGreSolutionBtn" class="btn btn-secondary">Download Solution Data</button>
+            </div>
+            <p id="chatbotSyncStatus" class="helper-text">Fetch the live GRE trader and solution exports, then update the GRE Chatbot Supabase dataset.</p>
           </section>
 
           <section class="panel">

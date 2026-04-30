@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import * as XLSX from "npm:xlsx@0.18.5";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,6 +25,16 @@ const defaultOpenRouterModel = Deno.env.get("GRE_MIS_OPENROUTER_MODEL") ?? "open
 const defaultGeminiModel = Deno.env.get("GRE_MIS_GEMINI_MODEL") ?? "gemini-2.0-flash";
 const defaultDeepSeekModel = Deno.env.get("GRE_MIS_DEEPSEEK_MODEL") ?? "deepseek-chat";
 const mapplsAccessToken = Deno.env.get("MAPPLS_ACCESS_TOKEN") ?? Deno.env.get("GRE_MIS_MAPPLS_ACCESS_TOKEN") ?? "";
+const greLoginBaseUrl = Deno.env.get("GRE_LOGIN_BASE_URL") ?? "https://login.platformcommons.org/gateway";
+const greSiteOrigin = Deno.env.get("GRE_SITE_ORIGIN") ?? "https://greenruraleconomy.in";
+const greMasterLogin = Deno.env.get("GRE_MASTER_LOGIN") ?? "";
+const greMasterTenant = Deno.env.get("GRE_MASTER_TENANT") ?? "green_rural_economy";
+const greMasterPassword = Deno.env.get("GRE_MASTER_PASSWORD") ?? "";
+const greMarketId = Deno.env.get("GRE_MARKET_ID") ?? "5";
+const greInboundReportName = Deno.env.get("GRE_INBOUND_REPORT_NAME") ?? "MARKIFY_GRE.REQUEST_DETAILS_REPORT";
+const greTraderReportName = Deno.env.get("GRE_TRADER_REPORT_NAME") ?? "MARKIFY_REPORT.MARKET_TRADER_BASIC_DETAILS";
+const greSolutionReportName =
+  Deno.env.get("GRE_SOLUTION_REPORT_NAME") ?? "MARKIFY_REPORT.GRE_SOLUTION_WITH_OFFERINGS_DETAILS";
 
 const adminClient = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false },
@@ -66,6 +77,156 @@ function parseNumber(value: unknown, fallback = 0) {
   if (!normalized) return fallback;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeCell(value: unknown) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text.length ? text : null;
+}
+
+function stripHtml(html: string | null) {
+  if (!html) return "";
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function splitLooseList(value: string | null, separators = [",", ";", "\n"]) {
+  if (!value) return [];
+  let working = value;
+  separators.forEach((separator) => {
+    working = working.split(separator).join("|");
+  });
+  return uniqueStrings(
+    working
+      .split("|")
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  );
+}
+
+function splitGeographies(value: string | null) {
+  if (!value) return [];
+  if (value.includes(";") || value.includes("\n") || value.includes("|")) {
+    return splitLooseList(value, [";", "\n", "|"]);
+  }
+  return [value.trim()].filter(Boolean);
+}
+
+function buildSearchDocument(parts: Array<string | null | string[]>) {
+  return parts
+    .flatMap((part) => Array.isArray(part) ? part : [part])
+    .filter(Boolean)
+    .join(" | ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function chunkArray<T>(items: T[], size = 250) {
+  const out: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    out.push(items.slice(index, index + size));
+  }
+  return out;
+}
+
+function parseWorkbookDate(value: unknown) {
+  const text = requireString(value);
+  if (!text) return null;
+  const parts = text.match(/^(\d{1,2})-(\d{1,2})-(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (parts) {
+    const [, day, month, year, hour = "0", minute = "0", second = "0"] = parts;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second))).toISOString();
+  }
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function readWorkbookRows(buffer: ArrayBuffer) {
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const firstSheet = workbook.SheetNames[0];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[firstSheet], {
+    defval: "",
+    raw: false,
+  });
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function createWorkbookDownloadPayload(buffer: ArrayBuffer, fileName: string) {
+  return {
+    fileName,
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    base64: bytesToBase64(new Uint8Array(buffer)),
+  };
+}
+
+async function loginToGre() {
+  if (!greMasterLogin || !greMasterPassword || !greMasterTenant) {
+    throw new Error("GRE master credentials are not configured in Supabase secrets.");
+  }
+
+  const response = await fetch(`${greLoginBaseUrl}/commons-iam-service/api/v1/obo/cross/login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: greSiteOrigin,
+      Referer: `${greSiteOrigin}/`,
+    },
+    body: JSON.stringify({
+      userLogin: greMasterLogin,
+      tenantLogin: greMasterTenant,
+      password: greMasterPassword,
+    }),
+  });
+  const data = await response.json().catch(() => null);
+  const sessionId = requireString(data?.sessionId);
+  if (!response.ok || !sessionId) {
+    throw new Error(data?.error?.message || data?.message || "GRE login failed.");
+  }
+  return sessionId;
+}
+
+async function fetchGreReportWorkbook(reportName: string, limitRowCount: number, filePrefix: string) {
+  const sessionId = await loginToGre();
+  const params = `MARKET_ID=${greMarketId}--LIMIT_OFFSET=0--LIMIT_ROW_COUNT=${limitRowCount}`;
+  const response = await fetch(
+    `${greLoginBaseUrl}/commons-report-service/api/v1/datasets/name/${encodeURIComponent(reportName)}/execute/download?fileType=EXCEL&param=${encodeURIComponent(params)}`,
+    {
+      headers: {
+        "x-sessionid": sessionId,
+        Accept: "application/octet-stream, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, */*",
+        Origin: greSiteOrigin,
+        Referer: `${greSiteOrigin}/`,
+      },
+    },
+  );
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    throw new Error(message || `GRE report download failed for ${reportName}.`);
+  }
+  const buffer = await response.arrayBuffer();
+  return {
+    buffer,
+    fileName: `${filePrefix}_${Date.now()}.xlsx`,
+  };
 }
 
 function stableRowSignature(value: unknown) {
@@ -488,6 +649,245 @@ function buildNeedNotes(curationCallDetails: string, solutionsShared: string) {
     .trim();
 }
 
+function parseGreInboundWorkbookRows(buffer: ArrayBuffer) {
+  return readWorkbookRows(buffer)
+    .map((row) => ({
+      request_id: requireString(row["Request Id"]),
+      organization_name: requireString(row["Seeker Organisation"]),
+      website: requireString(row.Website),
+      contact_person: requireString(row["Contact Person"]),
+      designation: requireString(row.Designation),
+      seeker_phone: requireString(row["Phone Number"]),
+      seeker_email: requireString(row.Email).toLowerCase(),
+      requested_on: parseWorkbookDate(row["Requested On"]),
+      problem_statement: requireString(row.Request),
+      state: requireString(row["Solution Needed in State"]),
+      district: requireString(row["Solution Needed in District"]),
+      status: requireString(row.Status),
+      internal_status: requireString(row["Internal Status"]),
+      curator_name: requireString(row["Curator Assigned"]),
+      curation_call_date: parseWorkbookDate(row["Curation Call Date"])?.slice(0, 10) || null,
+      curation_age_days: parseNumber(row["Curation Age"], 0),
+      curation_call_details: requireString(row["Curation Call Details"]),
+      curated_need: asStringArray(String(row["Curated Need of Service Seeker"] || "").replaceAll(",", ";")),
+      demand_broadcast_needed: parseBoolean(row["Demand Broadcast Needed"]),
+      solutions_shared_count: parseNumber(row["Solutions Shared Count"], 0),
+      solutions_shared: requireString(row["Solutions Shared"]),
+      invited_providers_count: parseNumber(row["Invited Providers Count"], 0),
+      invited_providers: requireString(row["Invited Providers"]),
+    }))
+    .filter((row) => row.request_id);
+}
+
+function normalizeTraderRowForChatbot(row: Record<string, unknown>) {
+  return {
+    trader_id: String(row.TraderId || "").trim(),
+    trader_name: normalizeCell(row.TraderName),
+    organisation_name: normalizeCell(row.TraderOrganisation),
+    mobile: normalizeCell(row.TraderMobile),
+    email: normalizeCell(row.TraderMail),
+    poc_name: normalizeCell(row.TraderPOC),
+    tenant_id: normalizeCell(row.TraderTenantId),
+    profile_id: normalizeCell(row.TraderProfileId),
+    description: normalizeCell(row.TraderDescription),
+    short_description: normalizeCell(row.TraderShortDescription),
+    tagline: normalizeCell(row.TraderTagLine),
+    website: normalizeCell(row.TraderWebsite),
+    created_at_source: normalizeCell(row.TraderCreatedDate),
+    association_status: normalizeCell(row.TraderAssociationStatus),
+    raw_payload: row,
+  };
+}
+
+function normalizeSolutionRowForChatbot(row: Record<string, unknown>) {
+  return {
+    solution_id: String(row.SolutionId || "").trim(),
+    trader_id: normalizeCell(row.TraderId),
+    solution_name: normalizeCell(row.SolutionName),
+    solution_status: normalizeCell(row.SolutionStatus),
+    publish_status: normalizeCell(row.SolutionPublishStatus),
+    created_at_source: normalizeCell(row.SolutionCreationDate),
+    about_solution_html: normalizeCell(row.AboutSolution),
+    about_solution_text: stripHtml(normalizeCell(row.AboutSolution)),
+    solution_image_url: normalizeCell(row.SolutionImage),
+    raw_payload: row,
+  };
+}
+
+function normalizeOfferingRowForChatbot(row: Record<string, unknown>) {
+  const aboutOfferingHtml = normalizeCell(row.AboutOffering);
+  const trainerDetailsHtml = normalizeCell(row["Trainer Details"]);
+  const valuechains = splitLooseList(normalizeCell(row.Valuechains));
+  const applications = splitLooseList(normalizeCell(row.Applications));
+  const tags = splitLooseList(normalizeCell(row.Tags));
+  const languages = splitLooseList(normalizeCell(row.Languages));
+  const geographiesRaw = normalizeCell(row.Geographies);
+  const geographies = splitGeographies(geographiesRaw);
+
+  return {
+    offering_id: String(row.OfferingId || "").trim().replace(/\.0$/, ""),
+    solution_id: normalizeCell(row.SolutionId),
+    trader_id: normalizeCell(row.TraderId),
+    offering_name: normalizeCell(row.OfferingName),
+    publish_status: normalizeCell(row.OfferingPublishStatus),
+    created_at_source: normalizeCell(row.OfferingCreationDate),
+    offering_category: normalizeCell(row.OfferingCategory),
+    offering_group: normalizeCell(row.OfferingGroup),
+    offering_type: normalizeCell(row.OfferingType),
+    domain_6m: normalizeCell(row["6M"]),
+    primary_valuechain_id: normalizeCell(row.PrimaryValuechainId),
+    primary_valuechain: normalizeCell(row.PrimaryValuechain),
+    primary_application_id: normalizeCell(row.PrimaryApplicationId),
+    primary_application: normalizeCell(row.PrimaryApplication),
+    valuechains,
+    applications,
+    tags,
+    languages,
+    geographies,
+    geographies_raw: geographiesRaw,
+    about_offering_html: aboutOfferingHtml,
+    about_offering_text: stripHtml(aboutOfferingHtml),
+    audience: normalizeCell(row["Who Can avail it"]),
+    trainer_name: normalizeCell(row["Trainer Name"]),
+    trainer_email: normalizeCell(row["Trainer Email Address"]),
+    trainer_phone: normalizeCell(row["Trainer Phone Number"]),
+    trainer_details_html: trainerDetailsHtml,
+    trainer_details_text: stripHtml(trainerDetailsHtml),
+    duration: normalizeCell(row.Duration),
+    prerequisites: normalizeCell(row["Prerequisites - Participants and Training"]),
+    service_cost: normalizeCell(row["Cost (Service)"]),
+    support_post_service: normalizeCell(row["Support post Service"]),
+    support_post_service_cost: normalizeCell(row["Support post Service Cost"]),
+    delivery_mode: normalizeCell(row["Is it offered - Online or Offline"]),
+    certification_offered: normalizeCell(row["Certification Offered"]),
+    cost_remarks: normalizeCell(row["Remarks on Cost"]),
+    location_availability: normalizeCell(row["Location Availability"]),
+    service_brochure_url: normalizeCell(row["Service offering Brochure"]),
+    grade_capacity: normalizeCell(row["Grade/Capacity"]),
+    product_cost: normalizeCell(row["Cost (Product)"]),
+    lead_time: normalizeCell(row["Lead Time"]),
+    support_details: normalizeCell(row.Support),
+    product_brochure_url: normalizeCell(row["Product Brochure"]),
+    knowledge_content_url: normalizeCell(row["Knowledge Offering Content"]),
+    contact_details: normalizeCell(row["Contact Details"]),
+    gre_link: normalizeCell(row["Offering Link on GRE"]),
+    search_document: buildSearchDocument([
+      normalizeCell(row.SolutionName),
+      normalizeCell(row.OfferingName),
+      normalizeCell(row.OfferingCategory),
+      normalizeCell(row.OfferingGroup),
+      normalizeCell(row.OfferingType),
+      normalizeCell(row["6M"]),
+      normalizeCell(row.PrimaryValuechain),
+      normalizeCell(row.PrimaryApplication),
+      valuechains,
+      applications,
+      tags,
+      languages,
+      geographies,
+      stripHtml(normalizeCell(row.AboutSolution)),
+      stripHtml(aboutOfferingHtml),
+      normalizeCell(row.TraderOrganisation),
+    ]),
+    raw_payload: row,
+  };
+}
+
+function dedupeRowsById<T extends Record<string, unknown>>(rows: T[], key: keyof T) {
+  const map = new Map<string, T>();
+  rows.forEach((row) => {
+    const id = String(row[key] ?? "").trim();
+    if (id) map.set(id, row);
+  });
+  return [...map.values()];
+}
+
+function buildChatbotImportBundle(solutionBuffer: ArrayBuffer, traderBuffer: ArrayBuffer) {
+  const solutionRows = readWorkbookRows(solutionBuffer);
+  const traderRows = readWorkbookRows(traderBuffer);
+  return {
+    traders: dedupeRowsById(traderRows.map(normalizeTraderRowForChatbot), "trader_id"),
+    solutions: dedupeRowsById(solutionRows.map(normalizeSolutionRowForChatbot), "solution_id"),
+    offerings: dedupeRowsById(solutionRows.map(normalizeOfferingRowForChatbot), "offering_id"),
+    stats: {
+      solutionRows: solutionRows.length,
+      traderRows: traderRows.length,
+    },
+  };
+}
+
+async function applyChatbotImportBundle(
+  bundle: {
+    traders: Record<string, unknown>[];
+    solutions: Record<string, unknown>[];
+    offerings: Record<string, unknown>[];
+    stats: { solutionRows: number; traderRows: number };
+  },
+  fileNames: { solutionFileName: string; traderFileName: string },
+) {
+  const { data: importRow, error: importError } = await adminClient
+    .from("data_imports")
+    .insert({
+      solution_file_name: fileNames.solutionFileName,
+      trader_file_name: fileNames.traderFileName,
+      status: "running",
+      source_solution_rows: bundle.stats.solutionRows,
+      source_trader_rows: bundle.stats.traderRows,
+    })
+    .select("id")
+    .single();
+  if (importError) throw new Error(importError.message);
+
+  const importId = importRow.id;
+
+  try {
+    for (const rows of chunkArray(bundle.traders)) {
+      const { error } = await adminClient.from("traders").upsert(rows, { onConflict: "trader_id" });
+      if (error) throw new Error(error.message);
+    }
+
+    for (const rows of chunkArray(bundle.solutions)) {
+      const { error } = await adminClient.from("solutions").upsert(rows, { onConflict: "solution_id" });
+      if (error) throw new Error(error.message);
+    }
+
+    for (const rows of chunkArray(bundle.offerings)) {
+      const rowsWithImport = rows.map((row) => ({ ...row, last_import_id: importId }));
+      const { error } = await adminClient.from("offerings").upsert(rowsWithImport, { onConflict: "offering_id" });
+      if (error) throw new Error(error.message);
+    }
+
+    const { error: completeError } = await adminClient
+      .from("data_imports")
+      .update({
+        status: "completed",
+        inserted_traders: bundle.traders.length,
+        inserted_solutions: bundle.solutions.length,
+        inserted_offerings: bundle.offerings.length,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", importId);
+    if (completeError) throw new Error(completeError.message);
+
+    return {
+      importId,
+      traders: bundle.traders.length,
+      solutions: bundle.solutions.length,
+      offerings: bundle.offerings.length,
+    };
+  } catch (error) {
+    await adminClient
+      .from("data_imports")
+      .update({
+        status: "failed",
+        completed_at: new Date().toISOString(),
+        error_message: error instanceof Error ? error.message : "Unknown import error",
+      })
+      .eq("id", importId);
+    throw error;
+  }
+}
+
 async function normalizeInboundRow(row: Record<string, unknown>, curatorId: string | null, fileName: string) {
   const requestId = requireString(row.request_id);
   const problemStatement = requireString(row.problem_statement);
@@ -627,6 +1027,57 @@ async function importInboundWorkbook(rowsInput: unknown, fileName: string, actor
     updatedCount: toUpdate.length,
     aiUpdatedCount,
   };
+}
+
+async function syncGreLiveInbounds(actorEmail: string, provider: string) {
+  const report = await fetchGreReportWorkbook(greInboundReportName, 5000, "request_details_report");
+  const rows = parseGreInboundWorkbookRows(report.buffer);
+  const summary = await importInboundWorkbook(rows, report.fileName, actorEmail, provider);
+  return {
+    ...summary,
+    downloadedFileName: report.fileName,
+  };
+}
+
+async function syncGreChatbotData() {
+  const [traderReport, solutionReport] = await Promise.all([
+    fetchGreReportWorkbook(greTraderReportName, 1000, "trader_data"),
+    fetchGreReportWorkbook(greSolutionReportName, 5000, "solution_data"),
+  ]);
+  const bundle = buildChatbotImportBundle(solutionReport.buffer, traderReport.buffer);
+  const summary = await applyChatbotImportBundle(bundle, {
+    solutionFileName: solutionReport.fileName,
+    traderFileName: traderReport.fileName,
+  });
+  return {
+    ok: true,
+    summary,
+    files: {
+      trader: { fileName: traderReport.fileName },
+      solution: { fileName: solutionReport.fileName },
+    },
+  };
+}
+
+async function downloadGreChatbotReport(reportKind: string) {
+  const normalized = requireString(reportKind).toLowerCase();
+  if (normalized === "trader") {
+    const report = await fetchGreReportWorkbook(greTraderReportName, 1000, "trader_data");
+    return {
+      ok: true,
+      kind: "trader",
+      download: await createWorkbookDownloadPayload(report.buffer, report.fileName),
+    };
+  }
+  if (normalized === "solution") {
+    const report = await fetchGreReportWorkbook(greSolutionReportName, 5000, "solution_data");
+    return {
+      ok: true,
+      kind: "solution",
+      download: await createWorkbookDownloadPayload(report.buffer, report.fileName),
+    };
+  }
+  throw new Error("Unsupported GRE chatbot report kind.");
 }
 
 async function refreshNeedIntelligence(actorEmail: string, provider: string) {
@@ -999,6 +1450,18 @@ Deno.serve(async (req) => {
       return jsonResponse(
         await importInboundWorkbook(payload.rows, requireString(payload.fileName) || "GRE inbound workbook", actorEmail, requireString(payload.aiProvider) || defaultAiProvider),
       );
+    }
+
+    if (action === "syncGreLiveInbounds") {
+      return jsonResponse(await syncGreLiveInbounds(actorEmail, requireString(payload.aiProvider) || defaultAiProvider));
+    }
+
+    if (action === "syncGreChatbotData") {
+      return jsonResponse(await syncGreChatbotData());
+    }
+
+    if (action === "downloadGreChatbotReport") {
+      return jsonResponse(await downloadGreChatbotReport(requireString(payload.reportKind)));
     }
 
     if (action === "refreshNeedIntelligence") {
