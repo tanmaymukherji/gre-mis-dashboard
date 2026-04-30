@@ -46,6 +46,30 @@ const MATCH_STOPWORDS = new Set([
 ]);
 
 const SIX_M_LABELS = ["Manpower", "Method", "Machine", "Material", "Market", "Money"];
+const GENERIC_THEMATIC_TERMS = new Set([
+  "infrastructure",
+  "technology",
+  "vendor",
+  "business development",
+  "business consultation",
+  "business mentoring",
+  "branding",
+  "connect collaborate",
+  "capacity building",
+  "training",
+  "finance",
+  "funding",
+  "investments",
+  "packaging",
+]);
+const SIX_M_RULES = [
+  { label: "Manpower", patterns: ["training", "capacity building"] },
+  { label: "Method", patterns: ["consulting", "consultancy", "business consultation", "mentoring", "business mentoring", "technology transfer", "technology", "video", "videos", "manual", "manuals", "sop", "sops", "blog", "blogs", "connect collaborate"] },
+  { label: "Machine", patterns: ["machinery", "machine", "plant setup"] },
+  { label: "Material", patterns: ["raw material", "raw materials", "material supply"] },
+  { label: "Market", patterns: ["products bought", "market support", "market reports", "market report", "business development", "branding", "packaging"] },
+  { label: "Money", patterns: ["financial support", "finance", "funding", "investment", "investments", "credit"] },
+];
 const SERVICE_PHRASES = [
   "market linkage",
   "capacity building",
@@ -199,6 +223,56 @@ function stripUrls(value) {
   return String(value || "").replace(/https?:\/\/[^\s)]+/gi, "").replace(/\s{2,}/g, " ").trim();
 }
 
+function extractSharedSolutionHints(value) {
+  const text = normalizeText(value);
+  if (!text) return { phrases: [], ids: { offeringIds: [], solutionIds: [], traderIds: [] } };
+  const urls = extractUrls(text);
+  const ids = { offeringIds: [], solutionIds: [], traderIds: [] };
+
+  urls.forEach((url) => {
+    const offeringId = url.match(/[?&]productSkuId=(\d+)/i)?.[1];
+    const solutionId = url.match(/[?&]solutionId=(\d+)/i)?.[1];
+    const traderId = url.match(/[?&]traderId=(\d+)/i)?.[1];
+    if (offeringId) ids.offeringIds.push(offeringId);
+    if (solutionId) ids.solutionIds.push(solutionId);
+    if (traderId) ids.traderIds.push(traderId);
+  });
+
+  const phrases = [];
+  text.split(/\n+/).forEach((line) => {
+    const cleaned = line.replace(/https?:\/\/[^\s)]+/gi, "").trim();
+    const parts = cleaned.split(":").map((item) => normalizeText(item));
+    if (parts.length >= 2 && parts[1]) {
+      phrases.push(parts[1].toLowerCase());
+    }
+  });
+
+  return {
+    phrases: uniq(phrases),
+    ids: {
+      offeringIds: uniq(ids.offeringIds),
+      solutionIds: uniq(ids.solutionIds),
+      traderIds: uniq(ids.traderIds),
+    },
+  };
+}
+
+function extractProblemPhrases(value) {
+  const tokens = String(value || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4 && !MATCH_STOPWORDS.has(token));
+  const phrases = [];
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    phrases.push(`${tokens[index]} ${tokens[index + 1]}`);
+    if (index < tokens.length - 2) {
+      phrases.push(`${tokens[index]} ${tokens[index + 1]} ${tokens[index + 2]}`);
+    }
+  }
+  return uniq(phrases).slice(0, 18);
+}
+
 function extractCategoryParts(value) {
   const raw = normalizeText(value).toLowerCase();
   if (!raw) return { raw: "", thematic: "", service: "" };
@@ -221,12 +295,29 @@ function getNeedThemeSignals(need) {
   return uniq(themes);
 }
 
+function getNeedSixMSignals(need) {
+  const explicit = parseArray(need?.six_m_signals);
+  if (explicit.length) return uniq(explicit);
+
+  const haystack = [
+    ...parseArray(need?.curated_need),
+    normalizeText(need?.problem_statement),
+    normalizeText(need?.curation_notes),
+  ]
+    .join(" | ")
+    .toLowerCase();
+
+  return SIX_M_RULES
+    .filter((rule) => rule.patterns.some((pattern) => haystack.includes(pattern)))
+    .map((rule) => rule.label);
+}
+
 function categoryFilterMatches(category, need) {
   if (!need) return false;
   const normalized = normalizeText(category).toLowerCase();
   const curated = parseArray(need.curated_need);
   if (SIX_M_LABELS.map((item) => item.toLowerCase()).includes(normalized)) {
-    return curated.some((item) => item.toLowerCase().includes(normalized));
+    return getNeedSixMSignals(need).map((item) => item.toLowerCase()).includes(normalized);
   }
   return getNeedThemeSignals(need).includes(normalized) || curated.some((item) => item.toLowerCase() === normalized);
 }
@@ -234,13 +325,24 @@ function categoryFilterMatches(category, need) {
 function buildNeedMatchProfile(need) {
   const categories = uniq(parseArray(need.curated_need).map((item) => item.toLowerCase()));
   const categoryParts = categories.map((item) => extractCategoryParts(item));
-  const thematicAreas = uniq(categoryParts.map((item) => item.thematic).filter(Boolean));
+  const categoryThematicAreas = uniq(
+    categoryParts
+      .map((item) => item.thematic)
+      .filter((item) => item && !GENERIC_THEMATIC_TERMS.has(item)),
+  );
   const serviceTerms = uniq(categoryParts.map((item) => item.service).filter(Boolean));
-  const categoryTokens = thematicAreas.flatMap((item) => tokenizeText(item, 3));
   const problemTokens = tokenizeText(need.problem_statement, 5);
   const notesTokens = tokenizeText(need.curation_notes, 5);
   const geographyTokens = tokenizeText(`${need.state || ""} ${need.district || ""}`, 3);
   const serviceTokens = serviceTerms.flatMap((item) => tokenizeText(item, 3));
+  const sharedSolutionHints = extractSharedSolutionHints(need.curation_notes);
+  const problemPhrases = extractProblemPhrases(need.problem_statement);
+  const thematicAreas = uniq([
+    ...sharedSolutionHints.phrases,
+    ...categoryThematicAreas,
+    ...(categoryThematicAreas.length ? [] : problemPhrases.slice(0, 8)),
+  ]);
+  const categoryTokens = thematicAreas.flatMap((item) => tokenizeText(item, 3));
   const primaryTerms = uniq([...categoryTokens, ...serviceTokens, ...problemTokens.slice(0, 8), ...notesTokens.slice(0, 4)]);
   const phrases = uniq(
     thematicAreas
@@ -258,6 +360,7 @@ function buildNeedMatchProfile(need) {
   return {
     categories,
     categoryParts,
+    categoryThematicAreas,
     thematicAreas,
     serviceTerms,
     categoryTokens: uniq(categoryTokens),
@@ -267,6 +370,7 @@ function buildNeedMatchProfile(need) {
     geographyTokens,
     phrases,
     primaryTerms,
+    sharedSolutionHints,
   };
 }
 
@@ -445,6 +549,17 @@ function scoreOfferingMatch(need, profile, offering) {
   const reasons = [];
   let thematicMatched = false;
   let serviceMatched = false;
+  const matchedSharedLink =
+    profile.sharedSolutionHints.ids.offeringIds.includes(String(offering.offering_id || "")) ||
+    profile.sharedSolutionHints.ids.solutionIds.includes(String(offering.solution_id || "")) ||
+    profile.sharedSolutionHints.ids.traderIds.includes(String(offering.trader_id || ""));
+
+  if (matchedSharedLink) {
+    thematicMatched = true;
+    serviceMatched = true;
+    score += 60;
+    reasons.push("Already shared with seeker");
+  }
 
   profile.thematicAreas.forEach((phrase) => {
     if (joined.includes(phrase)) {
@@ -491,10 +606,12 @@ function scoreOfferingMatch(need, profile, offering) {
   });
 
   profile.problemTokens.slice(0, 8).forEach((token) => {
-    if (thematicMatched && (tags.some((tag) => tag.includes(token)) || name.includes(token) || solutionName.includes(token))) {
+    if ((thematicMatched || !profile.categoryThematicAreas.length) && (tags.some((tag) => tag.includes(token)) || name.includes(token) || solutionName.includes(token))) {
+      if (!profile.categoryThematicAreas.length) thematicMatched = true;
       score += 4;
       reasons.push(token);
-    } else if (thematicMatched && about.includes(token)) {
+    } else if ((thematicMatched || !profile.categoryThematicAreas.length) && about.includes(token)) {
+      if (!profile.categoryThematicAreas.length) thematicMatched = true;
       score += 2;
       reasons.push(token);
     }
@@ -912,11 +1029,8 @@ function renderOverview() {
   const sixMCounts = Object.fromEntries(SIX_M_LABELS.map((label) => [label, 0]));
   const themeCounts = {};
   needs.forEach((need) => {
-    parseArray(need.curated_need).forEach((item) => {
-      const lower = item.toLowerCase();
-      SIX_M_LABELS.forEach((label) => {
-        if (lower.includes(label.toLowerCase())) sixMCounts[label] += 1;
-      });
+    getNeedSixMSignals(need).forEach((label) => {
+      sixMCounts[label] = (sixMCounts[label] || 0) + 1;
     });
     getNeedThemeSignals(need).forEach((theme) => {
       themeCounts[theme] = (themeCounts[theme] || 0) + 1;
@@ -1556,11 +1670,9 @@ function bindStaticEvents() {
   }));
 
   byId("refreshBtn")?.addEventListener("click", safeAsync(async () => {
-    const isOverviewDashboard = Boolean(byId("overviewView"));
     resetDashboardSelections();
     await rerender({ includeMatches: false });
     await refreshAll();
-    toast(isOverviewDashboard ? "Dashboard refreshed and selections reset." : "Data refreshed.");
   }));
 
   byId("closedToggleBtn")?.addEventListener("click", safeAsync(async () => {
