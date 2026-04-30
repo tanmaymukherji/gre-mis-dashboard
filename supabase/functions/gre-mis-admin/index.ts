@@ -16,6 +16,13 @@ const gmailClientId = Deno.env.get("GMAIL_CLIENT_ID") ?? "";
 const gmailClientSecret = Deno.env.get("GMAIL_CLIENT_SECRET") ?? "";
 const gmailRefreshToken = Deno.env.get("GMAIL_REFRESH_TOKEN") ?? "";
 const gmailSenderEmail = Deno.env.get("GMAIL_SENDER_EMAIL") ?? "tanmay@greenruraleconomy.in";
+const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY") ?? Deno.env.get("GRE_MIS_OPENROUTER_API_KEY") ?? "";
+const geminiApiKey = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GRE_MIS_GEMINI_API_KEY") ?? "";
+const deepSeekApiKey = Deno.env.get("DEEPSEEK_API_KEY") ?? Deno.env.get("GRE_MIS_DEEPSEEK_API_KEY") ?? "";
+const defaultAiProvider = (Deno.env.get("GRE_MIS_AI_PROVIDER") ?? "openrouter").toLowerCase();
+const defaultOpenRouterModel = Deno.env.get("GRE_MIS_OPENROUTER_MODEL") ?? "openai/gpt-4.1-mini";
+const defaultGeminiModel = Deno.env.get("GRE_MIS_GEMINI_MODEL") ?? "gemini-2.0-flash";
+const defaultDeepSeekModel = Deno.env.get("GRE_MIS_DEEPSEEK_MODEL") ?? "deepseek-chat";
 
 const adminClient = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false },
@@ -33,6 +40,151 @@ function jsonResponse(body: unknown, status = 200) {
 
 function requireString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function asStringArray(value: unknown) {
+  if (Array.isArray(value)) return value.map((item) => requireString(item)).filter(Boolean);
+  if (typeof value === "string") {
+    return value.split(/[;,|]/).map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function parseBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  const normalized = requireString(value).toLowerCase();
+  if (!normalized || normalized === "null") return null;
+  if (["yes", "true", "1"].includes(normalized)) return true;
+  if (["no", "false", "0"].includes(normalized)) return false;
+  return null;
+}
+
+function parseNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const normalized = requireString(value).replace(/[^0-9.-]/g, "");
+  if (!normalized) return fallback;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function stableRowSignature(value: unknown) {
+  return JSON.stringify(value, Object.keys(value as Record<string, unknown>).sort());
+}
+
+function buildNeedIntelligencePrompt(need: Record<string, unknown>) {
+  return `
+Classify this GRE inbound need into structured JSON for matching. Return only valid JSON.
+
+Rules:
+- Extract the main thematic or application area as specifically as possible.
+- Choose need_kind as one of: product, service, knowledge, finance, mixed.
+- If need_kind is service, fill service_kind with the specific service type. Otherwise return empty string.
+- Pick zero or more 6M labels from exactly: Manpower, Method, Machine, Material, Market, Money.
+- keywords should be a concise array of high-value match terms.
+- summary should be one short sentence focused on match intent.
+
+Need payload:
+${JSON.stringify({
+    organization_name: need.organization_name,
+    state: need.state,
+    district: need.district,
+    problem_statement: need.problem_statement,
+    curated_need: need.curated_need,
+    curation_notes: need.curation_notes,
+    solutions_shared_count: need.solutions_shared_count,
+  })}
+
+Return JSON with exactly:
+{
+  "thematic_area": "",
+  "application_area": "",
+  "need_kind": "",
+  "service_kind": "",
+  "six_m_signals": [],
+  "keywords": [],
+  "summary": ""
+}`.trim();
+}
+
+async function callAiJson(providerInput: string, prompt: string) {
+  const provider = (providerInput || defaultAiProvider || "openrouter").toLowerCase();
+
+  if (provider === "gemini") {
+    if (!geminiApiKey) throw new Error("GEMINI_API_KEY is not configured.");
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${defaultGeminiModel}:generateContent?key=${geminiApiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json" },
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    const text = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("") || "";
+    if (!response.ok || !text) throw new Error(data?.error?.message || "Gemini enrichment failed.");
+    return JSON.parse(text);
+  }
+
+  if (provider === "deepseek") {
+    if (!deepSeekApiKey) throw new Error("DEEPSEEK_API_KEY is not configured.");
+    const response = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${deepSeekApiKey}`,
+      },
+      body: JSON.stringify({
+        model: defaultDeepSeekModel,
+        response_format: { type: "json_object" },
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    const text = data?.choices?.[0]?.message?.content || "";
+    if (!response.ok || !text) throw new Error(data?.error?.message || "DeepSeek enrichment failed.");
+    return JSON.parse(text);
+  }
+
+  if (!openRouterApiKey) throw new Error("OPENROUTER_API_KEY is not configured.");
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openRouterApiKey}`,
+      "HTTP-Referer": "https://greenruraleconomy.in",
+      "X-Title": "GRE MIS Dashboard",
+    },
+    body: JSON.stringify({
+      model: defaultOpenRouterModel,
+      response_format: { type: "json_object" },
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  const data = await response.json().catch(() => null);
+  const text = data?.choices?.[0]?.message?.content || "";
+  if (!response.ok || !text) throw new Error(data?.error?.message || "OpenRouter enrichment failed.");
+  return JSON.parse(text);
+}
+
+async function enrichNeedIntelligence(need: Record<string, unknown>, provider: string) {
+  const ai = await callAiJson(provider, buildNeedIntelligencePrompt(need));
+  const patch = {
+    ai_thematic_area: requireString(ai.thematic_area),
+    ai_application_area: requireString(ai.application_area),
+    ai_need_kind: requireString(ai.need_kind),
+    ai_service_kind: requireString(ai.service_kind),
+    ai_keywords: asStringArray(ai.keywords),
+    ai_6m_signals: asStringArray(ai.six_m_signals),
+    ai_summary: requireString(ai.summary),
+    ai_engine: provider || defaultAiProvider,
+    ai_enriched_at: new Date().toISOString(),
+    ai_enrichment_status: "ready",
+    ai_payload: ai,
+  };
+
+  const { error } = await adminClient.from("gre_mis_needs").update(patch).eq("id", requireString(need.id));
+  if (error) throw new Error(error.message);
+  return patch;
 }
 
 async function hashToken(token: string) {
@@ -210,6 +362,193 @@ async function getAdminSnapshot() {
     ok: true,
     pendingNeeds: pendingNeeds.data || [],
     pendingUpdates: pendingUpdates.data || [],
+  };
+}
+
+async function resolveCuratorId(curatorName: string) {
+  const normalized = requireString(curatorName);
+  if (!normalized) return null;
+  const { data } = await adminClient
+    .from("gre_mis_curators")
+    .select("id, display_name")
+    .ilike("display_name", normalized)
+    .maybeSingle();
+  return data?.id || null;
+}
+
+function buildNeedNotes(curationCallDetails: string, solutionsShared: string) {
+  return [curationCallDetails, solutionsShared ? `Solutions Shared: ${solutionsShared}` : ""]
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
+}
+
+function normalizeInboundRow(row: Record<string, unknown>, curatorId: string | null, fileName: string) {
+  const requestId = requireString(row.request_id);
+  const problemStatement = requireString(row.problem_statement);
+  const curationNotes = buildNeedNotes(requireString(row.curation_call_details), requireString(row.solutions_shared));
+  const curatedNeed = asStringArray(row.curated_need);
+  return {
+    id: requestId,
+    organization_name: requireString(row.organization_name),
+    website: requireString(row.website),
+    contact_person: requireString(row.contact_person),
+    designation: requireString(row.designation),
+    seeker_phone: requireString(row.seeker_phone),
+    seeker_email: requireString(row.seeker_email).toLowerCase(),
+    requested_on: requireString(row.requested_on) || new Date().toISOString(),
+    problem_statement: problemStatement,
+    state: requireString(row.state),
+    district: requireString(row.district),
+    status: requireString(row.status) || "New",
+    internal_status: requireString(row.internal_status) || "Need solution providers",
+    curator_id: curatorId,
+    curation_call_date: requireString(row.curation_call_date) || null,
+    curation_age_days: parseNumber(row.curation_age_days, 0),
+    curation_notes: curationNotes || null,
+    curated_need: curatedNeed,
+    demand_broadcast_needed: parseBoolean(row.demand_broadcast_needed) ?? false,
+    solutions_shared_count: parseNumber(row.solutions_shared_count, 0),
+    invited_providers_count: parseNumber(row.invited_providers_count, 0),
+    next_action: requireString(row.status).toLowerCase() === "closed" ? "Closed" : "Follow up with seeker",
+    approval_status: "approved",
+    imported_from_batch: fileName,
+    source_kind: "website_inbound_snapshot",
+    last_status_change_at: new Date().toISOString(),
+    last_synced_at: new Date().toISOString(),
+  };
+}
+
+async function importInboundWorkbook(rowsInput: unknown, fileName: string, actorEmail: string, provider: string) {
+  const rows = Array.isArray(rowsInput) ? rowsInput as Record<string, unknown>[] : [];
+  if (!rows.length) throw new Error("No inbound rows were received.");
+
+  const ids = rows.map((row) => requireString(row.request_id)).filter(Boolean);
+  const { data: existingRows, error: existingError } = await adminClient
+    .from("gre_mis_needs")
+    .select("id, source_row_signature, curator_id")
+    .in("id", ids);
+  if (existingError) throw new Error(existingError.message);
+
+  const existingMap = new Map((existingRows || []).map((row) => [String(row.id), row]));
+  const toInsert: Record<string, unknown>[] = [];
+  const toUpdate: Record<string, unknown>[] = [];
+  const changedNeedIds: string[] = [];
+
+  for (const row of rows) {
+    const requestId = requireString(row.request_id);
+    if (!requestId) continue;
+    const curatorId = await resolveCuratorId(requireString(row.curator_name));
+    const patch = normalizeInboundRow(row, curatorId, fileName);
+    const sourceRowSignature = stableRowSignature(row);
+    const existing = existingMap.get(requestId);
+
+    if (!existing) {
+      toInsert.push({
+        ...patch,
+        source_row_signature: sourceRowSignature,
+      });
+      changedNeedIds.push(requestId);
+      continue;
+    }
+
+    if (existing.source_row_signature !== sourceRowSignature) {
+      toUpdate.push({
+        ...patch,
+        source_row_signature: sourceRowSignature,
+      });
+      changedNeedIds.push(requestId);
+    }
+  }
+
+  if (toInsert.length) {
+    const { error } = await adminClient.from("gre_mis_needs").insert(toInsert);
+    if (error) throw new Error(error.message);
+  }
+
+  for (const row of toUpdate) {
+    const { id, ...patch } = row;
+    const { error } = await adminClient.from("gre_mis_needs").update(patch).eq("id", id);
+    if (error) throw new Error(error.message);
+  }
+
+  let aiUpdatedCount = 0;
+  if (changedNeedIds.length) {
+    const { data: changedNeeds, error } = await adminClient
+      .from("gre_mis_needs")
+      .select("*")
+      .in("id", changedNeedIds);
+    if (error) throw new Error(error.message);
+
+    for (const need of changedNeeds || []) {
+      try {
+        await enrichNeedIntelligence(need, provider);
+        aiUpdatedCount += 1;
+      } catch (error) {
+        await adminClient
+          .from("gre_mis_needs")
+          .update({
+            ai_engine: provider,
+            ai_enriched_at: new Date().toISOString(),
+            ai_enrichment_status: error instanceof Error ? `error: ${error.message}` : "error",
+          })
+          .eq("id", need.id);
+      }
+    }
+  }
+
+  await adminClient.from("gre_mis_import_runs").insert({
+    file_name: fileName,
+    imported_by_email: actorEmail,
+    total_rows: rows.length,
+    inserted_count: toInsert.length,
+    updated_count: toUpdate.length,
+    ai_updated_count: aiUpdatedCount,
+  });
+
+  return {
+    ok: true,
+    insertedCount: toInsert.length,
+    updatedCount: toUpdate.length,
+    aiUpdatedCount,
+  };
+}
+
+async function refreshNeedIntelligence(actorEmail: string, provider: string) {
+  const { data: needs, error } = await adminClient
+    .from("gre_mis_needs")
+    .select("*")
+    .eq("approval_status", "approved")
+    .order("updated_at", { ascending: false })
+    .limit(200);
+
+  if (error) throw new Error(error.message);
+
+  const staleNeeds = (needs || [])
+    .filter((need) => !need.ai_enriched_at || new Date(need.updated_at).getTime() >= new Date(need.ai_enriched_at).getTime())
+    .slice(0, 25);
+
+  let aiUpdatedCount = 0;
+  for (const need of staleNeeds) {
+    try {
+      await enrichNeedIntelligence(need, provider);
+      aiUpdatedCount += 1;
+    } catch (error) {
+      await adminClient
+        .from("gre_mis_needs")
+        .update({
+          ai_engine: provider,
+          ai_enriched_at: new Date().toISOString(),
+          ai_enrichment_status: error instanceof Error ? `error: ${error.message}` : "error",
+        })
+        .eq("id", need.id);
+    }
+  }
+
+  return {
+    ok: true,
+    aiUpdatedCount,
+    message: `AI need intelligence refreshed for ${aiUpdatedCount} needs.`,
   };
 }
 
@@ -522,6 +861,16 @@ Deno.serve(async (req) => {
 
     if (action === "sendProviderIntro") {
       return jsonResponse(await sendProviderIntro(requireString(payload.needId), requireString(payload.providerEmail), actorEmail));
+    }
+
+    if (action === "importInboundWorkbook") {
+      return jsonResponse(
+        await importInboundWorkbook(payload.rows, requireString(payload.fileName) || "GRE inbound workbook", actorEmail, requireString(payload.aiProvider) || defaultAiProvider),
+      );
+    }
+
+    if (action === "refreshNeedIntelligence") {
+      return jsonResponse(await refreshNeedIntelligence(actorEmail, requireString(payload.aiProvider) || defaultAiProvider));
     }
 
     return jsonResponse({ error: "Unsupported action." }, 400);

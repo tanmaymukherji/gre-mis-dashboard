@@ -6,6 +6,7 @@
   <title>GRE MIS Admin Sync</title>
   <link rel="icon" href="data:," />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="./config.js"></script>
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -77,6 +78,32 @@
 
         <div id="metricsGrid" class="metrics-grid"></div>
         <div class="admin-grid">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Inbound Sync</p>
+                <h3>Upload Website Workbook</h3>
+              </div>
+            </div>
+            <div class="taxonomy-grid">
+              <label>
+                <span>Inbound Workbook</span>
+                <input id="inboundWorkbookFile" type="file" accept=".xlsx,.xls" />
+              </label>
+              <label>
+                <span>AI Engine</span>
+                <select id="aiProviderSelect">
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="deepseek">DeepSeek</option>
+                </select>
+              </label>
+              <button id="uploadInboundBtn" class="btn btn-primary">Upload and Sync</button>
+              <button id="refreshAiBtn" class="btn btn-secondary">Refresh AI Signals</button>
+            </div>
+            <p id="syncStatus" class="helper-text">Uploads add new inbounds, update changed rows for existing request IDs, and refresh AI need intelligence.</p>
+          </section>
+
           <section class="panel">
             <div class="panel-head">
               <div>

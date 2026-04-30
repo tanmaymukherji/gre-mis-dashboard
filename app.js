@@ -180,6 +180,67 @@ function parseArray(value) {
   return [];
 }
 
+function parseNumber(value, fallback = 0) {
+  const normalized = String(value ?? "").replace(/[^0-9.-]/g, "").trim();
+  if (!normalized) return fallback;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseWorkbookDate(value) {
+  const text = normalizeText(value);
+  if (!text) return null;
+  const parts = text.match(/^(\d{1,2})-(\d{1,2})-(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (parts) {
+    const [, day, month, year, hour = "0", minute = "0", second = "0"] = parts;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second))).toISOString();
+  }
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function parseWorkbookBoolean(value) {
+  const text = normalizeText(value).toLowerCase();
+  if (!text || text === "null") return null;
+  if (["yes", "true", "1"].includes(text)) return true;
+  if (["no", "false", "0"].includes(text)) return false;
+  return null;
+}
+
+async function parseInboundWorkbookFile(file) {
+  if (!file) throw new Error("Choose an inbound workbook first.");
+  if (!window.XLSX) throw new Error("Workbook parser is not available.");
+  const buffer = await file.arrayBuffer();
+  const workbook = window.XLSX.read(buffer, { type: "array" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = window.XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  return rows.map((row) => ({
+    request_id: normalizeText(row["Request Id"]),
+    organization_name: normalizeText(row["Seeker Organisation"]),
+    website: normalizeText(row.Website),
+    contact_person: normalizeText(row["Contact Person"]),
+    designation: normalizeText(row.Designation),
+    seeker_phone: normalizeText(row["Phone Number"]),
+    seeker_email: normalizeText(row.Email).toLowerCase(),
+    requested_on: parseWorkbookDate(row["Requested On"]),
+    problem_statement: normalizeText(row.Request),
+    state: normalizeText(row["Solution Needed in State"]),
+    district: normalizeText(row["Solution Needed in District"]),
+    status: normalizeText(row.Status),
+    internal_status: normalizeText(row["Internal Status"]),
+    curator_name: normalizeText(row["Curator Assigned"]),
+    curation_call_date: parseWorkbookDate(row["Curation Call Date"])?.slice(0, 10) || null,
+    curation_age_days: parseNumber(row["Curation Age"], 0),
+    curation_call_details: normalizeText(row["Curation Call Details"]),
+    curated_need: parseArray(String(row["Curated Need of Service Seeker"] || "").replaceAll(",", ";")),
+    demand_broadcast_needed: parseWorkbookBoolean(row["Demand Broadcast Needed"]),
+    solutions_shared_count: parseNumber(row["Solutions Shared Count"], 0),
+    solutions_shared: normalizeText(row["Solutions Shared"]),
+    invited_providers_count: parseNumber(row["Invited Providers Count"], 0),
+    invited_providers: normalizeText(row["Invited Providers"]),
+  })).filter((row) => row.request_id);
+}
+
 function formatDate(value) {
   if (!value) return "Not set";
   const date = new Date(value);
@@ -325,6 +386,14 @@ function categoryFilterMatches(category, need) {
 function buildNeedMatchProfile(need) {
   const categories = uniq(parseArray(need.curated_need).map((item) => item.toLowerCase()));
   const categoryParts = categories.map((item) => extractCategoryParts(item));
+  const aiKeywords = uniq(parseArray(need.ai_keywords).map((item) => item.toLowerCase()));
+  const aiSignals = uniq([
+    normalizeText(need.ai_thematic_area).toLowerCase(),
+    normalizeText(need.ai_application_area).toLowerCase(),
+    normalizeText(need.ai_need_kind).toLowerCase(),
+    normalizeText(need.ai_service_kind).toLowerCase(),
+    ...aiKeywords,
+  ].filter(Boolean));
   const categoryThematicAreas = uniq(
     categoryParts
       .map((item) => item.thematic)
@@ -340,6 +409,7 @@ function buildNeedMatchProfile(need) {
   const thematicAreas = uniq([
     ...sharedSolutionHints.phrases,
     ...categoryThematicAreas,
+    ...aiSignals,
     ...(categoryThematicAreas.length ? [] : problemPhrases.slice(0, 8)),
   ]);
   const categoryTokens = thematicAreas.flatMap((item) => tokenizeText(item, 3));
@@ -804,6 +874,14 @@ class GreMisStore {
 
   async sendProviderIntro(needId, providerEmail) {
     return this.callAdmin("sendProviderIntro", { needId, providerEmail }, true);
+  }
+
+  async importInboundWorkbook(fileName, rows, aiProvider) {
+    return this.callAdmin("importInboundWorkbook", { fileName, rows, aiProvider }, true);
+  }
+
+  async refreshNeedIntelligence(aiProvider) {
+    return this.callAdmin("refreshNeedIntelligence", { aiProvider }, true);
   }
 
   async searchMatchesForNeed(need) {
@@ -1672,6 +1750,13 @@ function bindStaticEvents() {
   byId("refreshBtn")?.addEventListener("click", safeAsync(async () => {
     resetDashboardSelections();
     await rerender({ includeMatches: false });
+    if (byId("adminView") && state.adminToken) {
+      const provider = byId("aiProviderSelect")?.value || "openrouter";
+      const syncStatus = byId("syncStatus");
+      if (syncStatus) syncStatus.textContent = "Refreshing AI need intelligence...";
+      const result = await store.refreshNeedIntelligence(provider);
+      if (syncStatus) syncStatus.textContent = result.message || "AI need intelligence refreshed.";
+    }
     await refreshAll();
   }));
 
@@ -1736,6 +1821,40 @@ function bindStaticEvents() {
     byId("optionLabel").value = "";
     await refreshAll();
     toast("Option saved.");
+  }));
+
+  byId("uploadInboundBtn")?.addEventListener("click", safeAsync(async () => {
+    if (!state.adminToken) {
+      toast("Login as admin first.");
+      return;
+    }
+    const fileInput = byId("inboundWorkbookFile");
+    const syncStatus = byId("syncStatus");
+    const file = fileInput?.files?.[0];
+    if (syncStatus) syncStatus.textContent = "Reading inbound workbook...";
+    const rows = await parseInboundWorkbookFile(file);
+    const provider = byId("aiProviderSelect")?.value || "openrouter";
+    if (syncStatus) syncStatus.textContent = `Syncing ${rows.length} inbound rows and refreshing AI intelligence...`;
+    const result = await store.importInboundWorkbook(file.name, rows, provider);
+    await refreshAll();
+    if (syncStatus) {
+      syncStatus.textContent = `Imported ${result.insertedCount || 0} new needs, updated ${result.updatedCount || 0} existing needs, refreshed AI for ${result.aiUpdatedCount || 0} needs.`;
+    }
+    toast("Inbound workbook synced.");
+  }));
+
+  byId("refreshAiBtn")?.addEventListener("click", safeAsync(async () => {
+    if (!state.adminToken) {
+      toast("Login as admin first.");
+      return;
+    }
+    const syncStatus = byId("syncStatus");
+    const provider = byId("aiProviderSelect")?.value || "openrouter";
+    if (syncStatus) syncStatus.textContent = "Refreshing AI need intelligence...";
+    const result = await store.refreshNeedIntelligence(provider);
+    await refreshAll();
+    if (syncStatus) syncStatus.textContent = result.message || "AI need intelligence refreshed.";
+    toast("AI signals refreshed.");
   }));
 
   byId("actionWorkbench")?.addEventListener("click", safeAsync(async (event) => {
