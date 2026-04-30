@@ -657,7 +657,7 @@ function renderCaseMapLocationPanel(group) {
               <p class="helper-text">${esc(clipText(need.problem_statement, 150))}</p>
               <div class="card-actions">
                 <span class="meta-text">${esc(getNeedMapLocationLabel(need))}</span>
-                <button class="btn btn-secondary" data-open-need-id="${escAttr(need.id)}">Open Need</button>
+                <button class="btn btn-secondary" data-open-need-id="${escAttr(need.id)}">View Details</button>
               </div>
             </article>
           `,
@@ -730,18 +730,10 @@ async function renderCaseMap(needs) {
         fitbounds: false,
       });
       marker?.on?.("click", async () => {
-        if (group.needs.length === 1) {
-          await focusNeedFromMap(group.needs[0].id);
-        } else {
-          renderCaseMapLocationPanel(group);
-        }
+        renderCaseMapLocationPanel(group);
       });
       marker?.addListener?.("click", async () => {
-        if (group.needs.length === 1) {
-          await focusNeedFromMap(group.needs[0].id);
-        } else {
-          renderCaseMapLocationPanel(group);
-        }
+        renderCaseMapLocationPanel(group);
       });
       state.caseMapMarkers.push(marker);
     });
@@ -750,6 +742,8 @@ async function renderCaseMap(needs) {
       const bounds = groups.map((group) => [group.lng, group.lat]);
       state.caseMap.fitBounds(bounds, { padding: 50, maxZoom: 7 });
     }
+
+    renderCaseMapLocationPanel(groups[0] || null);
   } catch (error) {
     console.error("Case map could not be rendered.", error);
     mapCanvas.innerHTML = `<div class="case-map-empty">The MapmyIndia map could not be loaded on this page yet.</div>`;
