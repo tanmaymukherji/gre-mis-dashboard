@@ -391,6 +391,8 @@ function buildNeedMatchProfile(need) {
     normalizeText(need.ai_service_kind).toLowerCase(),
     ...aiKeywords,
   ].filter(Boolean));
+  const aiNeedKind = normalizeText(need.ai_need_kind).toLowerCase();
+  const aiServiceKind = normalizeText(need.ai_service_kind).toLowerCase();
   const categoryThematicAreas = uniq(
     categoryParts
       .map((item) => item.thematic)
@@ -423,6 +425,7 @@ function buildNeedMatchProfile(need) {
           .map((item) => item.toLowerCase()),
       ),
   );
+  const requiresServiceMatch = Boolean(aiServiceKind) || (aiNeedKind === "service" && categoryThematicAreas.length === 0);
 
   return {
     categories,
@@ -430,6 +433,7 @@ function buildNeedMatchProfile(need) {
     categoryThematicAreas,
     thematicAreas,
     serviceTerms,
+    requiresServiceMatch,
     categoryTokens: uniq(categoryTokens),
     serviceTokens: uniq(serviceTokens),
     problemTokens,
@@ -692,7 +696,7 @@ function scoreOfferingMatch(need, profile, offering) {
   });
 
   if (!thematicMatched) score -= 25;
-  if (profile.serviceTerms.length && !serviceMatched) score -= 12;
+  if (profile.requiresServiceMatch && profile.serviceTerms.length && !serviceMatched) score -= 12;
   if (!profile.categoryTokens.length && !profile.problemTokens.length) score += 1;
   if (!reasons.length) score -= 8;
 
@@ -962,7 +966,7 @@ class GreMisStore {
           matchReasons: matchMeta.reasons,
         };
       })
-      .filter((item) => item.thematicMatched && (profile.serviceTerms.length ? item.serviceMatched : true) && item.matchScore >= 12)
+      .filter((item) => item.thematicMatched && (profile.requiresServiceMatch ? item.serviceMatched : true) && item.matchScore >= 12)
       .sort((a, b) => b.matchScore - a.matchScore);
   }
 }
