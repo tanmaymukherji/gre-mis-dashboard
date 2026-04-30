@@ -18,7 +18,7 @@
         <div>
           <p class="eyebrow">Green Rural Economy</p>
           <h1>Admin Sync</h1>
-          <p class="lede">Approval workspace for intake review, curator-submitted updates, and taxonomy maintenance.</p>
+          <p class="lede">Approval workspace for intake review, curator-submitted updates, GRE sync, and chatbot dataset refresh.</p>
         </div>
       </div>
       <div class="hero-actions">
@@ -28,7 +28,7 @@
 
     <main>
       <section id="adminView" class="view active">
-        <div class="admin-grid">
+        <div class="admin-grid admin-grid-top">
           <section class="panel">
             <div class="panel-head">
               <div>
@@ -49,18 +49,18 @@
               <div class="card-actions">
                 <button type="submit" class="btn btn-primary">Sign In</button>
                 <button type="button" id="adminLogoutBtn" class="btn btn-secondary hidden">Sign Out</button>
-                <button type="button" id="refreshBtn" class="btn btn-secondary">Refresh</button>
+                <button type="button" id="refreshBtn" class="btn btn-secondary">Refresh Snapshot</button>
               </div>
               <p id="loginStatus" class="helper-text"></p>
             </form>
             <p id="adminStatusText" class="helper-text">Admin approval is required for new intake records and curator-submitted status updates.</p>
           </section>
 
-          <section class="panel">
+          <section class="panel panel-large">
             <div class="panel-head">
               <div>
                 <p class="eyebrow">Session</p>
-                <h3>Admin Controls</h3>
+                <h3>Admin Snapshot</h3>
               </div>
             </div>
             <div id="sessionPanel" class="stack-list hidden">
@@ -68,7 +68,7 @@
                 <div class="status-row">
                   <span class="status-pill good">Signed in</span>
                 </div>
-                <p id="datasetHeadline" class="helper-text">Admin sync workspace for approval and taxonomy maintenance.</p>
+                <p id="datasetHeadline" class="helper-text">Admin sync workspace for approvals, GRE refresh, and chatbot data sync.</p>
                 <p id="datasetSubline" class="helper-text"></p>
                 <p id="sessionStatus" class="helper-text"></p>
               </article>
@@ -77,8 +77,8 @@
         </div>
 
         <div id="metricsGrid" class="metrics-grid"></div>
-        <div class="admin-grid">
-          <section class="panel">
+        <div class="admin-grid admin-grid-main">
+          <section class="panel panel-large">
             <div class="panel-head">
               <div>
                 <p class="eyebrow">Inbound Sync</p>
@@ -120,7 +120,7 @@
             <p id="chatbotSyncStatus" class="helper-text">Fetch the live GRE trader and solution exports, then update the GRE Chatbot Supabase dataset.</p>
           </section>
 
-          <section class="panel">
+          <section class="panel panel-large">
             <div class="panel-head">
               <div>
                 <p class="eyebrow">Pending Intake</p>
@@ -130,7 +130,7 @@
             <div id="pendingNeedsList" class="stack-list"></div>
           </section>
 
-          <section class="panel">
+          <section class="panel panel-large">
             <div class="panel-head">
               <div>
                 <p class="eyebrow">Curator Requests</p>
@@ -138,32 +138,6 @@
               </div>
             </div>
             <div id="pendingUpdatesList" class="stack-list"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Taxonomy</p>
-                <h3>Manage Missing Options</h3>
-              </div>
-            </div>
-            <div class="taxonomy-grid">
-              <label>
-                <span>Option Type</span>
-                <select id="optionType">
-                  <option value="status">Status</option>
-                  <option value="internal_status">Internal Status</option>
-                  <option value="category">Problem Category</option>
-                  <option value="next_action">Next Best Action</option>
-                </select>
-              </label>
-              <label>
-                <span>Label</span>
-                <input id="optionLabel" type="text" placeholder="Add a missing option" />
-              </label>
-              <button id="saveOptionBtn" class="btn btn-secondary">Save Option</button>
-            </div>
-            <div id="optionsList" class="option-list"></div>
           </section>
         </div>
       </section>

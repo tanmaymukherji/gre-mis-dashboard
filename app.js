@@ -1795,7 +1795,7 @@ async function renderMatches() {
               <p class="meta-text">${esc(parseArray(match.geographies).slice(0, 3).join(", ") || "Geography not listed")}</p>
               <div class="card-actions">
                 ${match.gre_link ? `<a class="btn btn-secondary" href="${esc(match.gre_link)}" target="_blank" rel="noreferrer">Open GRE Link</a>` : `<span></span>`}
-                ${state.adminToken && email ? `<button class="btn btn-primary" data-action="email-provider" data-provider-email="${esc(email)}">Email This Provider</button>` : ""}
+                <button class="btn btn-primary" type="button" disabled title="Provider outreach is temporarily disabled until the GRE email ID is updated.">Email This Provider</button>
               </div>
             </article>
           `;
@@ -1825,6 +1825,9 @@ function renderWorkbench() {
   const statusOptions = state.data.options.filter((item) => item.option_type === "status");
   const internalOptions = state.data.options.filter((item) => item.option_type === "internal_status");
   const nextActionOptions = state.data.options.filter((item) => item.option_type === "next_action");
+  const currentStatusLabel = normalizeText(need.status) || "Not set";
+  const currentInternalStatusLabel = normalizeText(need.internal_status) || "Not set";
+  const currentNextActionLabel = normalizeText(need.next_action) || "Not set";
   const curatorOptions = [`<option value="">Unassigned</option>`, ...state.data.curators.map((item) => `<option value="${esc(item.id)}" ${item.id === need.curator_id ? "selected" : ""}>${esc(item.display_name)}</option>`)].join("");
 
   workbench.innerHTML = `
@@ -1853,21 +1856,21 @@ function renderWorkbench() {
         <label>
           <span>Proposed Status</span>
           <select name="proposed_status">
-            <option value="">No change</option>
+            <option value="">Current: ${esc(currentStatusLabel)}</option>
             ${statusOptions.map((item) => `<option value="${esc(item.label)}">${esc(item.label)}</option>`).join("")}
           </select>
         </label>
         <label>
           <span>Proposed Internal Status</span>
           <select name="proposed_internal_status">
-            <option value="">No change</option>
+            <option value="">Current: ${esc(currentInternalStatusLabel)}</option>
             ${internalOptions.map((item) => `<option value="${esc(item.label)}">${esc(item.label)}</option>`).join("")}
           </select>
         </label>
         <label>
           <span>Proposed Next Action</span>
           <select name="proposed_next_action">
-            <option value="">No change</option>
+            <option value="">Current: ${esc(currentNextActionLabel)}</option>
             ${nextActionOptions.map((item) => `<option value="${esc(item.label)}">${esc(item.label)}</option>`).join("")}
           </select>
         </label>
@@ -1882,22 +1885,15 @@ function renderWorkbench() {
         <label>
           <span>Broadcast Needed</span>
           <select name="proposed_demand_broadcast_needed">
-            <option value="">No change</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
-        </label>
-        <label>
-          <span>Solutions Shared Count</span>
-          <input name="proposed_solutions_shared_count" type="number" min="0" />
-        </label>
-        <label>
-          <span>Invited Providers Count</span>
-          <input name="proposed_invited_providers_count" type="number" min="0" />
-        </label>
-        <div class="wide">
-          <button class="btn btn-primary" type="submit" ${curator ? "" : "disabled"}>Submit Update for Admin Approval</button>
-        </div>
+              <option value="">Current: ${need.demand_broadcast_needed ? "Yes" : "No"}</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          </label>
+          <div class="wide">
+            <button class="btn btn-primary" type="submit" ${curator ? "" : "disabled"}>Submit Update for Admin Approval</button>
+            <p class="helper-text">Solution and invited-provider counts are derived from the logged activity and are not edited in this form.</p>
+          </div>
       </form>
       <p class="helper-text">${curator ? "Only the currently assigned curator can submit an update request for this need." : "Assign a curator first so status changes can flow through approval."}</p>
     </article>
@@ -1907,8 +1903,7 @@ function renderWorkbench() {
 function renderAdminQueue() {
   const pendingNeedsList = byId("pendingNeedsList");
   const pendingUpdatesList = byId("pendingUpdatesList");
-  const optionsList = byId("optionsList");
-  if (!pendingNeedsList || !pendingUpdatesList || !optionsList) return;
+  if (!pendingNeedsList || !pendingUpdatesList) return;
 
   pendingNeedsList.innerHTML = state.adminToken
     ? state.data.pendingNeeds.length
@@ -1962,22 +1957,6 @@ function renderAdminQueue() {
       : `<div class="empty-state">No curator update requests are waiting for approval.</div>`
     : `<div class="empty-state">Login as admin to view curator-submitted status changes.</div>`;
 
-  const grouped = ensureList(state.data.options).reduce((acc, option) => {
-    acc[option.option_type] ||= [];
-    acc[option.option_type].push(option);
-    return acc;
-  }, {});
-
-  optionsList.innerHTML = Object.entries(grouped)
-    .map(
-      ([type, items]) => `
-        <article class="stack-card">
-          <h4>${esc(type.replaceAll("_", " "))}</h4>
-          <div class="tag-row">${items.map((item) => `<span>${esc(item.label)}</span>`).join("")}</div>
-        </article>
-      `,
-    )
-    .join("");
 }
 
 function renderAdminState() {
@@ -2029,7 +2008,7 @@ async function rerender(options = {}) {
   if (!byId("overviewView") && byId("adminView")) {
     const headline = byId("datasetHeadline");
     const subline = byId("datasetSubline");
-    if (headline) headline.textContent = "Admin sync workspace for approval and taxonomy maintenance";
+      if (headline) headline.textContent = "Admin sync workspace for approvals, GRE refresh, and chatbot data sync";
     if (subline) subline.textContent = `${state.data.pendingNeeds.length} intake records and ${state.data.pendingUpdates.length} curator updates are waiting for review.`;
   }
   if (includeMatches) {
@@ -2360,10 +2339,6 @@ function bindStaticEvents() {
         form.get("proposed_demand_broadcast_needed") === ""
           ? null
           : form.get("proposed_demand_broadcast_needed") === "true",
-      proposedSolutionsSharedCount:
-        form.get("proposed_solutions_shared_count") === "" ? null : Number(form.get("proposed_solutions_shared_count")),
-      proposedInvitedProvidersCount:
-        form.get("proposed_invited_providers_count") === "" ? null : Number(form.get("proposed_invited_providers_count")),
     });
     event.target.reset();
     await refreshAll();
@@ -2397,17 +2372,6 @@ function bindStaticEvents() {
       await refreshAll();
       toast("Curator update rejected.");
     }
-  }));
-
-  byId("matchResults")?.addEventListener("click", safeAsync(async (event) => {
-    const button = event.target.closest("[data-action='email-provider']");
-    if (!button) return;
-    if (!state.adminToken) {
-      toast("Login as admin to send provider outreach from the GRE mailbox.");
-      return;
-    }
-    const result = await store.sendProviderIntro(state.selectedNeedId, button.dataset.providerEmail);
-    toast(result.message || "Provider outreach email triggered.");
   }));
 }
 

@@ -681,6 +681,39 @@ textarea { resize: vertical; }
   grid-template-columns: 1.1fr 1.2fr 0.9fr;
 }
 
+.admin-page .metrics-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-grid-top {
+  grid-template-columns: 0.9fr 1.3fr;
+  align-items: start;
+}
+
+.admin-grid-main {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.admin-page .panel-large {
+  grid-column: span 2;
+}
+
+.admin-page .panel {
+  background: linear-gradient(180deg, #ffffff, #f7faf4);
+}
+
+.admin-page .stack-list {
+  max-height: 540px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.admin-page .approval-card,
+.admin-page .stack-card {
+  background: linear-gradient(180deg, #ffffff, #f3f8ef);
+}
+
 .btn {
   border: none;
   cursor: pointer;
