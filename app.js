@@ -640,7 +640,7 @@ function renderCaseMapLocationPanel(group) {
     <div class="case-map-location-panel-shell">
       <div class="case-map-location-panel-head">
         <div>
-          <p class="eyebrow">Map Summary</p>
+          <p class="eyebrow">Location Cases</p>
           <h4>${esc(group.label)}</h4>
         </div>
         <div class="case-map-location-panel-actions">
@@ -670,7 +670,6 @@ function renderCaseMapLocationPanel(group) {
       </div>
     </div>
   `;
-  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 async function focusNeedFromMap(needId) {
@@ -687,13 +686,18 @@ async function focusNeedFromMap(needId) {
 async function renderCaseMap(needs) {
   const mapCanvas = byId("categoryCasesMap");
   if (!mapCanvas) return;
+  const overlayPanel = byId("caseMapLocationPanel");
+  if (overlayPanel) {
+    overlayPanel.classList.add("hidden");
+    overlayPanel.innerHTML = "";
+  }
   const requestToken = Date.now();
   state.caseMapRequestToken = requestToken;
-  mapCanvas.innerHTML = `<div class="case-map-empty">Mapping visible cases...</div>`;
+  mapCanvas.innerHTML = `<div class="case-map-empty">Mapping visible cases...</div><div id="caseMapLocationPanel" class="case-map-location-panel hidden"></div>`;
   const groups = await getNeedMapGroups(needs);
   if (state.caseMapRequestToken !== requestToken) return;
   if (!groups.length) {
-    mapCanvas.innerHTML = `<div class="case-map-empty">No map points could be derived yet for the visible cases.</div>`;
+    mapCanvas.innerHTML = `<div class="case-map-empty">No map points could be derived yet for the visible cases.</div><div id="caseMapLocationPanel" class="case-map-location-panel hidden"></div>`;
     renderCaseMapLocationPanel(null);
     state.caseMap = null;
     state.caseMapMarkers = [];
@@ -703,7 +707,7 @@ async function renderCaseMap(needs) {
   const sdkReady = await ensureMapplsSdk();
   if (state.caseMapRequestToken !== requestToken) return;
   if (!sdkReady || !window.mappls) {
-    mapCanvas.innerHTML = `<div class="case-map-empty">Mappls map is waiting for a valid SDK key in <code>config.js</code>.</div>`;
+    mapCanvas.innerHTML = `<div class="case-map-empty">Mappls map is waiting for a valid SDK key in <code>config.js</code>.</div><div id="caseMapLocationPanel" class="case-map-location-panel hidden"></div>`;
     renderCaseMapLocationPanel(null);
     return;
   }
@@ -714,7 +718,7 @@ async function renderCaseMap(needs) {
     state.caseMap?.remove?.();
     state.caseMap = null;
 
-    mapCanvas.innerHTML = `<div id="categoryCasesMapCanvas" class="case-map-canvas"></div>`;
+    mapCanvas.innerHTML = `<div id="categoryCasesMapCanvas" class="case-map-canvas"></div><div id="caseMapLocationPanel" class="case-map-location-panel hidden"></div>`;
     state.caseMap = new window.mappls.Map("categoryCasesMapCanvas", {
       center: { lat: groups[0].lat, lng: groups[0].lng },
       zoom: groups.length > 1 ? 4 : 7,
@@ -749,10 +753,9 @@ async function renderCaseMap(needs) {
       state.caseMap.fitBounds(bounds, { padding: 50, maxZoom: 7 });
     }
 
-    renderCaseMapLocationPanel(groups[0] || null);
   } catch (error) {
     console.error("Case map could not be rendered.", error);
-    mapCanvas.innerHTML = `<div class="case-map-empty">The MapmyIndia map could not be loaded on this page yet.</div>`;
+    mapCanvas.innerHTML = `<div class="case-map-empty">The MapmyIndia map could not be loaded on this page yet.</div><div id="caseMapLocationPanel" class="case-map-location-panel hidden"></div>`;
     renderCaseMapLocationPanel(null);
     state.caseMap = null;
     state.caseMapMarkers = [];
@@ -1449,8 +1452,7 @@ function renderOverview() {
           ? visibleCards.join("")
           : `<div class="empty-state">${esc(focusPayload.emptyText || "No cases are currently sitting in this selection.")}</div>`}
       </div>
-      <div class="pipeline-drilldown-map-stack">
-        <div id="categoryCasesMap" class="pipeline-drilldown-map"></div>
+      <div id="categoryCasesMap" class="pipeline-drilldown-map">
         <div id="caseMapLocationPanel" class="case-map-location-panel hidden"></div>
       </div>
     </div>

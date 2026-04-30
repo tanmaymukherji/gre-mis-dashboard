@@ -217,11 +217,8 @@ h2 { font-size: 1.35rem; }
   gap: 16px;
   align-items: start;
 }
-.pipeline-drilldown-map-stack {
-  display: grid;
-  gap: 14px;
-}
 .pipeline-drilldown-map {
+  position: relative;
   min-height: 520px;
   border: 1px solid var(--line);
   border-radius: 20px;
@@ -241,8 +238,13 @@ h2 { font-size: 1.35rem; }
   color: var(--muted);
 }
 .case-map-location-panel {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 3;
   display: grid;
-  gap: 10px;
+  justify-items: end;
 }
 .case-map-location-panel.hidden {
   display: none;
@@ -254,8 +256,10 @@ h2 { font-size: 1.35rem; }
   padding: 14px;
   display: grid;
   gap: 12px;
-  max-height: 360px;
+  width: min(100%, 460px);
+  max-height: 340px;
   overflow: auto;
+  box-shadow: 0 22px 40px rgba(18, 38, 24, 0.2);
 }
 .case-map-location-panel-head {
   display: flex;
@@ -777,4 +781,13 @@ textarea { resize: vertical; }
   .access-actions { width: 100%; }
   .brand-logo { width: 88px; }
   .page-end-actions { padding: 0.85rem 0 0.2rem; }
+  .case-map-location-panel {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+  }
+  .case-map-location-panel-shell {
+    width: 100%;
+    max-height: 280px;
+  }
 }
