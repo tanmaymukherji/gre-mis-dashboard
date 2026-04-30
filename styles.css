@@ -211,6 +211,82 @@ h2 { font-size: 1.35rem; }
   display: grid;
   gap: 12px;
 }
+.pipeline-drilldown-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.pipeline-drilldown-map {
+  min-height: 520px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #f7faf4, #eef4ea);
+}
+.case-map-canvas {
+  width: 100%;
+  min-height: 520px;
+}
+.case-map-empty {
+  min-height: 520px;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  text-align: center;
+  color: var(--muted);
+}
+.case-map-location-panel {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+.case-map-location-panel.hidden {
+  display: none;
+}
+.case-map-location-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.case-map-location-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #f7faf4);
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+}
+.case-map-marker,
+.case-map-marker-ring {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.case-map-marker {
+  background: #2e6a3c;
+  border: 3px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 10px 20px rgba(46, 106, 60, 0.3);
+}
+.case-map-marker-ring {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border: 4px solid #2e6a3c;
+  background: rgba(46, 106, 60, 0.08);
+  box-shadow: 0 10px 20px rgba(46, 106, 60, 0.22);
+}
+.case-map-marker-ring::after {
+  content: attr(data-count);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #244f2f;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
 .pipeline-drilldown-head {
   display: flex;
   justify-content: space-between;
@@ -642,6 +718,7 @@ textarea { resize: vertical; }
   .admin-grid { grid-template-columns: 1fr 1fr; }
   .panel-large,
   .panel-wide { grid-column: span 2; }
+  .pipeline-drilldown-split { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 920px) {

@@ -2,7 +2,7 @@ window.APP_CONFIG = {
   SUPABASE_URL: "",
   SUPABASE_ANON_KEY: "",
   ADMIN_FUNCTION: "gre-mis-admin",
+  MAPPLS_MAP_KEY: "",
   ENABLE_EMAIL_ACTIONS: true,
   BRAND_NAME: "GREEN RURAL ECONOMY",
 };
-

@@ -23,6 +23,7 @@ const defaultAiProvider = (Deno.env.get("GRE_MIS_AI_PROVIDER") ?? "openrouter").
 const defaultOpenRouterModel = Deno.env.get("GRE_MIS_OPENROUTER_MODEL") ?? "openai/gpt-4.1-mini";
 const defaultGeminiModel = Deno.env.get("GRE_MIS_GEMINI_MODEL") ?? "gemini-2.0-flash";
 const defaultDeepSeekModel = Deno.env.get("GRE_MIS_DEEPSEEK_MODEL") ?? "deepseek-chat";
+const mapplsAccessToken = Deno.env.get("MAPPLS_ACCESS_TOKEN") ?? Deno.env.get("GRE_MIS_MAPPLS_ACCESS_TOKEN") ?? "";
 
 const adminClient = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false },
@@ -203,6 +204,62 @@ async function enrichNeedIntelligence(need: Record<string, unknown>, provider: s
   const { error } = await adminClient.from("gre_mis_needs").update(patch).eq("id", requireString(need.id));
   if (error) throw new Error(error.message);
   return patch;
+}
+
+async function geocodeNeedLocation(input: {
+  organization_name?: string;
+  district?: string;
+  state?: string;
+}) {
+  if (!mapplsAccessToken) {
+    return {
+      latitude: null,
+      longitude: null,
+      geocoded_label: "",
+      geocode_status: "mappls_key_missing",
+    };
+  }
+
+  const query = [
+    requireString(input.organization_name),
+    requireString(input.district),
+    requireString(input.state),
+    "India",
+  ].filter(Boolean).join(", ");
+
+  if (!query) {
+    return {
+      latitude: null,
+      longitude: null,
+      geocoded_label: "",
+      geocode_status: "location_missing",
+    };
+  }
+
+  const response = await fetch(
+    `https://search.mappls.com/search/places/textsearch/json?query=${encodeURIComponent(query)}&region=IND&access_token=${encodeURIComponent(mapplsAccessToken)}`,
+  );
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return {
+      latitude: null,
+      longitude: null,
+      geocoded_label: "",
+      geocode_status: "search_failed",
+    };
+  }
+
+  const candidates = data?.suggestedLocations || data?.copResults || [];
+  const first = Array.isArray(candidates) ? candidates[0] : candidates;
+  const latitude = typeof first?.latitude === "number" ? first.latitude : null;
+  const longitude = typeof first?.longitude === "number" ? first.longitude : null;
+  const label = requireString(first?.placeAddress || first?.formattedAddress || query);
+  return {
+    latitude,
+    longitude,
+    geocoded_label: label,
+    geocode_status: latitude !== null && longitude !== null ? "ready" : "not_found",
+  };
 }
 
 async function hashToken(token: string) {
@@ -401,11 +458,16 @@ function buildNeedNotes(curationCallDetails: string, solutionsShared: string) {
     .trim();
 }
 
-function normalizeInboundRow(row: Record<string, unknown>, curatorId: string | null, fileName: string) {
+async function normalizeInboundRow(row: Record<string, unknown>, curatorId: string | null, fileName: string) {
   const requestId = requireString(row.request_id);
   const problemStatement = requireString(row.problem_statement);
   const curationNotes = buildNeedNotes(requireString(row.curation_call_details), requireString(row.solutions_shared));
   const curatedNeed = asStringArray(row.curated_need);
+  const geocode = await geocodeNeedLocation({
+    organization_name: requireString(row.organization_name),
+    district: requireString(row.district),
+    state: requireString(row.state),
+  });
   return {
     id: requestId,
     organization_name: requireString(row.organization_name),
@@ -434,6 +496,11 @@ function normalizeInboundRow(row: Record<string, unknown>, curatorId: string | n
     source_kind: "website_inbound_snapshot",
     last_status_change_at: new Date().toISOString(),
     last_synced_at: new Date().toISOString(),
+    latitude: geocode.latitude,
+    longitude: geocode.longitude,
+    geocoded_label: geocode.geocoded_label || null,
+    geocode_status: geocode.geocode_status,
+    geocoded_at: new Date().toISOString(),
   };
 }
 
@@ -457,7 +524,7 @@ async function importInboundWorkbook(rowsInput: unknown, fileName: string, actor
     const requestId = requireString(row.request_id);
     if (!requestId) continue;
     const curatorId = await resolveCuratorId(requireString(row.curator_name));
-    const patch = normalizeInboundRow(row, curatorId, fileName);
+    const patch = await normalizeInboundRow(row, curatorId, fileName);
     const sourceRowSignature = stableRowSignature(row);
     const existing = existingMap.get(requestId);
 
@@ -549,6 +616,23 @@ async function refreshNeedIntelligence(actorEmail: string, provider: string) {
   let aiUpdatedCount = 0;
   for (const need of staleNeeds) {
     try {
+      if (typeof need.latitude !== "number" || typeof need.longitude !== "number") {
+        const geocode = await geocodeNeedLocation({
+          organization_name: requireString(need.organization_name),
+          district: requireString(need.district),
+          state: requireString(need.state),
+        });
+        await adminClient
+          .from("gre_mis_needs")
+          .update({
+            latitude: geocode.latitude,
+            longitude: geocode.longitude,
+            geocoded_label: geocode.geocoded_label || null,
+            geocode_status: geocode.geocode_status,
+            geocoded_at: new Date().toISOString(),
+          })
+          .eq("id", need.id);
+      }
       await enrichNeedIntelligence(need, provider);
       aiUpdatedCount += 1;
     } catch (error) {

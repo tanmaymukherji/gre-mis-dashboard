@@ -12,6 +12,10 @@ const state = {
   overviewPage: 1,
   matchPage: 1,
   matchCache: new Map(),
+  mapplsSdkLoaded: false,
+  caseMap: null,
+  caseMapMarkers: [],
+  activeMapGroupKey: "",
   showClosedNeeds: false,
   overviewFilters: {
     metric: [],
@@ -135,6 +139,10 @@ function byId(id) {
   return document.getElementById(id);
 }
 
+function escAttr(value) {
+  return esc(value).replaceAll("'", "&#39;");
+}
+
 function toast(message) {
   window.alert(message);
 }
@@ -238,6 +246,11 @@ function formatDate(value) {
   if (!value) return "Not set";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function parseCoordinate(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function slugStatus(value) {
@@ -469,6 +482,160 @@ function setOverviewFocus(kind, id) {
 
 function sortNeedsByUrgency(needs) {
   return [...needs].sort((a, b) => Number(b.curation_age_days || 0) - Number(a.curation_age_days || 0));
+}
+
+async function ensureMapplsSdk() {
+  if (window.mappls && state.mapplsSdkLoaded) return true;
+  const key = window.APP_CONFIG?.MAPPLS_MAP_KEY;
+  if (!key) return false;
+  const existingScript = document.getElementById("mappls-sdk-script");
+  if (existingScript) {
+    await new Promise((resolve) => {
+      if (window.mappls) resolve(true);
+      existingScript.addEventListener("load", () => resolve(true), { once: true });
+      existingScript.addEventListener("error", () => resolve(false), { once: true });
+    });
+    state.mapplsSdkLoaded = Boolean(window.mappls);
+    return state.mapplsSdkLoaded;
+  }
+
+  const script = document.createElement("script");
+  script.id = "mappls-sdk-script";
+  script.src = `https://sdk.mappls.com/map/sdk/web?v=3.0&access_token=${encodeURIComponent(key)}`;
+  script.async = true;
+  document.head.appendChild(script);
+  const loaded = await new Promise((resolve) => {
+    script.addEventListener("load", () => resolve(true), { once: true });
+    script.addEventListener("error", () => resolve(false), { once: true });
+  });
+  state.mapplsSdkLoaded = Boolean(loaded && window.mappls);
+  return state.mapplsSdkLoaded;
+}
+
+function getNeedMapLocationLabel(need) {
+  return [normalizeText(need.district), normalizeText(need.state)].filter(Boolean).join(", ") || "Location pending";
+}
+
+function getNeedMapGroups(needs) {
+  const groups = new Map();
+  needs.forEach((need) => {
+    const lat = parseCoordinate(need.latitude);
+    const lng = parseCoordinate(need.longitude);
+    if (lat === null || lng === null) return;
+    const key = `${lat.toFixed(5)}|${lng.toFixed(5)}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        lat,
+        lng,
+        label: getNeedMapLocationLabel(need),
+        needs: [],
+      });
+    }
+    groups.get(key).needs.push(need);
+  });
+  return [...groups.values()];
+}
+
+function renderCaseMapLocationPanel(group) {
+  const panel = byId("caseMapLocationPanel");
+  if (!panel) return;
+  if (!group) {
+    panel.classList.add("hidden");
+    panel.innerHTML = "";
+    state.activeMapGroupKey = "";
+    return;
+  }
+  state.activeMapGroupKey = group.key;
+  panel.classList.remove("hidden");
+  panel.innerHTML = `
+    <div class="pipeline-drilldown-head">
+      <div>
+        <p class="eyebrow">Map Location</p>
+        <h4>${esc(group.label)}</h4>
+      </div>
+      <span class="status-pill info">${esc(group.needs.length)} cases</span>
+    </div>
+    <div class="case-map-location-grid">
+      ${group.needs
+        .map(
+          (need) => `
+            <article class="case-map-location-card">
+              <div class="status-row">
+                <span class="status-pill ${badgeTone(need.status)}">${esc(need.status)}</span>
+                <span class="status-pill ${badgeTone(need.internal_status)}">${esc(need.internal_status)}</span>
+              </div>
+              <h4>${esc(need.organization_name)}</h4>
+              <p class="helper-text">${esc(clipText(need.problem_statement, 150))}</p>
+              <div class="card-actions">
+                <span class="meta-text">${esc(getNeedMapLocationLabel(need))}</span>
+                <button class="btn btn-secondary" data-open-need-id="${escAttr(need.id)}">Open Need</button>
+              </div>
+            </article>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+async function focusNeedFromMap(needId) {
+  state.selectedNeedId = needId;
+  state.queueNeedsScrollIntoView = true;
+  state.matchPage = 1;
+  switchView("operations");
+  renderQueue();
+  renderNeedDetail();
+  renderWorkbench();
+  await renderMatches();
+}
+
+async function renderCaseMap(needs) {
+  const mapCanvas = byId("categoryCasesMap");
+  if (!mapCanvas) return;
+  const groups = getNeedMapGroups(needs);
+  if (!groups.length) {
+    mapCanvas.innerHTML = `<div class="case-map-empty">Map will appear here once inbound needs have latitude and longitude.</div>`;
+    renderCaseMapLocationPanel(null);
+    state.caseMap = null;
+    state.caseMapMarkers = [];
+    return;
+  }
+
+  const sdkReady = await ensureMapplsSdk();
+  if (!sdkReady || !window.mappls) {
+    mapCanvas.innerHTML = `<div class="case-map-empty">Mappls map is waiting for a valid SDK key in <code>config.js</code>.</div>`;
+    renderCaseMapLocationPanel(null);
+    return;
+  }
+
+  mapCanvas.innerHTML = `<div id="categoryCasesMapCanvas" class="case-map-canvas"></div>`;
+  state.caseMap = new window.mappls.Map("categoryCasesMapCanvas", {
+    center: { lat: groups[0].lat, lng: groups[0].lng },
+    zoom: groups.length > 1 ? 4 : 7,
+  });
+  state.caseMapMarkers = [];
+
+  groups.forEach((group) => {
+    const markerHtml = group.needs.length > 1
+      ? `<div class="case-map-marker-ring" data-count="${escAttr(group.needs.length)}"></div>`
+      : `<div class="case-map-marker"></div>`;
+    const marker = new window.mappls.Marker({
+      map: state.caseMap,
+      position: { lat: group.lat, lng: group.lng },
+      html: markerHtml,
+      popupHtml: `<div><strong>${esc(group.label)}</strong><br/>${esc(group.needs.length)} cases</div>`,
+      popupOptions: { autoClose: true },
+    });
+    marker.addListener("click", async () => {
+      if (group.needs.length === 1) {
+        await focusNeedFromMap(group.needs[0].id);
+      } else {
+        renderCaseMapLocationPanel(group);
+      }
+    });
+    state.caseMapMarkers.push(marker);
+  });
 }
 
 function getCaseNeed(item) {
@@ -1145,6 +1312,7 @@ function renderOverview() {
   if (state.overviewPage > totalPages) state.overviewPage = totalPages;
   const pageStart = (state.overviewPage - 1) * pageSize;
   const visibleCards = focusPayload.cards.slice(pageStart, pageStart + pageSize);
+  const focusNeeds = focusPayload.items.map((item) => getCaseNeed(item)).filter(Boolean);
   byId("pipelineDrilldown").innerHTML = `
     <div class="pipeline-drilldown-head">
       <div>
@@ -1153,10 +1321,13 @@ function renderOverview() {
       </div>
       <span class="status-pill ${focusPayload.tone}">${esc(focusPayload.cards.length)} cases</span>
     </div>
-    <div class="pipeline-drilldown-list">
-      ${focusPayload.cards.length
-        ? visibleCards.join("")
-        : `<div class="empty-state">${esc(focusPayload.emptyText || "No cases are currently sitting in this selection.")}</div>`}
+    <div class="pipeline-drilldown-split">
+      <div class="pipeline-drilldown-list">
+        ${focusPayload.cards.length
+          ? visibleCards.join("")
+          : `<div class="empty-state">${esc(focusPayload.emptyText || "No cases are currently sitting in this selection.")}</div>`}
+      </div>
+      <div id="categoryCasesMap" class="pipeline-drilldown-map"></div>
     </div>
     ${
       focusPayload.cards.length
@@ -1171,6 +1342,7 @@ function renderOverview() {
         : ""
     }
   `;
+  renderCaseMap(focusNeeds);
 }
 
 function renderBarList(targetId, items, tone) {
@@ -1736,6 +1908,12 @@ function bindStaticEvents() {
     renderNeedDetail();
     renderWorkbench();
     await renderMatches();
+  });
+
+  byId("caseMapLocationPanel")?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-open-need-id]");
+    if (!button) return;
+    await focusNeedFromMap(button.dataset.openNeedId);
   });
 
   byId("matchResults")?.addEventListener("click", safeAsync(async (event) => {

@@ -2,6 +2,7 @@ window.APP_CONFIG = {
   SUPABASE_URL: "https://zphabezqbboaexmmhcic.supabase.co",
   SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpwaGFiZXpxYmJvYWV4bW1oY2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxNTY5MTgsImV4cCI6MjA5MTczMjkxOH0.cHZCuzwiAEEQjPo6WAADaD5oBZapFmk45dOe4A4g37U",
   ADMIN_FUNCTION: "gre-mis-admin",
+  MAPPLS_MAP_KEY: "",
   ENABLE_EMAIL_ACTIONS: true,
   BRAND_NAME: "GREEN RURAL ECONOMY",
 };
