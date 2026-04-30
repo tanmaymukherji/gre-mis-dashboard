@@ -747,7 +747,7 @@ async function renderCaseMap(needs) {
     });
 
     if (groups.length > 1 && state.caseMap?.fitBounds) {
-      const bounds = groups.map((group) => [group.lat, group.lng]);
+      const bounds = groups.map((group) => [group.lng, group.lat]);
       state.caseMap.fitBounds(bounds, { padding: 50, maxZoom: 7 });
     }
   } catch (error) {
