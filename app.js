@@ -562,6 +562,17 @@ function buildNeedMatchProfile(need) {
     !ruleThemes.length &&
     !categoryThematicAreas.length &&
     (Boolean(aiServiceKind || ruleServices[0]) || (aiNeedKind || ruleNeedKind) === "service");
+  const resolvedNeedKind = aiNeedKind || ruleNeedKind || (ruleServices.length ? "service" : "");
+  const preferredOfferingKinds =
+    resolvedNeedKind === "service"
+      ? ["service", "product", "knowledge"]
+      : resolvedNeedKind === "product"
+        ? ["product", "service", "knowledge"]
+        : resolvedNeedKind === "knowledge"
+          ? ["knowledge", "service", "product"]
+          : resolvedNeedKind === "mixed"
+            ? (ruleServices.length || aiServiceKind ? ["service", "product", "knowledge"] : ["product", "service", "knowledge"])
+            : ["service", "product", "knowledge"];
 
   return {
     categories,
@@ -580,6 +591,8 @@ function buildNeedMatchProfile(need) {
     explicitThemeTokens,
     domainFocusTokens,
     sharedSolutionHints,
+    resolvedNeedKind,
+    preferredOfferingKinds,
   };
 }
 
@@ -1055,6 +1068,21 @@ function scoreOfferingMatch(need, profile, offering) {
   const valuechains = parseArray(offering.valuechains).map((item) => item.toLowerCase());
   const about = normalizeText(offering.about_offering_text || offering.solution?.about_solution_text).toLowerCase();
   const solutionName = normalizeText(offering.solution?.solution_name).toLowerCase();
+  const offeringKind = offeringGroup.includes("service")
+    ? "service"
+    : offeringGroup.includes("product")
+      ? "product"
+      : offeringGroup.includes("knowledge")
+        ? "knowledge"
+        : offeringType.includes("manual") || offeringType.includes("video") || offeringType.includes("sop")
+          ? "knowledge"
+          : category.includes("service")
+            ? "service"
+            : category.includes("product")
+              ? "product"
+              : category.includes("knowledge")
+                ? "knowledge"
+                : "";
   const joined = [
     name,
     category,
@@ -1075,6 +1103,7 @@ function scoreOfferingMatch(need, profile, offering) {
   const reasons = [];
   let thematicMatched = false;
   let serviceMatched = false;
+  let primaryThematicMatched = false;
   const matchedSharedLink =
     profile.sharedSolutionHints.ids.offeringIds.includes(String(offering.offering_id || "")) ||
     profile.sharedSolutionHints.ids.solutionIds.includes(String(offering.solution_id || "")) ||
@@ -1092,20 +1121,34 @@ function scoreOfferingMatch(need, profile, offering) {
       thematicMatched = true;
       score += 18;
       reasons.push(phrase);
+      if (
+        tags.some((tag) => tag.includes(phrase)) ||
+        primaryApplication.includes(phrase) ||
+        primaryValuechain.includes(phrase) ||
+        applications.some((item) => item.includes(phrase)) ||
+        valuechains.some((item) => item.includes(phrase)) ||
+        name.includes(phrase) ||
+        solutionName.includes(phrase)
+      ) {
+        primaryThematicMatched = true;
+      }
     }
   });
 
   profile.categoryTokens.forEach((token) => {
     if (tags.some((tag) => tag.includes(token))) {
       thematicMatched = true;
+      primaryThematicMatched = true;
       score += 8;
       reasons.push(token);
     } else if (primaryApplication.includes(token) || primaryValuechain.includes(token)) {
       thematicMatched = true;
+      primaryThematicMatched = true;
       score += 9;
       reasons.push(token);
     } else if (applications.some((item) => item.includes(token)) || valuechains.some((item) => item.includes(token))) {
       thematicMatched = true;
+      primaryThematicMatched = true;
       score += 8;
       reasons.push(token);
     } else if (category.includes(token)) {
@@ -1171,6 +1214,29 @@ function scoreOfferingMatch(need, profile, offering) {
   if (profile.domainFocusTokens?.length && !domainMatched) {
     score -= 18;
   }
+  if (profile.domainFocusTokens?.length && thematicMatched && !primaryThematicMatched) {
+    score -= 10;
+  }
+
+  const preferenceIndex = profile.preferredOfferingKinds.indexOf(offeringKind);
+  if (preferenceIndex === 0) {
+    score += 14;
+    reasons.push(`${offeringKind} fit`);
+  } else if (preferenceIndex === 1) {
+    score += 5;
+  } else if (preferenceIndex === 2) {
+    score -= 8;
+  }
+
+  if ((profile.resolvedNeedKind === "service" || (profile.resolvedNeedKind === "mixed" && profile.serviceTerms.length)) && offeringKind === "knowledge") {
+    score -= 14;
+  }
+  if (profile.resolvedNeedKind === "product" && offeringKind === "knowledge") {
+    score -= 16;
+  }
+  if (profile.resolvedNeedKind === "knowledge" && offeringKind === "knowledge") {
+    score += 10;
+  }
 
   profile.geographyTokens.forEach((token) => {
     if (geographies.some((item) => item.includes(token)) || about.includes(token)) {
@@ -1187,6 +1253,7 @@ function scoreOfferingMatch(need, profile, offering) {
   return {
     score,
     thematicMatched,
+    primaryThematicMatched,
     serviceMatched,
     domainMatched,
     reasons: uniq(reasons).slice(0, 4),

@@ -460,7 +460,12 @@ Classify this GRE inbound need into structured JSON for matching. Return only va
 
 Rules:
 - Extract the main thematic or application area as specifically as possible.
+- thematic_area must be the real domain or application area, such as dairy, solar street lights, wild mango, goatery, branding, packaging.
 - Choose need_kind as one of: product, service, knowledge, finance, mixed.
+- Prefer service when the need is asking for implementation support, advisory, handholding, consulting, mentoring, training, deployment support, or operational guidance.
+- Prefer product when the need is asking for equipment, machinery, physical units, or installed infrastructure.
+- Prefer knowledge when the need is mainly asking for manuals, SOPs, videos, reports, or learning content.
+- Use mixed only when the need clearly needs more than one of service/product/knowledge in the same request.
 - If need_kind is service, fill service_kind with the specific service type. Otherwise return empty string.
 - Pick zero or more 6M labels from exactly: Manpower, Method, Machine, Material, Market, Money.
 - keywords should be a concise array of high-value match terms.
