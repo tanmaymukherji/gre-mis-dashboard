@@ -598,11 +598,11 @@ function getOfferingKind(offering) {
   const offeringType = normalizeText(offering?.offering_type).toLowerCase();
   const category = normalizeText(offering?.offering_category).toLowerCase();
   const aiKind = normalizeText(offering?.ai_offering_kind).toLowerCase();
-  if (aiKind) return aiKind;
+  if (offeringGroup.includes("knowledge")) return "knowledge";
   if (offeringGroup.includes("service")) return "service";
   if (offeringGroup.includes("product")) return "product";
-  if (offeringGroup.includes("knowledge")) return "knowledge";
   if (offeringType.includes("manual") || offeringType.includes("video") || offeringType.includes("sop")) return "knowledge";
+  if (aiKind) return aiKind;
   if (category.includes("service")) return "service";
   if (category.includes("product")) return "product";
   if (category.includes("knowledge")) return "knowledge";

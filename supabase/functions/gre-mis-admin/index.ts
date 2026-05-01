@@ -153,6 +153,13 @@ const domainStopwords = new Set([
   "management",
   "going",
   "under",
+  "null",
+  "shared",
+  "solutions",
+  "solution",
+  "business",
+  "consultation",
+  "mentoring",
 ]);
 
 const ruleThemeSignals = [
@@ -548,9 +555,10 @@ Return JSON with exactly:
 
 function classifyNeedByRules(need: Record<string, unknown>) {
   const curatedNeed = asStringArray(need.curated_need).map((item) => item.toLowerCase());
+  const cleanNotes = requireString(need.curation_notes).replace(/\bnull\b/gi, " ");
   const text = [
     requireString(need.problem_statement),
-    requireString(need.curation_notes),
+    cleanNotes,
     curatedNeed.join(" "),
   ].join(" | ").toLowerCase();
 
@@ -583,7 +591,10 @@ function classifyNeedByRules(need: Record<string, unknown>) {
       .map((rule) => rule.label),
   );
 
-  const needKind = ruleNeedKinds.length > 1 ? "mixed" : ruleNeedKinds[0] || "";
+  let needKind = ruleNeedKinds.length > 1 ? "mixed" : ruleNeedKinds[0] || "";
+  if (serviceHints.length && thematicHints.length && ruleNeedKinds.includes("service")) {
+    needKind = "service";
+  }
   const serviceKind = needKind === "service" || needKind === "mixed" ? serviceHints[0] || "" : "";
   const domainTokens = tokenizeLooseText(text, 4).filter((token) => !domainStopwords.has(token)).slice(0, 18);
 
