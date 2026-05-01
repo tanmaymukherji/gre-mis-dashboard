@@ -54,13 +54,42 @@ const MATCH_STOPWORDS = new Set([
 
 const SIX_M_LABELS = ["Manpower", "Method", "Machine", "Material", "Market", "Money"];
 const GENERIC_THEMATIC_TERMS = new Set([
-  "infrastructure",
-  "technology",
-  "vendor",
-  "connect collaborate",
-  "finance",
+    "infrastructure",
+    "technology",
+    "vendor",
+    "connect collaborate",
+    "business",
+    "business consultation",
+    "business mentoring",
+    "business development",
+    "training",
+    "capacity building",
+    "advisory",
+    "consulting",
+    "consultancy",
+    "entrepreneurship",
+    "business training",
+    "finance",
+    "funding",
+    "investments",
+  ]);
+const DOMAIN_MATCH_STOPWORDS = new Set([
+  "project",
+  "projects",
+  "village",
+  "villages",
+  "support",
+  "farmers",
+  "farmer",
+  "guidance",
+  "implement",
+  "implementation",
   "funding",
-  "investments",
+  "under",
+  "need",
+  "needs",
+  "management",
+  "going",
 ]);
 const SIX_M_RULES = [
   { label: "Manpower", patterns: ["training", "capacity building"] },
@@ -490,6 +519,7 @@ function buildNeedMatchProfile(need) {
     ...tokenizeText(need.problem_statement, 4),
     ...tokenizeText(need.curation_notes, 4),
   ]).slice(0, 16);
+  const domainFocusTokens = explicitThemeTokens.filter((token) => !DOMAIN_MATCH_STOPWORDS.has(token));
   const thematicAreas = uniq([
     ...sharedSolutionHints.phrases,
     ...categoryThematicAreas,
@@ -527,6 +557,7 @@ function buildNeedMatchProfile(need) {
     phrases,
     primaryTerms,
     explicitThemeTokens,
+    domainFocusTokens,
     sharedSolutionHints,
   };
 }
@@ -1105,6 +1136,21 @@ function scoreOfferingMatch(need, profile, offering) {
     }
   });
 
+  const domainMatched = profile.domainFocusTokens?.some((token) => (
+    tags.some((tag) => tag.includes(token)) ||
+    name.includes(token) ||
+    solutionName.includes(token) ||
+    primaryApplication.includes(token) ||
+    primaryValuechain.includes(token) ||
+    applications.some((item) => item.includes(token)) ||
+    valuechains.some((item) => item.includes(token)) ||
+    about.includes(token)
+  )) || false;
+
+  if (profile.domainFocusTokens?.length && !domainMatched) {
+    score -= 18;
+  }
+
   profile.geographyTokens.forEach((token) => {
     if (geographies.some((item) => item.includes(token)) || about.includes(token)) {
       score += 2;
@@ -1121,6 +1167,7 @@ function scoreOfferingMatch(need, profile, offering) {
     score,
     thematicMatched,
     serviceMatched,
+    domainMatched,
     reasons: uniq(reasons).slice(0, 4),
   };
 }
@@ -1421,15 +1468,16 @@ class GreMisStore {
           solution: solutionMap.get(offering.solution_id) || null,
         };
         const matchMeta = scoreOfferingMatch(need, profile, enriched);
-        return {
-          ...enriched,
-          matchScore: matchMeta.score,
-          thematicMatched: matchMeta.thematicMatched,
-          serviceMatched: matchMeta.serviceMatched,
-          matchReasons: matchMeta.reasons,
-        };
-      })
-      .filter((item) => item.thematicMatched && (profile.requiresServiceMatch ? item.serviceMatched : true) && item.matchScore >= 8)
+      return {
+        ...enriched,
+        matchScore: matchMeta.score,
+        thematicMatched: matchMeta.thematicMatched,
+        serviceMatched: matchMeta.serviceMatched,
+        domainMatched: matchMeta.domainMatched,
+        matchReasons: matchMeta.reasons,
+      };
+    })
+      .filter((item) => item.thematicMatched && (!profile.domainFocusTokens.length || item.domainMatched) && (profile.requiresServiceMatch ? item.serviceMatched : true) && item.matchScore >= 8)
       .sort((a, b) => b.matchScore - a.matchScore);
   }
 }
