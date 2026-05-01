@@ -602,6 +602,22 @@ function buildNeedMatchProfile(need) {
   };
 }
 
+function getOfferingKind(offering) {
+  const offeringGroup = normalizeText(offering?.offering_group).toLowerCase();
+  const offeringType = normalizeText(offering?.offering_type).toLowerCase();
+  const category = normalizeText(offering?.offering_category).toLowerCase();
+  const aiKind = normalizeText(offering?.ai_offering_kind).toLowerCase();
+  if (aiKind) return aiKind;
+  if (offeringGroup.includes("service")) return "service";
+  if (offeringGroup.includes("product")) return "product";
+  if (offeringGroup.includes("knowledge")) return "knowledge";
+  if (offeringType.includes("manual") || offeringType.includes("video") || offeringType.includes("sop")) return "knowledge";
+  if (category.includes("service")) return "service";
+  if (category.includes("product")) return "product";
+  if (category.includes("knowledge")) return "knowledge";
+  return "";
+}
+
 function getPipelineSegmentNeeds(segmentId) {
   const segment = PIPELINE_SEGMENTS.find((item) => item.id === segmentId) || PIPELINE_SEGMENTS[0];
   return state.data.needs
@@ -1074,21 +1090,11 @@ function scoreOfferingMatch(need, profile, offering) {
   const valuechains = parseArray(offering.valuechains).map((item) => item.toLowerCase());
   const about = normalizeText(offering.about_offering_text || offering.solution?.about_solution_text).toLowerCase();
   const solutionName = normalizeText(offering.solution?.solution_name).toLowerCase();
-  const offeringKind = offeringGroup.includes("service")
-    ? "service"
-    : offeringGroup.includes("product")
-      ? "product"
-      : offeringGroup.includes("knowledge")
-        ? "knowledge"
-        : offeringType.includes("manual") || offeringType.includes("video") || offeringType.includes("sop")
-          ? "knowledge"
-          : category.includes("service")
-            ? "service"
-            : category.includes("product")
-              ? "product"
-              : category.includes("knowledge")
-                ? "knowledge"
-                : "";
+  const offeringKind = getOfferingKind(offering);
+  const aiOfferingTheme = normalizeText(offering.ai_thematic_area).toLowerCase();
+  const aiOfferingApplication = normalizeText(offering.ai_application_area).toLowerCase();
+  const aiOfferingService = normalizeText(offering.ai_service_kind).toLowerCase();
+  const aiOfferingKeywords = parseArray(offering.ai_keywords).map((item) => item.toLowerCase());
   const joined = [
     name,
     category,
@@ -1103,6 +1109,10 @@ function scoreOfferingMatch(need, profile, offering) {
     solutionName,
     tags.join(" "),
     geographies.join(" "),
+    aiOfferingTheme,
+    aiOfferingApplication,
+    aiOfferingService,
+    aiOfferingKeywords.join(" "),
   ].join(" ");
 
   let score = 0;
@@ -1140,6 +1150,17 @@ function scoreOfferingMatch(need, profile, offering) {
       }
     }
   });
+
+  if (aiOfferingTheme) {
+    profile.thematicAreas.forEach((phrase) => {
+      if (aiOfferingTheme.includes(phrase) || aiOfferingApplication.includes(phrase)) {
+        thematicMatched = true;
+        primaryThematicMatched = true;
+        score += 18;
+        reasons.push(`AI:${phrase}`);
+      }
+    });
+  }
 
   profile.categoryTokens.forEach((token) => {
     if (tags.some((tag) => tag.includes(token))) {
@@ -1179,6 +1200,11 @@ function scoreOfferingMatch(need, profile, offering) {
       reasons.push(service);
     }
   });
+  if (aiOfferingService && profile.serviceTerms.some((service) => aiOfferingService.includes(service) || service.includes(aiOfferingService))) {
+    serviceMatched = true;
+    score += 12;
+    reasons.push(`AI:${aiOfferingService}`);
+  }
 
   profile.serviceTokens.forEach((token) => {
     if (joined.includes(token)) {
@@ -1446,8 +1472,8 @@ class GreMisStore {
     return this.callAdmin("syncGreLiveInbounds", { aiProvider }, true);
   }
 
-  async syncGreChatbotData() {
-    return this.callAdmin("syncGreChatbotData", {}, true);
+  async syncGreChatbotData(aiProvider) {
+    return this.callAdmin("syncGreChatbotData", { aiProvider }, true);
   }
 
   async downloadGreChatbotReport(reportKind) {
@@ -1462,14 +1488,17 @@ class GreMisStore {
     const client = this.getClient();
     if (!client || !need) return [];
     const profile = buildNeedMatchProfile(need);
-    const offeringSelect = "offering_id,solution_id,trader_id,offering_name,offering_category,offering_group,offering_type,primary_application,primary_valuechain,applications,valuechains,domain_6m,tags,geographies,about_offering_text,contact_details,gre_link";
-    const searchTerms = uniq([
-      ...profile.thematicAreas,
-      ...profile.serviceTerms,
+    const offeringSelect = "offering_id,solution_id,trader_id,offering_name,offering_category,offering_group,offering_type,primary_application,primary_valuechain,applications,valuechains,domain_6m,tags,geographies,about_offering_text,contact_details,gre_link,ai_thematic_area,ai_application_area,ai_offering_kind,ai_service_kind,ai_keywords";
+    const domainTerms = uniq([
+      ...profile.thematicAreas.filter((item) => item && !GENERIC_THEMATIC_TERMS.has(item)),
+      ...profile.domainFocusTokens,
       ...profile.phrases,
-      ...profile.primaryTerms,
-      ...profile.explicitThemeTokens,
-    ]).slice(0, 14);
+    ]);
+    const searchTerms = uniq(
+      profile.hasStrongTheme
+        ? [...domainTerms, ...profile.serviceTerms.slice(0, 2)]
+        : [...domainTerms, ...profile.serviceTerms, ...profile.primaryTerms, ...profile.explicitThemeTokens],
+    ).slice(0, 14);
     const queries = [];
 
     if (searchTerms.length) {
@@ -2583,11 +2612,12 @@ function bindStaticEvents() {
       return;
     }
     const statusEl = byId("chatbotSyncStatus");
+    const provider = byId("aiProviderSelect")?.value || "openrouter";
     if (statusEl) statusEl.textContent = "Fetching live trader and solution exports from GRE and updating the chatbot dataset...";
-    const result = await store.syncGreChatbotData();
+    const result = await store.syncGreChatbotData(provider);
     if (statusEl) {
       statusEl.textContent =
-        `Chatbot dataset refreshed. Traders: ${result.summary?.traders || 0}, solutions: ${result.summary?.solutions || 0}, offerings: ${result.summary?.offerings || 0}.`;
+        `Chatbot dataset refreshed. Traders: ${result.summary?.traders || 0}, solutions: ${result.summary?.solutions || 0}, offerings: ${result.summary?.offerings || 0}, offering AI refreshed: ${result.summary?.offeringAiUpdated || 0}.`;
     }
     toast("GRE Chatbot dataset refreshed.");
   }));

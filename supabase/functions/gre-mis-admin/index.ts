@@ -494,6 +494,56 @@ Return JSON with exactly:
   }`.trim();
 }
 
+function buildOfferingIntelligencePrompt(input: {
+  offering: Record<string, unknown>;
+  solution: Record<string, unknown> | null;
+  trader: Record<string, unknown> | null;
+}) {
+  return `
+Classify this GRE solution offering into structured JSON for matching. Return only valid JSON.
+
+Rules:
+- thematic_area must be the real domain or application area, such as dairy, solar street lights, wild mango, goatery, branding, packaging.
+- Choose offering_kind as one of: product, service, knowledge, finance, mixed.
+- Prefer service when the offering provides implementation support, consulting, mentoring, training, technology transfer, advisory, deployment, or handholding.
+- Prefer product when the offering is a physical product, machinery, equipment, raw material, or installed unit.
+- Prefer knowledge when the offering is mainly manuals, SOPs, videos, reports, or static knowledge content.
+- Use mixed only when the offering genuinely combines more than one kind.
+- If offering_kind is service, fill service_kind with the specific service type. Otherwise return empty string.
+- Pick zero or more 6M labels from exactly: Manpower, Method, Machine, Material, Market, Money.
+- keywords should be a concise array of high-value domain and subdomain terms.
+- summary should be one short sentence focused on deployment relevance.
+
+Offering payload:
+${JSON.stringify({
+    offering_name: input.offering.offering_name,
+    offering_group: input.offering.offering_group,
+    offering_type: input.offering.offering_type,
+    offering_category: input.offering.offering_category,
+    primary_application: input.offering.primary_application,
+    primary_valuechain: input.offering.primary_valuechain,
+    applications: input.offering.applications,
+    valuechains: input.offering.valuechains,
+    tags: input.offering.tags,
+    domain_6m: input.offering.domain_6m,
+    about_offering_text: input.offering.about_offering_text,
+    about_solution_text: input.solution?.about_solution_text,
+    solution_name: input.solution?.solution_name,
+    trader_name: input.trader?.organisation_name || input.trader?.trader_name,
+  })}
+
+Return JSON with exactly:
+{
+  "thematic_area": "",
+  "application_area": "",
+  "offering_kind": "",
+  "service_kind": "",
+  "six_m_signals": [],
+  "keywords": [],
+  "summary": ""
+}`.trim();
+}
+
 function classifyNeedByRules(need: Record<string, unknown>) {
   const curatedNeed = asStringArray(need.curated_need).map((item) => item.toLowerCase());
   const text = [
@@ -542,6 +592,79 @@ function classifyNeedByRules(need: Record<string, unknown>) {
     needKind,
     serviceKind,
     keywords: uniqueStrings([...thematicHints, ...domainTokens]).slice(0, 18),
+  };
+}
+
+function classifyOfferingByRules(
+  offering: Record<string, unknown>,
+  solution: Record<string, unknown> | null,
+) {
+  const text = [
+    requireString(offering.offering_name),
+    requireString(offering.offering_group),
+    requireString(offering.offering_type),
+    requireString(offering.offering_category),
+    requireString(offering.primary_application),
+    requireString(offering.primary_valuechain),
+    asStringArray(offering.applications).join(" "),
+    asStringArray(offering.valuechains).join(" "),
+    asStringArray(offering.tags).join(" "),
+    requireString(offering.domain_6m),
+    requireString(offering.about_offering_text),
+    requireString(solution?.solution_name),
+    requireString(solution?.about_solution_text),
+  ].join(" | ").toLowerCase();
+
+  const thematicHints = uniqueStrings(
+    ruleThemeSignals
+      .filter((rule) => rule.patterns.some((pattern) => text.includes(pattern)))
+      .map((rule) => rule.label),
+  );
+
+  const serviceHints = uniqueStrings(
+    ruleServiceKindPatterns
+      .filter((rule) => rule.patterns.some((pattern) => text.includes(pattern)))
+      .map((rule) => rule.label),
+  );
+
+  const offeringGroup = requireString(offering.offering_group).toLowerCase();
+  const offeringType = requireString(offering.offering_type).toLowerCase();
+  const category = requireString(offering.offering_category).toLowerCase();
+
+  let offeringKind = "";
+  if (offeringGroup.includes("service") || category.includes("service")) offeringKind = "service";
+  else if (offeringGroup.includes("product") || category.includes("product")) offeringKind = "product";
+  else if (offeringGroup.includes("knowledge") || category.includes("knowledge") || ["manual", "video", "sop", "blog"].some((token) => offeringType.includes(token))) offeringKind = "knowledge";
+  else {
+    const kinds = uniqueStrings(
+      ruleNeedKindPatterns
+        .filter((rule) => rule.patterns.some((pattern) => text.includes(pattern)))
+        .map((rule) => rule.label === "service" ? "service" : rule.label),
+    );
+    offeringKind = kinds.length > 1 ? "mixed" : kinds[0] || "";
+  }
+
+  const rule6M = uniqueStrings(
+    [
+      ["training", "capacity building"].some((pattern) => text.includes(pattern)) ? "Manpower" : "",
+      ["consulting", "consultancy", "mentoring", "technology transfer", "manual", "video", "sop", "blog", "advisory"].some((pattern) => text.includes(pattern)) ? "Method" : "",
+      ["machine", "machinery", "equipment", "plant setup", "street light"].some((pattern) => text.includes(pattern)) ? "Machine" : "",
+      ["raw material", "material", "supply"].some((pattern) => text.includes(pattern)) ? "Material" : "",
+      ["market", "branding", "packaging", "marketplace"].some((pattern) => text.includes(pattern)) ? "Market" : "",
+      ["financial", "finance", "funding", "credit", "loan"].some((pattern) => text.includes(pattern)) ? "Money" : "",
+    ].filter(Boolean) as string[],
+  );
+
+  return {
+    thematicHints,
+    serviceHints,
+    sixMSignals: rule6M,
+    offeringKind,
+    serviceKind: offeringKind === "service" || offeringKind === "mixed" ? serviceHints[0] || "" : "",
+    keywords: uniqueStrings([
+      ...thematicHints,
+      ...tokenizeLooseText(text, 4).filter((token) => !domainStopwords.has(token)),
+    ]).slice(0, 18),
   };
 }
 
@@ -756,6 +879,67 @@ async function enrichNeedIntelligence(need: Record<string, unknown>, provider: s
   }
 
   const { error } = await adminClient.from("gre_mis_needs").update(patch).eq("id", requireString(need.id));
+  if (error) throw new Error(error.message);
+  return patch;
+}
+
+async function enrichOfferingIntelligence(
+  offering: Record<string, unknown>,
+  solution: Record<string, unknown> | null,
+  trader: Record<string, unknown> | null,
+  provider: string,
+) {
+  const rules = classifyOfferingByRules(offering, solution);
+  const basePatch = {
+    rule_thematic_hints: rules.thematicHints,
+    rule_service_hints: rules.serviceHints,
+    rule_keywords: rules.keywords,
+    rule_6m_signals: rules.sixMSignals,
+  };
+  const nowIso = new Date().toISOString();
+
+  let patch: Record<string, unknown>;
+  try {
+    const ai = await callAiJson(provider, buildOfferingIntelligencePrompt({ offering, solution, trader }));
+    patch = {
+      ...basePatch,
+      ai_thematic_area: requireString(ai.thematic_area),
+      ai_application_area: requireString(ai.application_area),
+      ai_offering_kind: requireString(ai.offering_kind),
+      ai_service_kind: requireString(ai.service_kind),
+      ai_keywords: asStringArray(ai.keywords),
+      ai_6m_signals: asStringArray(ai.six_m_signals),
+      ai_summary: requireString(ai.summary),
+      ai_engine: provider || defaultAiProvider,
+      ai_enriched_at: nowIso,
+      ai_enrichment_status: "ready",
+      ai_prompt_version: aiPromptVersion,
+      ai_schema_version: `${aiSchemaVersion}.offering`,
+      ai_payload: ai,
+    };
+  } catch (error) {
+    patch = {
+      ...basePatch,
+      ai_thematic_area: rules.thematicHints[0] || "",
+      ai_application_area: requireString(offering.primary_application) || requireString(offering.primary_valuechain),
+      ai_offering_kind: rules.offeringKind || "",
+      ai_service_kind: rules.serviceKind,
+      ai_keywords: rules.keywords,
+      ai_6m_signals: rules.sixMSignals,
+      ai_summary: requireString(offering.about_offering_text || solution?.about_solution_text).slice(0, 500),
+      ai_engine: "rules_only",
+      ai_enriched_at: nowIso,
+      ai_enrichment_status: "rules_only",
+      ai_prompt_version: aiPromptVersion,
+      ai_schema_version: `${aiSchemaVersion}.offering`,
+      ai_payload: {
+        mode: "rules_only",
+        reason: error instanceof Error ? error.message : "AI enrichment unavailable.",
+      },
+    };
+  }
+
+  const { error } = await adminClient.from("offerings").update(patch).eq("offering_id", requireString(offering.offering_id));
   if (error) throw new Error(error.message);
   return patch;
 }
@@ -1173,6 +1357,7 @@ function normalizeOfferingRowForChatbot(row: Record<string, unknown>) {
     knowledge_content_url: normalizeCell(row["Knowledge Offering Content"]),
     contact_details: normalizeCell(row["Contact Details"]),
     gre_link: normalizeCell(row["Offering Link on GRE"]),
+    source_row_signature: stableRowSignature(row),
     search_document: buildSearchDocument([
       normalizeCell(row.SolutionName),
       normalizeCell(row.OfferingName),
@@ -1226,6 +1411,7 @@ async function applyChatbotImportBundle(
     stats: { solutionRows: number; traderRows: number };
   },
   fileNames: { solutionFileName: string; traderFileName: string },
+  provider: string,
 ) {
   const { data: importRow, error: importError } = await adminClient
     .from("data_imports")
@@ -1241,6 +1427,22 @@ async function applyChatbotImportBundle(
   if (importError) throw new Error(importError.message);
 
   const importId = importRow.id;
+  const offeringIds = bundle.offerings.map((row) => requireString(row.offering_id)).filter(Boolean);
+  const { data: existingOfferings, error: existingOfferingsError } = offeringIds.length
+    ? await adminClient
+      .from("offerings")
+      .select("offering_id, source_row_signature, ai_enriched_at")
+      .in("offering_id", offeringIds)
+    : { data: [], error: null };
+  if (existingOfferingsError) throw new Error(existingOfferingsError.message);
+  const existingOfferingMap = new Map((existingOfferings || []).map((row) => [requireString(row.offering_id), row]));
+  const changedOfferingIds = bundle.offerings
+    .filter((row) => {
+      const existing = existingOfferingMap.get(requireString(row.offering_id)) as Record<string, unknown> | undefined;
+      if (!existing) return true;
+      return requireString(existing.source_row_signature) !== requireString(row.source_row_signature) || !existing.ai_enriched_at;
+    })
+    .map((row) => requireString(row.offering_id));
 
   try {
     for (const rows of chunkArray(bundle.traders)) {
@@ -1257,6 +1459,39 @@ async function applyChatbotImportBundle(
       const rowsWithImport = rows.map((row) => ({ ...row, last_import_id: importId }));
       const { error } = await adminClient.from("offerings").upsert(rowsWithImport, { onConflict: "offering_id" });
       if (error) throw new Error(error.message);
+    }
+
+    if (changedOfferingIds.length) {
+      const { data: offeringRows, error: offeringError } = await adminClient
+        .from("offerings")
+        .select("*")
+        .in("offering_id", changedOfferingIds);
+      if (offeringError) throw new Error(offeringError.message);
+
+      const solutionIds = uniqueStrings((offeringRows || []).map((row) => requireString(row.solution_id)));
+      const traderIds = uniqueStrings((offeringRows || []).map((row) => requireString(row.trader_id)));
+      const [{ data: solutionRows, error: solutionError }, { data: traderRows, error: traderError }] = await Promise.all([
+        solutionIds.length
+          ? adminClient.from("solutions").select("*").in("solution_id", solutionIds)
+          : Promise.resolve({ data: [], error: null }),
+        traderIds.length
+          ? adminClient.from("traders").select("*").in("trader_id", traderIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (solutionError) throw new Error(solutionError.message);
+      if (traderError) throw new Error(traderError.message);
+
+      const solutionMap = new Map((solutionRows || []).map((row) => [requireString(row.solution_id), row]));
+      const traderMap = new Map((traderRows || []).map((row) => [requireString(row.trader_id), row]));
+
+      for (const offeringRow of offeringRows || []) {
+        await enrichOfferingIntelligence(
+          offeringRow,
+          solutionMap.get(requireString(offeringRow.solution_id)) || null,
+          traderMap.get(requireString(offeringRow.trader_id)) || null,
+          provider,
+        );
+      }
     }
 
     const { error: completeError } = await adminClient
@@ -1276,6 +1511,7 @@ async function applyChatbotImportBundle(
       traders: bundle.traders.length,
       solutions: bundle.solutions.length,
       offerings: bundle.offerings.length,
+      offeringAiUpdated: changedOfferingIds.length,
     };
   } catch (error) {
     await adminClient
@@ -1441,7 +1677,7 @@ async function syncGreLiveInbounds(actorEmail: string, provider: string) {
   };
 }
 
-async function syncGreChatbotData() {
+async function syncGreChatbotData(provider: string) {
   const [traderReport, solutionReport] = await Promise.all([
     fetchGreReportWorkbook(greTraderReportName, 1000, "trader_data"),
     fetchGreReportWorkbook(greSolutionReportName, 5000, "solution_data"),
@@ -1450,7 +1686,7 @@ async function syncGreChatbotData() {
   const summary = await applyChatbotImportBundle(bundle, {
     solutionFileName: solutionReport.fileName,
     traderFileName: traderReport.fileName,
-  });
+  }, provider);
   return {
     ok: true,
     summary,
@@ -1908,7 +2144,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === "syncGreChatbotData") {
-      return jsonResponse(await syncGreChatbotData());
+      return jsonResponse(await syncGreChatbotData(requireString(payload.aiProvider) || defaultAiProvider));
     }
 
     if (action === "downloadGreChatbotReport") {
