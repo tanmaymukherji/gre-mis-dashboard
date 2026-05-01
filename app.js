@@ -363,6 +363,15 @@ function badgeTone(value) {
   return "info";
 }
 
+function formatAiEnrichmentStatus(value) {
+  const text = normalizeText(value);
+  const lowered = text.toLowerCase();
+  if (!text) return "not enriched";
+  if (lowered.includes("not configured")) return "Legacy AI refresh unavailable";
+  if (lowered === "rules_only") return "Rule-based enrichment";
+  return text;
+}
+
 function tokenizeText(value, minimumLength = 4) {
   return normalizeText(value)
     .toLowerCase()
@@ -494,6 +503,10 @@ function categoryFilterMatches(category, need) {
 function buildNeedMatchProfile(need) {
   const categories = uniq(parseArray(need.curated_need).map((item) => item.toLowerCase()));
   const categoryParts = categories.map((item) => extractCategoryParts(item));
+  const ruleThemes = uniq(parseArray(need.rule_thematic_hints).map((item) => item.toLowerCase()).filter(Boolean));
+  const ruleServices = uniq(parseArray(need.rule_service_hints).map((item) => item.toLowerCase()).filter(Boolean));
+  const ruleKeywords = uniq(parseArray(need.rule_keywords).map((item) => item.toLowerCase()).filter(Boolean));
+  const ruleNeedKind = normalizeText(need.rule_need_kind).toLowerCase();
   const aiKeywords = uniq(parseArray(need.ai_keywords).map((item) => item.toLowerCase()));
   const aiSignals = uniq([
     normalizeText(need.ai_thematic_area).toLowerCase(),
@@ -509,20 +522,24 @@ function buildNeedMatchProfile(need) {
       .map((item) => item.thematic)
       .filter((item) => item && !GENERIC_THEMATIC_TERMS.has(item)),
   );
-  const serviceTerms = uniq(categoryParts.map((item) => item.service).filter(Boolean));
-  const problemTokens = tokenizeText(need.problem_statement, 5);
-  const notesTokens = tokenizeText(need.curation_notes, 5);
+  const serviceTerms = uniq([...categoryParts.map((item) => item.service).filter(Boolean), ...ruleServices]);
+  const problemTokens = uniq([...ruleKeywords, ...tokenizeText(need.problem_statement, 7)]);
+  const notesTokens = uniq([...ruleKeywords, ...tokenizeText(need.curation_notes, 5)]);
   const geographyTokens = tokenizeText(`${need.state || ""} ${need.district || ""}`, 3);
   const serviceTokens = serviceTerms.flatMap((item) => tokenizeText(item, 3));
   const sharedSolutionHints = extractSharedSolutionHints(need.curation_notes);
   const problemPhrases = extractProblemPhrases(need.problem_statement);
   const explicitThemeTokens = uniq([
+    ...ruleThemes.flatMap((item) => tokenizeText(item, 3)),
+    ...ruleKeywords,
     ...tokenizeText(need.problem_statement, 4),
     ...tokenizeText(need.curation_notes, 4),
   ]).slice(0, 16);
-  const domainFocusTokens = explicitThemeTokens.filter((token) => !DOMAIN_MATCH_STOPWORDS.has(token));
+  const domainFocusTokens = uniq([...ruleThemes.flatMap((item) => tokenizeText(item, 3)), ...ruleKeywords, ...explicitThemeTokens])
+    .filter((token) => !DOMAIN_MATCH_STOPWORDS.has(token));
   const thematicAreas = uniq([
     ...sharedSolutionHints.phrases,
+    ...ruleThemes,
     ...categoryThematicAreas,
     ...aiSignals,
     ...(categoryThematicAreas.length ? [] : problemPhrases.slice(0, 8)),
@@ -541,7 +558,7 @@ function buildNeedMatchProfile(need) {
           .map((item) => item.toLowerCase()),
       ),
   );
-  const requiresServiceMatch = Boolean(aiServiceKind) || (aiNeedKind === "service" && categoryThematicAreas.length === 0);
+  const requiresServiceMatch = Boolean(aiServiceKind || ruleServices[0]) || ((aiNeedKind || ruleNeedKind) === "service" && categoryThematicAreas.length === 0 && !ruleThemes.length);
 
   return {
     categories,
@@ -1463,7 +1480,7 @@ class GreMisStore {
     const traderMap = new Map((tradersRes.data || []).map((row) => [row.trader_id, row]));
     const solutionMap = new Map((solutionsRes.data || []).map((row) => [row.solution_id, row]));
 
-    return offerings
+    const ranked = offerings
       .map((offering) => {
         const enriched = {
           ...offering,
@@ -1480,8 +1497,21 @@ class GreMisStore {
         matchReasons: matchMeta.reasons,
       };
     })
-      .filter((item) => item.thematicMatched && (!profile.domainFocusTokens.length || item.domainMatched) && (profile.requiresServiceMatch ? item.serviceMatched : true) && item.matchScore >= 8)
       .sort((a, b) => b.matchScore - a.matchScore);
+
+    const strictMatches = ranked.filter((item) =>
+      item.thematicMatched &&
+      (!profile.domainFocusTokens.length || item.domainMatched) &&
+      (profile.requiresServiceMatch ? item.serviceMatched : true) &&
+      item.matchScore >= 8,
+    );
+
+    if (strictMatches.length) return strictMatches;
+
+    return ranked.filter((item) =>
+      item.matchScore >= 10 &&
+      (item.domainMatched || item.thematicMatched),
+    );
   }
 }
 
@@ -2098,7 +2128,7 @@ function renderAdminQueue() {
                 <div class="status-row">
                   <span class="status-pill ${need.ai_validation_status === "flagged" ? "warn" : "info"}">${esc(need.ai_validation_status || "needs review")}</span>
                   <span class="status-pill info">${esc(`Confidence ${need.ai_confidence ?? 0}`)}</span>
-                  <span class="status-pill ${badgeTone(need.ai_enrichment_status)}">${esc(need.ai_enrichment_status || "not enriched")}</span>
+                  <span class="status-pill ${badgeTone(need.ai_enrichment_status)}">${esc(formatAiEnrichmentStatus(need.ai_enrichment_status))}</span>
                 </div>
                 <h4>${esc(need.organization_name)}</h4>
                 <p class="helper-text">${esc(clipText(need.problem_statement, 170))}</p>

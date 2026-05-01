@@ -600,6 +600,11 @@ function validateAiEnrichment(
 
 async function callAiJson(providerInput: string, prompt: string) {
   const provider = (providerInput || defaultAiProvider || "openrouter").toLowerCase();
+  const configuredProviders = [
+    geminiApiKey ? "gemini" : "",
+    openRouterApiKey ? "openrouter" : "",
+    deepSeekApiKey ? "deepseek" : "",
+  ].filter(Boolean);
   const tryProvider = async (resolvedProvider: string) => {
     if (resolvedProvider === "gemini") {
       if (!geminiApiKey) throw new Error("GEMINI_API_KEY is not configured.");
@@ -658,11 +663,19 @@ async function callAiJson(providerInput: string, prompt: string) {
     return JSON.parse(text);
   };
 
-  const fallbackOrder = provider === "gemini"
+  const requestedOrder = provider === "gemini"
     ? ["gemini", "openrouter", "deepseek"]
     : provider === "deepseek"
       ? ["deepseek", "openrouter", "gemini"]
       : ["openrouter", "gemini", "deepseek"];
+  const fallbackOrder = [
+    ...requestedOrder.filter((candidate) => configuredProviders.includes(candidate)),
+    ...configuredProviders.filter((candidate) => !requestedOrder.includes(candidate)),
+  ];
+
+  if (!fallbackOrder.length) {
+    throw new Error("No AI provider is configured. Falling back to rule-based enrichment.");
+  }
 
   let lastError: unknown = null;
   for (const candidate of fallbackOrder) {
@@ -678,31 +691,64 @@ async function callAiJson(providerInput: string, prompt: string) {
 
 async function enrichNeedIntelligence(need: Record<string, unknown>, provider: string) {
   const rules = classifyNeedByRules(need);
-  const ai = await callAiJson(provider, buildNeedIntelligencePrompt(need));
-  const validation = validateAiEnrichment(need, ai, rules);
-  const patch = {
+  const basePatch = {
     rule_thematic_hints: rules.thematicHints,
     rule_service_hints: rules.serviceHints,
     rule_keywords: rules.keywords,
     rule_6m_signals: rules.sixMSignals,
     rule_need_kind: rules.needKind,
-    ai_thematic_area: requireString(ai.thematic_area),
-    ai_application_area: requireString(ai.application_area),
-    ai_need_kind: requireString(ai.need_kind),
-    ai_service_kind: requireString(ai.service_kind),
-    ai_keywords: asStringArray(ai.keywords),
-    ai_6m_signals: asStringArray(ai.six_m_signals),
-    ai_summary: requireString(ai.summary),
-    ai_engine: provider || defaultAiProvider,
-    ai_enriched_at: new Date().toISOString(),
-    ai_enrichment_status: validation.status === "ready" ? "ready" : "ready_flagged",
-    ai_validation_flags: validation.flags,
-    ai_validation_status: validation.status,
-    ai_confidence: validation.confidence,
-    ai_prompt_version: aiPromptVersion,
-    ai_schema_version: aiSchemaVersion,
-    ai_payload: ai,
   };
+  const nowIso = new Date().toISOString();
+
+  let patch: Record<string, unknown>;
+  try {
+    const ai = await callAiJson(provider, buildNeedIntelligencePrompt(need));
+    const validation = validateAiEnrichment(need, ai, rules);
+    patch = {
+      ...basePatch,
+      ai_thematic_area: requireString(ai.thematic_area),
+      ai_application_area: requireString(ai.application_area),
+      ai_need_kind: requireString(ai.need_kind),
+      ai_service_kind: requireString(ai.service_kind),
+      ai_keywords: asStringArray(ai.keywords),
+      ai_6m_signals: asStringArray(ai.six_m_signals),
+      ai_summary: requireString(ai.summary),
+      ai_engine: provider || defaultAiProvider,
+      ai_enriched_at: nowIso,
+      ai_enrichment_status: validation.status === "ready" ? "ready" : "ready_flagged",
+      ai_validation_flags: validation.flags,
+      ai_validation_status: validation.status,
+      ai_confidence: validation.confidence,
+      ai_prompt_version: aiPromptVersion,
+      ai_schema_version: aiSchemaVersion,
+      ai_payload: ai,
+    };
+  } catch (error) {
+    const fallbackFlags = rules.thematicHints.length || rules.keywords.length ? [] : ["needs_review"];
+    patch = {
+      ...basePatch,
+      ai_thematic_area: rules.thematicHints[0] || "",
+      ai_application_area: "",
+      ai_need_kind: rules.needKind || "",
+      ai_service_kind: rules.serviceHints[0] || "",
+      ai_keywords: rules.keywords,
+      ai_6m_signals: rules.sixMSignals,
+      ai_summary: requireString(need.problem_statement).slice(0, 500),
+      ai_engine: "rules_only",
+      ai_enriched_at: nowIso,
+      ai_enrichment_status: "rules_only",
+      ai_validation_flags: fallbackFlags,
+      ai_validation_status: fallbackFlags.length ? "flagged" : "ready",
+      ai_confidence: rules.thematicHints.length ? 74 : rules.keywords.length ? 61 : 28,
+      ai_prompt_version: aiPromptVersion,
+      ai_schema_version: aiSchemaVersion,
+      ai_payload: {
+        mode: "rules_only",
+        provider_requested: provider || defaultAiProvider,
+        reason: error instanceof Error ? error.message : "AI enrichment unavailable.",
+      },
+    };
+  }
 
   const { error } = await adminClient.from("gre_mis_needs").update(patch).eq("id", requireString(need.id));
   if (error) throw new Error(error.message);
