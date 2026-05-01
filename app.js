@@ -35,15 +35,16 @@ const state = {
     state: "all",
     search: "",
   },
-  data: {
-    curators: [],
-    options: [],
-    needs: [],
-    needUpdates: [],
-    pendingNeeds: [],
-    pendingUpdates: [],
-  },
-};
+    data: {
+      curators: [],
+      options: [],
+      needs: [],
+      needUpdates: [],
+      pendingNeeds: [],
+      pendingUpdates: [],
+      aiReviewNeeds: [],
+    },
+  };
 
 const MATCH_STOPWORDS = new Set([
   "about", "across", "after", "also", "been", "being", "between", "could", "does", "from", "have", "into",
@@ -1282,11 +1283,13 @@ class GreMisStore {
     if (!state.adminToken) {
       state.data.pendingNeeds = [];
       state.data.pendingUpdates = [];
+      state.data.aiReviewNeeds = [];
       return;
     }
     const data = await this.callAdmin("adminSnapshot", {}, true);
     state.data.pendingNeeds = ensureList(data.pendingNeeds);
     state.data.pendingUpdates = ensureList(data.pendingUpdates);
+    state.data.aiReviewNeeds = ensureList(data.aiReviewNeeds);
   }
 
   async createNeed(payload) {
@@ -1551,13 +1554,16 @@ function renderMetrics() {
   if (!metricsGrid) return;
   const needs = getDisplayNeeds();
   const metrics = [
-    ["approved", "Approved Needs", needs.length, "Live inbound needs currently visible in the MIS."],
-    ["in_progress", "In Progress", needs.filter((need) => need.status === "In progress").length, "Needs under active curation or provider search."],
-    ["need_providers", "Need Providers", needs.filter((need) => need.internal_status === "Need solution providers").length, "Needs waiting on live solution/provider matching."],
-    ["connection_made", "Connection Made", needs.filter((need) => need.internal_status === "Connection made").length, "Needs where the solution side has begun to move."],
-    ["stuck", "Stuck 7+ Days", needs.filter((need) => Number(need.curation_age_days || 0) >= 7).length, "Aging needs that need intervention during the day."],
-    ["admin_queue", "Admin Queue", state.data.pendingNeeds.length + state.data.pendingUpdates.length, "Pending intake approvals and curator change requests."],
-  ];
+      ["approved", "Approved Needs", needs.length, "Live inbound needs currently visible in the MIS."],
+      ["in_progress", "In Progress", needs.filter((need) => need.status === "In progress").length, "Needs under active curation or provider search."],
+      ["need_providers", "Need Providers", needs.filter((need) => need.internal_status === "Need solution providers").length, "Needs waiting on live solution/provider matching."],
+      ["connection_made", "Connection Made", needs.filter((need) => need.internal_status === "Connection made").length, "Needs where the solution side has begun to move."],
+      ["stuck", "Stuck 7+ Days", needs.filter((need) => Number(need.curation_age_days || 0) >= 7).length, "Aging needs that need intervention during the day."],
+      ["admin_queue", "Admin Queue", state.data.pendingNeeds.length + state.data.pendingUpdates.length, "Pending intake approvals and curator change requests."],
+    ];
+  if (byId("adminView")) {
+    metrics.push(["ai_review", "AI Review", state.data.aiReviewNeeds.length, "Approved needs flagged for AI review or missing validation."]);
+  }
 
   metricsGrid.innerHTML = metrics
     .map(
@@ -2028,7 +2034,8 @@ function renderWorkbench() {
 function renderAdminQueue() {
   const pendingNeedsList = byId("pendingNeedsList");
   const pendingUpdatesList = byId("pendingUpdatesList");
-  if (!pendingNeedsList || !pendingUpdatesList) return;
+  const aiReviewList = byId("aiReviewList");
+  if (!pendingNeedsList || !pendingUpdatesList || !aiReviewList) return;
 
   pendingNeedsList.innerHTML = state.adminToken
     ? state.data.pendingNeeds.length
@@ -2080,7 +2087,33 @@ function renderAdminQueue() {
           )
           .join("")
       : `<div class="empty-state">No curator update requests are waiting for approval.</div>`
-    : `<div class="empty-state">Login as admin to view curator-submitted status changes.</div>`;
+      : `<div class="empty-state">Login as admin to view curator-submitted status changes.</div>`;
+
+  aiReviewList.innerHTML = state.adminToken
+    ? state.data.aiReviewNeeds.length
+      ? state.data.aiReviewNeeds
+          .map(
+            (need) => `
+              <article class="approval-card">
+                <div class="status-row">
+                  <span class="status-pill ${need.ai_validation_status === "flagged" ? "warn" : "info"}">${esc(need.ai_validation_status || "needs review")}</span>
+                  <span class="status-pill info">${esc(`Confidence ${need.ai_confidence ?? 0}`)}</span>
+                  <span class="status-pill ${badgeTone(need.ai_enrichment_status)}">${esc(need.ai_enrichment_status || "not enriched")}</span>
+                </div>
+                <h4>${esc(need.organization_name)}</h4>
+                <p class="helper-text">${esc(clipText(need.problem_statement, 170))}</p>
+                <div class="detail-list">
+                  <div><strong>Rule Themes:</strong> ${esc(parseArray(need.rule_thematic_hints).join(", ") || "None")}</div>
+                  <div><strong>AI Theme:</strong> ${esc(need.ai_thematic_area || "Not set")}</div>
+                  <div><strong>Need Kind:</strong> ${esc(need.ai_need_kind || "Not set")}${need.ai_service_kind ? ` / ${esc(need.ai_service_kind)}` : ""}</div>
+                  <div><strong>Flags:</strong> ${esc(parseArray(need.ai_validation_flags).join(", ") || "None")}</div>
+                </div>
+              </article>
+            `,
+          )
+          .join("")
+      : `<div class="empty-state">No approved needs are currently flagged for AI review.</div>`
+    : `<div class="empty-state">Login as admin to view the AI review queue.</div>`;
 
 }
 
@@ -2144,15 +2177,17 @@ async function rerender(options = {}) {
 async function refreshAll() {
   await Promise.all([
     store.loadBaseData(),
-    state.adminToken
-      ? store.loadAdminSnapshot().catch(() => {
-          state.data.pendingNeeds = [];
-          state.data.pendingUpdates = [];
-        })
-      : Promise.resolve().then(() => {
-          state.data.pendingNeeds = [];
-          state.data.pendingUpdates = [];
-        }),
+      state.adminToken
+        ? store.loadAdminSnapshot().catch(() => {
+            state.data.pendingNeeds = [];
+            state.data.pendingUpdates = [];
+            state.data.aiReviewNeeds = [];
+          })
+        : Promise.resolve().then(() => {
+            state.data.pendingNeeds = [];
+            state.data.pendingUpdates = [];
+            state.data.aiReviewNeeds = [];
+          }),
   ]);
   const displayNeeds = getDisplayNeeds();
   if (!displayNeeds.find((need) => need.id === state.selectedNeedId)) {

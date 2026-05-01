@@ -24,6 +24,8 @@ const defaultAiProvider = (Deno.env.get("GRE_MIS_AI_PROVIDER") ?? "openrouter").
 const defaultOpenRouterModel = Deno.env.get("GRE_MIS_OPENROUTER_MODEL") ?? "openai/gpt-4.1-mini";
 const defaultGeminiModel = Deno.env.get("GRE_MIS_GEMINI_MODEL") ?? "gemini-2.0-flash";
 const defaultDeepSeekModel = Deno.env.get("GRE_MIS_DEEPSEEK_MODEL") ?? "deepseek-chat";
+const aiPromptVersion = "2026-05-01.gre-mis.v1";
+const aiSchemaVersion = "gre-mis-need-intelligence.v1";
 const mapplsAccessToken = Deno.env.get("MAPPLS_ACCESS_TOKEN") ?? Deno.env.get("GRE_MIS_MAPPLS_ACCESS_TOKEN") ?? "";
 const greLoginBaseUrl = Deno.env.get("GRE_LOGIN_BASE_URL") ?? "https://login.platformcommons.org/gateway";
 const greSiteOrigin = Deno.env.get("GRE_SITE_ORIGIN") ?? "https://greenruraleconomy.in";
@@ -100,6 +102,83 @@ function stripHtml(html: string | null) {
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
 }
+
+function tokenizeLooseText(value: unknown, minimumLength = 4) {
+  return uniqueStrings(
+    requireString(value)
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length >= minimumLength),
+  );
+}
+
+const genericThematicTerms = new Set([
+  "business",
+  "business consultation",
+  "business mentoring",
+  "business development",
+  "training",
+  "capacity building",
+  "advisory",
+  "consulting",
+  "consultancy",
+  "technology",
+  "infrastructure",
+  "vendor",
+  "connect collaborate",
+  "entrepreneurship",
+  "business training",
+  "finance",
+  "funding",
+  "investments",
+]);
+
+const domainStopwords = new Set([
+  "project",
+  "projects",
+  "village",
+  "villages",
+  "support",
+  "farmers",
+  "farmer",
+  "guidance",
+  "implement",
+  "implementation",
+  "funding",
+  "need",
+  "needs",
+  "management",
+  "going",
+  "under",
+]);
+
+const ruleThemeSignals = [
+  { label: "dairy", patterns: ["dairy", "milk", "milching", "cow", "cows", "livestock", "fodder"] },
+  { label: "solar", patterns: ["solar", "street light", "street lights", "streetlight"] },
+  { label: "wild mango", patterns: ["wild mango", "mango", "amchur", "ntfp", "forest produce"] },
+  { label: "goatery", patterns: ["goat", "goatery", "goat farming"] },
+  { label: "poultry", patterns: ["poultry", "chicken", "broiler", "layer"] },
+  { label: "fisheries", patterns: ["fishery", "fisheries", "aquaculture", "fish farming"] },
+  { label: "makhana", patterns: ["makhana", "fox nut"] },
+  { label: "branding", patterns: ["branding", "logo", "packaging", "marketplace onboarding"] },
+  { label: "business planning", patterns: ["business plan", "business development plan", "costing", "pricing"] },
+];
+
+const ruleNeedKindPatterns = [
+  { label: "finance", patterns: ["finance", "funding", "credit", "loan", "financial support"] },
+  { label: "product", patterns: ["machine", "machinery", "equipment", "plant", "street light", "product", "unit"] },
+  { label: "knowledge", patterns: ["manual", "video", "sop", "blog", "knowledge product", "guide"] },
+  { label: "service", patterns: ["training", "consulting", "consultancy", "mentoring", "technology transfer", "advisory"] },
+];
+
+const ruleServiceKindPatterns = [
+  { label: "training", patterns: ["training", "capacity building"] },
+  { label: "consulting", patterns: ["consulting", "consultancy", "business consultation"] },
+  { label: "mentoring", patterns: ["mentoring", "business mentoring"] },
+  { label: "technology transfer", patterns: ["technology transfer"] },
+  { label: "advisory", patterns: ["advisory"] },
+];
 
 function splitLooseList(value: string | null, separators = [",", ";", "\n"]) {
   if (!value) return [];
@@ -407,7 +486,116 @@ Return JSON with exactly:
   "six_m_signals": [],
   "keywords": [],
   "summary": ""
-}`.trim();
+  }`.trim();
+}
+
+function classifyNeedByRules(need: Record<string, unknown>) {
+  const curatedNeed = asStringArray(need.curated_need).map((item) => item.toLowerCase());
+  const text = [
+    requireString(need.problem_statement),
+    requireString(need.curation_notes),
+    curatedNeed.join(" "),
+  ].join(" | ").toLowerCase();
+
+  const thematicHints = uniqueStrings(
+    ruleThemeSignals
+      .filter((rule) => rule.patterns.some((pattern) => text.includes(pattern)))
+      .map((rule) => rule.label),
+  );
+
+  const serviceHints = uniqueStrings(
+    ruleServiceKindPatterns
+      .filter((rule) => rule.patterns.some((pattern) => text.includes(pattern) || curatedNeed.some((entry) => entry.includes(pattern))))
+      .map((rule) => rule.label),
+  );
+
+  const rule6M = uniqueStrings(
+    [
+      text.includes("training") || text.includes("capacity building") ? "Manpower" : "",
+      ["consulting", "consultancy", "mentoring", "technology transfer", "manual", "video", "sop", "blog"].some((pattern) => text.includes(pattern)) ? "Method" : "",
+      ["machine", "machinery", "plant setup", "street light", "street lights", "equipment"].some((pattern) => text.includes(pattern)) ? "Machine" : "",
+      ["raw material", "raw materials", "material supply"].some((pattern) => text.includes(pattern)) ? "Material" : "",
+      ["products bought", "market support", "market report", "market reports", "branding", "packaging", "business development"].some((pattern) => text.includes(pattern)) ? "Market" : "",
+      ["financial support", "finance", "funding", "investment", "credit", "loan"].some((pattern) => text.includes(pattern)) ? "Money" : "",
+    ].filter(Boolean) as string[],
+  );
+
+  const ruleNeedKinds = uniqueStrings(
+    ruleNeedKindPatterns
+      .filter((rule) => rule.patterns.some((pattern) => text.includes(pattern)))
+      .map((rule) => rule.label),
+  );
+
+  const needKind = ruleNeedKinds.length > 1 ? "mixed" : ruleNeedKinds[0] || "";
+  const serviceKind = needKind === "service" || needKind === "mixed" ? serviceHints[0] || "" : "";
+  const domainTokens = tokenizeLooseText(text, 4).filter((token) => !domainStopwords.has(token)).slice(0, 18);
+
+  return {
+    thematicHints,
+    serviceHints,
+    sixMSignals: rule6M,
+    needKind,
+    serviceKind,
+    keywords: uniqueStrings([...thematicHints, ...domainTokens]).slice(0, 18),
+  };
+}
+
+function validateAiEnrichment(
+  need: Record<string, unknown>,
+  ai: Record<string, unknown>,
+  rules: ReturnType<typeof classifyNeedByRules>,
+) {
+  const flags: string[] = [];
+  const aiThematic = requireString(ai.thematic_area).toLowerCase();
+  const aiNeedKind = requireString(ai.need_kind).toLowerCase();
+  const aiServiceKind = requireString(ai.service_kind).toLowerCase();
+  const aiKeywords = asStringArray(ai.keywords).map((item) => item.toLowerCase());
+  const aiSixM = asStringArray(ai.six_m_signals);
+
+  if (!aiThematic) {
+    flags.push("missing_thematic_area");
+  } else if (genericThematicTerms.has(aiThematic)) {
+    flags.push("generic_thematic_area");
+  }
+
+  if (!aiNeedKind) {
+    flags.push("missing_need_kind");
+  }
+  if (aiNeedKind !== "service" && aiServiceKind) {
+    flags.push("service_kind_without_service_need");
+  }
+  if (aiNeedKind === "service" && !aiServiceKind) {
+    flags.push("missing_service_kind");
+  }
+
+  if (rules.sixMSignals.length && !rules.sixMSignals.some((label) => aiSixM.includes(label))) {
+    flags.push("six_m_mismatch");
+  }
+  if (rules.thematicHints.length && aiThematic && !rules.thematicHints.some((hint) => aiThematic.includes(hint) || hint.includes(aiThematic))) {
+    flags.push("thematic_mismatch");
+  }
+  if (rules.keywords.length && !rules.keywords.some((keyword) => aiKeywords.some((item) => item.includes(keyword) || keyword.includes(item)))) {
+    flags.push("keyword_mismatch");
+  }
+  if (!aiKeywords.length) {
+    flags.push("missing_keywords");
+  }
+
+  let confidence = 94;
+  confidence -= flags.length * 14;
+  if (rules.thematicHints.length && aiThematic && rules.thematicHints.some((hint) => aiThematic.includes(hint) || hint.includes(aiThematic))) {
+    confidence += 6;
+  }
+  if (rules.sixMSignals.length && rules.sixMSignals.some((label) => aiSixM.includes(label))) {
+    confidence += 4;
+  }
+  confidence = Math.max(0, Math.min(100, confidence));
+
+  return {
+    flags: uniqueStrings(flags),
+    status: flags.length ? "flagged" : "ready",
+    confidence,
+  };
 }
 
 async function callAiJson(providerInput: string, prompt: string) {
@@ -489,8 +677,15 @@ async function callAiJson(providerInput: string, prompt: string) {
 }
 
 async function enrichNeedIntelligence(need: Record<string, unknown>, provider: string) {
+  const rules = classifyNeedByRules(need);
   const ai = await callAiJson(provider, buildNeedIntelligencePrompt(need));
+  const validation = validateAiEnrichment(need, ai, rules);
   const patch = {
+    rule_thematic_hints: rules.thematicHints,
+    rule_service_hints: rules.serviceHints,
+    rule_keywords: rules.keywords,
+    rule_6m_signals: rules.sixMSignals,
+    rule_need_kind: rules.needKind,
     ai_thematic_area: requireString(ai.thematic_area),
     ai_application_area: requireString(ai.application_area),
     ai_need_kind: requireString(ai.need_kind),
@@ -500,7 +695,12 @@ async function enrichNeedIntelligence(need: Record<string, unknown>, provider: s
     ai_summary: requireString(ai.summary),
     ai_engine: provider || defaultAiProvider,
     ai_enriched_at: new Date().toISOString(),
-    ai_enrichment_status: "ready",
+    ai_enrichment_status: validation.status === "ready" ? "ready" : "ready_flagged",
+    ai_validation_flags: validation.flags,
+    ai_validation_status: validation.status,
+    ai_confidence: validation.confidence,
+    ai_prompt_version: aiPromptVersion,
+    ai_schema_version: aiSchemaVersion,
     ai_payload: ai,
   };
 
@@ -750,26 +950,35 @@ async function adminLogout(token: string) {
 }
 
 async function getAdminSnapshot() {
-  const [pendingNeeds, pendingUpdates] = await Promise.all([
+  const [pendingNeeds, pendingUpdates, aiReviewNeeds] = await Promise.all([
     adminClient
       .from("gre_mis_needs")
       .select("id, organization_name, state, district, status, internal_status, requested_on, curator_id, problem_statement, source_kind")
       .eq("approval_status", "pending_admin")
       .order("requested_on", { ascending: false }),
     adminClient
-      .from("gre_mis_update_requests")
-      .select("*")
-      .eq("approval_status", "pending")
-      .order("created_at", { ascending: false }),
-  ]);
+        .from("gre_mis_update_requests")
+        .select("*")
+        .eq("approval_status", "pending")
+        .order("created_at", { ascending: false }),
+      adminClient
+        .from("gre_mis_needs")
+        .select("id, organization_name, state, district, problem_statement, ai_thematic_area, ai_need_kind, ai_service_kind, ai_validation_status, ai_validation_flags, ai_confidence, ai_enrichment_status, ai_engine, ai_enriched_at, rule_thematic_hints, rule_6m_signals")
+        .eq("approval_status", "approved")
+        .or("ai_validation_status.is.null,ai_validation_status.eq.flagged,ai_enrichment_status.is.null")
+        .order("updated_at", { ascending: false })
+        .limit(60),
+    ]);
 
   if (pendingNeeds.error) throw new Error(pendingNeeds.error.message);
   if (pendingUpdates.error) throw new Error(pendingUpdates.error.message);
+  if (aiReviewNeeds.error) throw new Error(aiReviewNeeds.error.message);
 
   return {
     ok: true,
     pendingNeeds: pendingNeeds.data || [],
     pendingUpdates: pendingUpdates.data || [],
+    aiReviewNeeds: aiReviewNeeds.data || [],
   };
 }
 
@@ -1233,8 +1442,13 @@ async function refreshNeedIntelligence(actorEmail: string, provider: string) {
   if (error) throw new Error(error.message);
 
   const staleNeeds = (needs || [])
-    .filter((need) => !need.ai_enriched_at || new Date(need.updated_at).getTime() >= new Date(need.ai_enriched_at).getTime())
-    .slice(0, 25);
+    .filter((need) =>
+      !need.ai_enriched_at ||
+      !need.ai_validation_status ||
+      need.ai_validation_status === "flagged" ||
+      new Date(need.updated_at).getTime() >= new Date(need.ai_enriched_at).getTime(),
+    )
+    .slice(0, 250);
 
   let aiUpdatedCount = 0;
   for (const need of staleNeeds) {
