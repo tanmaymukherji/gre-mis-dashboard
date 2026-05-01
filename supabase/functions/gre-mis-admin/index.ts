@@ -20,10 +20,12 @@ const gmailSenderEmail = Deno.env.get("GMAIL_SENDER_EMAIL") ?? "help@greenrurale
 const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY") ?? Deno.env.get("GRE_MIS_OPENROUTER_API_KEY") ?? "";
 const geminiApiKey = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GRE_MIS_GEMINI_API_KEY") ?? "";
 const deepSeekApiKey = Deno.env.get("DEEPSEEK_API_KEY") ?? Deno.env.get("GRE_MIS_DEEPSEEK_API_KEY") ?? "";
+const openAiApiKey = Deno.env.get("OPENAI_API_KEY") ?? Deno.env.get("GRE_MIS_OPENAI_API_KEY") ?? "";
 const defaultAiProvider = (Deno.env.get("GRE_MIS_AI_PROVIDER") ?? "openrouter").toLowerCase();
 const defaultOpenRouterModel = Deno.env.get("GRE_MIS_OPENROUTER_MODEL") ?? "openai/gpt-4.1-mini";
 const defaultGeminiModel = Deno.env.get("GRE_MIS_GEMINI_MODEL") ?? "gemini-2.0-flash";
 const defaultDeepSeekModel = Deno.env.get("GRE_MIS_DEEPSEEK_MODEL") ?? "deepseek-chat";
+const defaultOpenAiModel = Deno.env.get("GRE_MIS_OPENAI_MODEL") ?? "gpt-4.1-mini";
 const aiPromptVersion = "2026-05-01.gre-mis.v1";
 const aiSchemaVersion = "gre-mis-need-intelligence.v1";
 const mapplsAccessToken = Deno.env.get("MAPPLS_ACCESS_TOKEN") ?? Deno.env.get("GRE_MIS_MAPPLS_ACCESS_TOKEN") ?? "";
@@ -732,6 +734,7 @@ async function callAiJson(providerInput: string, prompt: string) {
     geminiApiKey ? "gemini" : "",
     openRouterApiKey ? "openrouter" : "",
     deepSeekApiKey ? "deepseek" : "",
+    openAiApiKey ? "openai" : "",
   ].filter(Boolean);
   const tryProvider = async (resolvedProvider: string) => {
     if (resolvedProvider === "gemini") {
@@ -770,6 +773,26 @@ async function callAiJson(providerInput: string, prompt: string) {
       return JSON.parse(text);
     }
 
+    if (resolvedProvider === "openai") {
+      if (!openAiApiKey) throw new Error("OPENAI_API_KEY is not configured.");
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openAiApiKey}`,
+        },
+        body: JSON.stringify({
+          model: defaultOpenAiModel,
+          response_format: { type: "json_object" },
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      const text = data?.choices?.[0]?.message?.content || "";
+      if (!response.ok || !text) throw new Error(data?.error?.message || "OpenAI enrichment failed.");
+      return JSON.parse(text);
+    }
+
     if (!openRouterApiKey) throw new Error("OPENROUTER_API_KEY is not configured.");
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -792,10 +815,12 @@ async function callAiJson(providerInput: string, prompt: string) {
   };
 
   const requestedOrder = provider === "gemini"
-    ? ["gemini", "openrouter", "deepseek"]
+    ? ["gemini", "openrouter", "deepseek", "openai"]
     : provider === "deepseek"
-      ? ["deepseek", "openrouter", "gemini"]
-      : ["openrouter", "gemini", "deepseek"];
+      ? ["deepseek", "openrouter", "gemini", "openai"]
+      : provider === "openai"
+        ? ["openai", "openrouter", "gemini", "deepseek"]
+        : ["openrouter", "gemini", "deepseek", "openai"];
   const fallbackOrder = [
     ...requestedOrder.filter((candidate) => configuredProviders.includes(candidate)),
     ...configuredProviders.filter((candidate) => !requestedOrder.includes(candidate)),
