@@ -1625,8 +1625,10 @@ class GreMisStore {
         ...enriched,
         matchScore: matchMeta.score,
         thematicMatched: matchMeta.thematicMatched,
+        primaryThematicMatched: matchMeta.primaryThematicMatched,
         serviceMatched: matchMeta.serviceMatched,
         domainMatched: matchMeta.domainMatched,
+        offeringKind: matchMeta.offeringKind,
         matchReasons: matchMeta.reasons,
       };
     })
