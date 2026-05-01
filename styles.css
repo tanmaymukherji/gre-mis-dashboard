@@ -219,7 +219,7 @@ h2 { font-size: 1.35rem; }
 }
 .pipeline-drilldown-map {
   position: relative;
-  min-height: 520px;
+  min-height: 760px;
   border: 1px solid var(--line);
   border-radius: 20px;
   overflow: hidden;
@@ -227,10 +227,10 @@ h2 { font-size: 1.35rem; }
 }
 .case-map-canvas {
   width: 100%;
-  min-height: 520px;
+  min-height: 760px;
 }
 .case-map-empty {
-  min-height: 520px;
+  min-height: 760px;
   display: grid;
   place-items: center;
   padding: 18px;

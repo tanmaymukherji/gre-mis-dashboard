@@ -1,6 +1,6 @@
 const FALLBACK_CURATORS = [
   { id: "fallback-1", display_name: "Tanmay Mukherji", email: "tanmay@greenruraleconomy.in" },
-  { id: "fallback-2", display_name: "Phaneesh K", email: "phaneesh@greenruraleconomy.in" },
+  { id: "fallback-2", display_name: "Phaneesh K", email: "agri@greenruraleconomy.in" },
   { id: "fallback-3", display_name: "Swati Singh", email: "swati@greenruraleconomy.in" },
   { id: "fallback-4", display_name: "Shaifali Nagar", email: "shaifali@greenruraleconomy.in" },
 ];
@@ -486,6 +486,10 @@ function buildNeedMatchProfile(need) {
   const serviceTokens = serviceTerms.flatMap((item) => tokenizeText(item, 3));
   const sharedSolutionHints = extractSharedSolutionHints(need.curation_notes);
   const problemPhrases = extractProblemPhrases(need.problem_statement);
+  const explicitThemeTokens = uniq([
+    ...tokenizeText(need.problem_statement, 4),
+    ...tokenizeText(need.curation_notes, 4),
+  ]).slice(0, 16);
   const thematicAreas = uniq([
     ...sharedSolutionHints.phrases,
     ...categoryThematicAreas,
@@ -522,6 +526,7 @@ function buildNeedMatchProfile(need) {
     geographyTokens,
     phrases,
     primaryTerms,
+    explicitThemeTokens,
     sharedSolutionHints,
   };
 }
@@ -802,8 +807,9 @@ async function renderCaseMap(needs) {
     state.caseMap?.remove?.();
     state.caseMap = null;
 
-    mapCanvas.innerHTML = `<div id="categoryCasesMapCanvas" class="case-map-canvas"></div><div id="caseMapLocationPanel" class="case-map-location-panel hidden"></div>`;
-    state.caseMap = new window.mappls.Map("categoryCasesMapCanvas", {
+    const canvasId = `categoryCasesMapCanvas-${requestToken}`;
+    mapCanvas.innerHTML = `<div id="${canvasId}" class="case-map-canvas"></div><div id="caseMapLocationPanel" class="case-map-location-panel hidden"></div>`;
+    state.caseMap = new window.mappls.Map(canvasId, {
       center: { lat: groups[0].lat, lng: groups[0].lng },
       zoom: groups.length > 1 ? 4 : 7,
       zoomControl: true,
@@ -988,9 +994,30 @@ function scoreOfferingMatch(need, profile, offering) {
   const geographies = parseArray(offering.geographies).map((item) => item.toLowerCase());
   const category = normalizeText(offering.offering_category).toLowerCase();
   const name = normalizeText(offering.offering_name).toLowerCase();
+  const primaryApplication = normalizeText(offering.primary_application).toLowerCase();
+  const primaryValuechain = normalizeText(offering.primary_valuechain).toLowerCase();
+  const offeringGroup = normalizeText(offering.offering_group).toLowerCase();
+  const offeringType = normalizeText(offering.offering_type).toLowerCase();
+  const domain6m = normalizeText(offering.domain_6m).toLowerCase();
+  const applications = parseArray(offering.applications).map((item) => item.toLowerCase());
+  const valuechains = parseArray(offering.valuechains).map((item) => item.toLowerCase());
   const about = normalizeText(offering.about_offering_text || offering.solution?.about_solution_text).toLowerCase();
   const solutionName = normalizeText(offering.solution?.solution_name).toLowerCase();
-  const joined = [name, category, about, solutionName, tags.join(" "), geographies.join(" ")].join(" ");
+  const joined = [
+    name,
+    category,
+    primaryApplication,
+    primaryValuechain,
+    offeringGroup,
+    offeringType,
+    domain6m,
+    applications.join(" "),
+    valuechains.join(" "),
+    about,
+    solutionName,
+    tags.join(" "),
+    geographies.join(" "),
+  ].join(" ");
 
   let score = 0;
   const reasons = [];
@@ -1018,6 +1045,14 @@ function scoreOfferingMatch(need, profile, offering) {
 
   profile.categoryTokens.forEach((token) => {
     if (tags.some((tag) => tag.includes(token))) {
+      thematicMatched = true;
+      score += 8;
+      reasons.push(token);
+    } else if (primaryApplication.includes(token) || primaryValuechain.includes(token)) {
+      thematicMatched = true;
+      score += 9;
+      reasons.push(token);
+    } else if (applications.some((item) => item.includes(token)) || valuechains.some((item) => item.includes(token))) {
       thematicMatched = true;
       score += 8;
       reasons.push(token);
@@ -1053,9 +1088,15 @@ function scoreOfferingMatch(need, profile, offering) {
   });
 
   profile.problemTokens.slice(0, 8).forEach((token) => {
-    if ((thematicMatched || !profile.categoryThematicAreas.length) && (tags.some((tag) => tag.includes(token)) || name.includes(token) || solutionName.includes(token))) {
+    if ((thematicMatched || !profile.categoryThematicAreas.length) && (
+      tags.some((tag) => tag.includes(token)) ||
+      name.includes(token) ||
+      solutionName.includes(token) ||
+      primaryApplication.includes(token) ||
+      primaryValuechain.includes(token)
+    )) {
       if (!profile.categoryThematicAreas.length) thematicMatched = true;
-      score += 4;
+      score += 5;
       reasons.push(token);
     } else if ((thematicMatched || !profile.categoryThematicAreas.length) && about.includes(token)) {
       if (!profile.categoryThematicAreas.length) thematicMatched = true;
@@ -1277,8 +1318,14 @@ class GreMisStore {
     const client = this.getClient();
     if (!client || !need) return [];
     const profile = buildNeedMatchProfile(need);
-    const offeringSelect = "offering_id,solution_id,trader_id,offering_name,offering_category,tags,geographies,about_offering_text,contact_details,gre_link";
-    const searchTerms = uniq([...profile.thematicAreas, ...profile.serviceTerms, ...profile.phrases, ...profile.primaryTerms]).slice(0, 8);
+    const offeringSelect = "offering_id,solution_id,trader_id,offering_name,offering_category,offering_group,offering_type,primary_application,primary_valuechain,applications,valuechains,domain_6m,tags,geographies,about_offering_text,contact_details,gre_link";
+    const searchTerms = uniq([
+      ...profile.thematicAreas,
+      ...profile.serviceTerms,
+      ...profile.phrases,
+      ...profile.primaryTerms,
+      ...profile.explicitThemeTokens,
+    ]).slice(0, 14);
     const queries = [];
 
     if (searchTerms.length) {
@@ -1290,24 +1337,52 @@ class GreMisStore {
             config: "simple",
             type: "websearch",
           })
-          .limit(48),
+          .limit(72),
       );
     }
 
-    searchTerms.slice(0, 3).forEach((term) => {
+    searchTerms.slice(0, 6).forEach((term) => {
       const safeTerm = term.replaceAll("%", "").replaceAll(",", " ").trim();
       if (!safeTerm) return;
       queries.push(
         client
           .from("offerings")
           .select(offeringSelect)
-          .or(`offering_name.ilike.%${safeTerm}%,offering_category.ilike.%${safeTerm}%,about_offering_text.ilike.%${safeTerm}%`)
-          .limit(30),
+          .or(`offering_name.ilike.%${safeTerm}%,offering_category.ilike.%${safeTerm}%,about_offering_text.ilike.%${safeTerm}%,primary_application.ilike.%${safeTerm}%,primary_valuechain.ilike.%${safeTerm}%`)
+          .limit(42),
       );
     });
 
+    if (profile.sharedSolutionHints.ids.offeringIds.length) {
+      queries.push(
+        client
+          .from("offerings")
+          .select(offeringSelect)
+          .in("offering_id", profile.sharedSolutionHints.ids.offeringIds)
+          .limit(24),
+      );
+    }
+    if (profile.sharedSolutionHints.ids.solutionIds.length) {
+      queries.push(
+        client
+          .from("offerings")
+          .select(offeringSelect)
+          .in("solution_id", profile.sharedSolutionHints.ids.solutionIds)
+          .limit(24),
+      );
+    }
+    if (profile.sharedSolutionHints.ids.traderIds.length) {
+      queries.push(
+        client
+          .from("offerings")
+          .select(offeringSelect)
+          .in("trader_id", profile.sharedSolutionHints.ids.traderIds)
+          .limit(36),
+      );
+    }
+
     if (!queries.length) {
-      queries.push(client.from("offerings").select(offeringSelect).limit(48));
+      queries.push(client.from("offerings").select(offeringSelect).limit(72));
     }
 
     const responses = await Promise.all(queries);
@@ -1354,7 +1429,7 @@ class GreMisStore {
           matchReasons: matchMeta.reasons,
         };
       })
-      .filter((item) => item.thematicMatched && (profile.requiresServiceMatch ? item.serviceMatched : true) && item.matchScore >= 12)
+      .filter((item) => item.thematicMatched && (profile.requiresServiceMatch ? item.serviceMatched : true) && item.matchScore >= 8)
       .sort((a, b) => b.matchScore - a.matchScore);
   }
 }
@@ -1795,7 +1870,9 @@ async function renderMatches() {
               <p class="meta-text">${esc(parseArray(match.geographies).slice(0, 3).join(", ") || "Geography not listed")}</p>
               <div class="card-actions">
                 ${match.gre_link ? `<a class="btn btn-secondary" href="${esc(match.gre_link)}" target="_blank" rel="noreferrer">Open GRE Link</a>` : `<span></span>`}
-                <button class="btn btn-primary" type="button" disabled title="Provider outreach is temporarily disabled until the GRE email ID is updated.">Email This Provider</button>
+                ${window.APP_CONFIG?.ENABLE_EMAIL_ACTIONS && state.adminToken && email
+                  ? `<button class="btn btn-primary" data-action="email-provider" data-provider-email="${esc(email)}">Email This Provider</button>`
+                  : `<button class="btn btn-primary" type="button" disabled title="Provider outreach is available only in an active admin session.">Email This Provider</button>`}
               </div>
             </article>
           `;
@@ -2065,18 +2142,28 @@ function bindStaticEvents() {
     renderNeedDetail();
     renderWorkbench();
     renderMatches();
+    renderOverview();
   });
   byId("curatorFilter")?.addEventListener("change", (event) => {
     state.filters.curator = event.target.value;
     renderQueue();
+    renderNeedDetail();
+    renderWorkbench();
+    renderOverview();
   });
   byId("stateFilter")?.addEventListener("change", (event) => {
     state.filters.state = event.target.value;
     renderQueue();
+    renderNeedDetail();
+    renderWorkbench();
+    renderOverview();
   });
   byId("searchFilter")?.addEventListener("input", (event) => {
     state.filters.search = event.target.value.trim();
     renderQueue();
+    renderNeedDetail();
+    renderWorkbench();
+    renderOverview();
   });
 
   byId("needsQueue")?.addEventListener("click", async (event) => {
@@ -2372,6 +2459,17 @@ function bindStaticEvents() {
       await refreshAll();
       toast("Curator update rejected.");
     }
+  }));
+
+  byId("matchResults")?.addEventListener("click", safeAsync(async (event) => {
+    const button = event.target.closest("[data-action='email-provider']");
+    if (!button) return;
+    if (!state.adminToken) {
+      toast("Login as admin to send provider outreach from the GRE mailbox.");
+      return;
+    }
+    const result = await store.sendProviderIntro(state.selectedNeedId, button.dataset.providerEmail);
+    toast(result.message || "Provider outreach email triggered.");
   }));
 }
 

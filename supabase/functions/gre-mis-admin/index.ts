@@ -16,7 +16,7 @@ const serviceRoleKey =
 const gmailClientId = Deno.env.get("GMAIL_CLIENT_ID") ?? "";
 const gmailClientSecret = Deno.env.get("GMAIL_CLIENT_SECRET") ?? "";
 const gmailRefreshToken = Deno.env.get("GMAIL_REFRESH_TOKEN") ?? "";
-const gmailSenderEmail = Deno.env.get("GMAIL_SENDER_EMAIL") ?? "tanmay@greenruraleconomy.in";
+const gmailSenderEmail = Deno.env.get("GMAIL_SENDER_EMAIL") ?? "help@greenruraleconomy.in";
 const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY") ?? Deno.env.get("GRE_MIS_OPENROUTER_API_KEY") ?? "";
 const geminiApiKey = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GRE_MIS_GEMINI_API_KEY") ?? "";
 const deepSeekApiKey = Deno.env.get("DEEPSEEK_API_KEY") ?? Deno.env.get("GRE_MIS_DEEPSEEK_API_KEY") ?? "";
@@ -1546,7 +1546,7 @@ async function sendProviderIntro(needId: string, providerEmail: string, actorEma
     created_by_email: actorEmail,
   });
 
-  return { ok: true, message: "Provider introduction email sent." };
+  return { ok: true, message: `Provider introduction email sent from ${gmailSenderEmail}.` };
 }
 
 Deno.serve(async (req) => {
