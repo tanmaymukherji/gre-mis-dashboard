@@ -558,7 +558,10 @@ function buildNeedMatchProfile(need) {
           .map((item) => item.toLowerCase()),
       ),
   );
-  const requiresServiceMatch = Boolean(aiServiceKind || ruleServices[0]) || ((aiNeedKind || ruleNeedKind) === "service" && categoryThematicAreas.length === 0 && !ruleThemes.length);
+  const requiresServiceMatch =
+    !ruleThemes.length &&
+    !categoryThematicAreas.length &&
+    (Boolean(aiServiceKind || ruleServices[0]) || (aiNeedKind || ruleNeedKind) === "service");
 
   return {
     categories,
