@@ -1467,6 +1467,33 @@ class GreMisStore {
       });
     });
 
+    if (!offerings.length && profile.thematicAreas.length) {
+      const thematicFallbackTerms = uniq([
+        ...profile.thematicAreas,
+        ...profile.domainFocusTokens,
+      ]).slice(0, 4);
+      const fallbackResponses = await Promise.all(
+        thematicFallbackTerms.map((term) => {
+          const safeTerm = term.replaceAll("%", "").replaceAll(",", " ").trim();
+          if (!safeTerm) return Promise.resolve({ data: [], error: null });
+          return client
+            .from("offerings")
+            .select(offeringSelect)
+            .or(`offering_name.ilike.%${safeTerm}%,offering_category.ilike.%${safeTerm}%,about_offering_text.ilike.%${safeTerm}%,primary_application.ilike.%${safeTerm}%,primary_valuechain.ilike.%${safeTerm}%`)
+            .limit(60);
+        }),
+      );
+
+      fallbackResponses.forEach((response) => {
+        (response.data || []).forEach((row) => {
+          if (!seenOfferingIds.has(row.offering_id)) {
+            seenOfferingIds.add(row.offering_id);
+            offerings.push(row);
+          }
+        });
+      });
+    }
+
     if (!offerings.length) return [];
     const traderIds = [...new Set(offerings.map((item) => item.trader_id).filter(Boolean))];
     const solutionIds = [...new Set(offerings.map((item) => item.solution_id).filter(Boolean))];
