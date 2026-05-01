@@ -562,7 +562,12 @@ function buildNeedMatchProfile(need) {
     !ruleThemes.length &&
     !categoryThematicAreas.length &&
     (Boolean(aiServiceKind || ruleServices[0]) || (aiNeedKind || ruleNeedKind) === "service");
-  const resolvedNeedKind = aiNeedKind || ruleNeedKind || (ruleServices.length ? "service" : "");
+  const resolvedNeedKind = (
+    aiNeedKind ||
+    ((ruleThemes.length && ruleServices.length && !["product", "knowledge", "finance"].includes(ruleNeedKind)) ? "service" : "") ||
+    ruleNeedKind ||
+    (ruleServices.length ? "service" : "")
+  );
   const preferredOfferingKinds =
     resolvedNeedKind === "service"
       ? ["service", "product", "knowledge"]
@@ -593,6 +598,7 @@ function buildNeedMatchProfile(need) {
     sharedSolutionHints,
     resolvedNeedKind,
     preferredOfferingKinds,
+    hasStrongTheme: Boolean(ruleThemes.length || categoryThematicAreas.length || normalizeText(need.ai_thematic_area)),
   };
 }
 
@@ -1256,6 +1262,7 @@ function scoreOfferingMatch(need, profile, offering) {
     primaryThematicMatched,
     serviceMatched,
     domainMatched,
+    offeringKind,
     reasons: uniq(reasons).slice(0, 4),
   };
 }
@@ -1596,19 +1603,25 @@ class GreMisStore {
     })
       .sort((a, b) => b.matchScore - a.matchScore);
 
-    const strictMatches = ranked.filter((item) =>
-      item.thematicMatched &&
-      (!profile.domainFocusTokens.length || item.domainMatched) &&
-      (profile.requiresServiceMatch ? item.serviceMatched : true) &&
-      item.matchScore >= 8,
-    );
+    const strictMatches = ranked.filter((item) => {
+      if (!item.thematicMatched) return false;
+      if (profile.hasStrongTheme && !item.primaryThematicMatched) return false;
+      if (profile.domainFocusTokens.length && !item.domainMatched) return false;
+      if (profile.requiresServiceMatch && !item.serviceMatched) return false;
+      if ((profile.resolvedNeedKind === "service" || (profile.resolvedNeedKind === "mixed" && profile.serviceTerms.length)) && item.offeringKind === "knowledge") return false;
+      if (profile.resolvedNeedKind === "product" && item.offeringKind === "knowledge") return false;
+      return item.matchScore >= 8;
+    });
 
     if (strictMatches.length) return strictMatches;
 
-    return ranked.filter((item) =>
-      item.matchScore >= 10 &&
-      (item.domainMatched || item.thematicMatched),
-    );
+    return ranked.filter((item) => {
+      if (item.matchScore < 10) return false;
+      if (!(item.domainMatched || item.thematicMatched)) return false;
+      if (profile.hasStrongTheme && !item.primaryThematicMatched) return false;
+      if ((profile.resolvedNeedKind === "service" || (profile.resolvedNeedKind === "mixed" && profile.serviceTerms.length)) && item.offeringKind === "knowledge") return false;
+      return true;
+    });
   }
 }
 
