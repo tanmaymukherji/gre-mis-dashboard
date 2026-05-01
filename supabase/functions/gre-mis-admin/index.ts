@@ -1500,33 +1500,63 @@ async function refreshNeedIntelligence(actorEmail: string, provider: string) {
   for (const need of staleNeeds) {
     try {
       if (typeof need.latitude !== "number" || typeof need.longitude !== "number") {
-        const geocode = await geocodeNeedLocation({
-          organization_name: requireString(need.organization_name),
-          district: requireString(need.district),
-          state: requireString(need.state),
-        });
-        await adminClient
-          .from("gre_mis_needs")
-          .update({
-            latitude: geocode.latitude,
-            longitude: geocode.longitude,
-            geocoded_label: geocode.geocoded_label || null,
-            geocode_status: geocode.geocode_status,
-            geocoded_at: new Date().toISOString(),
-          })
-          .eq("id", need.id);
+        try {
+          const geocode = await geocodeNeedLocation({
+            organization_name: requireString(need.organization_name),
+            district: requireString(need.district),
+            state: requireString(need.state),
+          });
+          await adminClient
+            .from("gre_mis_needs")
+            .update({
+              latitude: geocode.latitude,
+              longitude: geocode.longitude,
+              geocoded_label: geocode.geocoded_label || null,
+              geocode_status: geocode.geocode_status,
+              geocoded_at: new Date().toISOString(),
+            })
+            .eq("id", need.id);
+        } catch {
+          await adminClient
+            .from("gre_mis_needs")
+            .update({
+              geocode_status: "geocode_failed",
+              geocoded_at: new Date().toISOString(),
+            })
+            .eq("id", need.id);
+        }
       }
       await enrichNeedIntelligence(need, provider);
       aiUpdatedCount += 1;
     } catch (error) {
+      const rules = classifyNeedByRules(need);
       await adminClient
         .from("gre_mis_needs")
         .update({
-          ai_engine: provider,
+          rule_thematic_hints: rules.thematicHints,
+          rule_service_hints: rules.serviceHints,
+          rule_keywords: rules.keywords,
+          rule_6m_signals: rules.sixMSignals,
+          rule_need_kind: rules.needKind,
+          ai_thematic_area: rules.thematicHints[0] || null,
+          ai_need_kind: rules.needKind || null,
+          ai_service_kind: rules.serviceHints[0] || null,
+          ai_keywords: rules.keywords,
+          ai_6m_signals: rules.sixMSignals,
+          ai_summary: requireString(need.problem_statement).slice(0, 500),
+          ai_engine: "rules_only",
           ai_enriched_at: new Date().toISOString(),
-          ai_enrichment_status: error instanceof Error ? `error: ${error.message}` : "error",
+          ai_enrichment_status: "rules_only",
+          ai_validation_status: rules.thematicHints.length || rules.keywords.length ? "ready" : "flagged",
+          ai_validation_flags: rules.thematicHints.length || rules.keywords.length ? [] : ["needs_review"],
+          ai_confidence: rules.thematicHints.length ? 74 : rules.keywords.length ? 61 : 28,
+          ai_payload: {
+            mode: "rules_only",
+            reason: error instanceof Error ? error.message : "Rule fallback applied.",
+          },
         })
         .eq("id", need.id);
+      aiUpdatedCount += 1;
     }
   }
 
