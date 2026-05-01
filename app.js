@@ -568,16 +568,7 @@ function buildNeedMatchProfile(need) {
     ruleNeedKind ||
     (ruleServices.length ? "service" : "")
   );
-  const preferredOfferingKinds =
-    resolvedNeedKind === "service"
-      ? ["service", "product", "knowledge"]
-      : resolvedNeedKind === "product"
-        ? ["product", "service", "knowledge"]
-        : resolvedNeedKind === "knowledge"
-          ? ["knowledge", "service", "product"]
-          : resolvedNeedKind === "mixed"
-            ? (ruleServices.length || aiServiceKind ? ["service", "product", "knowledge"] : ["product", "service", "knowledge"])
-            : ["service", "product", "knowledge"];
+  const preferredOfferingKinds = ["service", "product", "knowledge"];
 
   return {
     categories,
