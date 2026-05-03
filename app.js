@@ -28,8 +28,11 @@ const state = {
     category: [],
   },
   adminToken: localStorage.getItem("gre-mis-admin-token") || "",
-  adminSession: null,
-  filters: {
+    adminSession: null,
+    puterModelsLoaded: false,
+    puterModels: [],
+    puterRecommendations: {},
+    filters: {
     status: "all",
     curator: "all",
     state: "all",
@@ -396,6 +399,36 @@ function uniq(items) {
   return [...new Set(items.filter(Boolean))];
 }
 
+function getEffectiveNeedThematicArea(need) {
+  return normalizeText(need?.override_thematic_area || need?.ai_thematic_area);
+}
+
+function getEffectiveNeedApplicationArea(need) {
+  return normalizeText(need?.override_application_area || need?.ai_application_area);
+}
+
+function getEffectiveNeedKind(need) {
+  return normalizeText(need?.override_need_kind || need?.ai_need_kind);
+}
+
+function getEffectiveNeedServiceKind(need) {
+  return normalizeText(need?.override_service_kind || need?.ai_service_kind);
+}
+
+function getEffectiveNeedKeywords(need) {
+  return uniq([
+    ...parseArray(need?.override_keywords).map((item) => item.toLowerCase()),
+    ...parseArray(need?.ai_keywords).map((item) => item.toLowerCase()),
+  ]);
+}
+
+function getEffectiveNeed6MSignals(need) {
+  return uniq([
+    ...parseArray(need?.override_6m_signals),
+    ...parseArray(need?.ai_6m_signals),
+  ]);
+}
+
 function clipText(value, length = 180) {
   const text = normalizeText(value);
   return text.length > length ? `${text.slice(0, length)}...` : text;
@@ -441,6 +474,64 @@ function extractSharedSolutionHints(value) {
       traderIds: uniq(ids.traderIds),
     },
   };
+}
+
+function extractPuterText(response) {
+  if (typeof response === "string") return response.trim();
+  const candidates = [
+    response?.message?.content,
+    response?.content,
+    response?.text,
+    response?.result,
+    response?.message,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    if (Array.isArray(candidate)) {
+      const joined = candidate
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (typeof item?.text === "string") return item.text;
+          if (typeof item?.content === "string") return item.content;
+          return "";
+        })
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+      if (joined) return joined;
+    }
+    if (candidate && typeof candidate === "object") {
+      const nested = String(candidate.text || candidate.content || candidate.message || "").trim();
+      if (nested) return nested;
+    }
+  }
+  return JSON.stringify(response || {});
+}
+
+function stripCodeFences(value) {
+  return String(value || "").replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+}
+
+function parseJsonObject(text) {
+  const cleaned = stripCodeFences(text);
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("AI response did not contain valid JSON.");
+    return JSON.parse(match[0]);
+  }
+}
+
+function normalizePuterModelEntries(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      if (typeof item === "string") return { id: item, name: item };
+      const id = String(item?.id || item?.model || item?.name || "").trim();
+      const name = String(item?.name || item?.label || item?.id || id).trim();
+      return id ? { id, name } : null;
+    })
+    .filter(Boolean);
 }
 
 function extractProblemPhrases(value) {
@@ -499,7 +590,10 @@ function getNeedThemeSignals(need) {
 }
 
 function getNeedSixMSignals(need) {
-  const explicit = parseArray(need?.six_m_signals);
+  const explicit = uniq([
+    ...parseArray(need?.override_6m_signals),
+    ...parseArray(need?.six_m_signals),
+  ]);
   if (explicit.length) return uniq(explicit);
 
   const haystack = [
@@ -533,16 +627,18 @@ function buildNeedMatchProfile(need) {
   const ruleServices = uniq(parseArray(need.rule_service_hints).map((item) => item.toLowerCase()).filter(Boolean));
   const ruleKeywords = uniq(parseArray(need.rule_keywords).map((item) => item.toLowerCase()).filter(Boolean));
   const ruleNeedKind = normalizeText(need.rule_need_kind).toLowerCase();
-  const aiKeywords = uniq(parseArray(need.ai_keywords).map((item) => item.toLowerCase()));
+  const aiKeywords = getEffectiveNeedKeywords(need);
+  const effectiveThematicArea = getEffectiveNeedThematicArea(need).toLowerCase();
+  const effectiveApplicationArea = getEffectiveNeedApplicationArea(need).toLowerCase();
   const aiSignals = uniq([
-    normalizeText(need.ai_thematic_area).toLowerCase(),
-    normalizeText(need.ai_application_area).toLowerCase(),
-    normalizeText(need.ai_need_kind).toLowerCase(),
-    normalizeText(need.ai_service_kind).toLowerCase(),
+    effectiveThematicArea,
+    effectiveApplicationArea,
+    getEffectiveNeedKind(need).toLowerCase(),
+    getEffectiveNeedServiceKind(need).toLowerCase(),
     ...aiKeywords,
   ].filter(Boolean));
-  const aiNeedKind = normalizeText(need.ai_need_kind).toLowerCase();
-  const aiServiceKind = normalizeText(need.ai_service_kind).toLowerCase();
+  const aiNeedKind = getEffectiveNeedKind(need).toLowerCase();
+  const aiServiceKind = getEffectiveNeedServiceKind(need).toLowerCase();
   const categoryThematicAreas = uniq(
     categoryParts
       .map((item) => item.thematic)
@@ -622,7 +718,7 @@ function buildNeedMatchProfile(need) {
     sharedSolutionHints,
     resolvedNeedKind,
     preferredOfferingKinds,
-    hasStrongTheme: Boolean(problemThemeSignals.length || ruleThemes.length || categoryThematicAreas.length || normalizeText(need.ai_thematic_area)),
+    hasStrongTheme: Boolean(problemThemeSignals.length || ruleThemes.length || categoryThematicAreas.length || effectiveThematicArea),
   };
 }
 
@@ -1463,6 +1559,10 @@ class GreMisStore {
     state.data.aiReviewNeeds = ensureList(data.aiReviewNeeds);
   }
 
+  async applyNeedOverride(needId, patch, conflictNote = "", resolveConflict = false) {
+    return this.callAdmin("applyNeedOverride", { needId, patch, conflictNote, resolveConflict }, true);
+  }
+
   async createNeed(payload) {
     const client = this.getClient();
     if (!client) throw new Error("Supabase is not configured.");
@@ -1784,7 +1884,7 @@ function renderMetrics() {
       ["admin_queue", "Admin Queue", state.data.pendingNeeds.length + state.data.pendingUpdates.length, "Pending intake approvals and curator change requests."],
     ];
   if (byId("adminView")) {
-    metrics.push(["ai_review", "AI Review", state.data.aiReviewNeeds.length, "Approved needs flagged for AI review or missing validation."]);
+    metrics.push(["ai_review", "Match QA", state.data.aiReviewNeeds.length, "Approved needs flagged for conflict review, missing validation, or weak classification."]);
   }
 
   metricsGrid.innerHTML = metrics
@@ -2253,6 +2353,126 @@ function renderWorkbench() {
   `;
 }
 
+function getChosenPuterModel() {
+  return String(byId("puterModelSelect")?.value || "").trim() || null;
+}
+
+async function ensurePuterModelsLoaded(forceRefresh = false) {
+  if (!window.puter?.ai) {
+    throw new Error("Puter AI is not available on this page.");
+  }
+  if (state.puterModelsLoaded && !forceRefresh) return state.puterModels;
+  const status = byId("puterStatus");
+  if (status) status.textContent = "Loading Puter models...";
+  const result = await window.puter.ai.listModels();
+  const models = normalizePuterModelEntries(result);
+  state.puterModels = models;
+  state.puterModelsLoaded = true;
+  const select = byId("puterModelSelect");
+  if (select) {
+    const previous = getChosenPuterModel();
+    select.innerHTML = `<option value="">Default Puter model</option>`;
+    models.slice(0, 200).forEach((model) => {
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = model.name;
+      select.appendChild(option);
+    });
+    if (previous && models.some((model) => model.id === previous)) {
+      select.value = previous;
+    }
+  }
+  if (status) status.textContent = models.length ? `Loaded ${models.length} Puter model options.` : "No Puter models were returned.";
+  return models;
+}
+
+async function runPuterChat(prompt) {
+  await ensurePuterModelsLoaded(false);
+  const model = getChosenPuterModel();
+  const options = model ? { model } : {};
+  const response = await window.puter.ai.chat(prompt, options);
+  return extractPuterText(response);
+}
+
+function buildPuterNeedReviewPrompt(need) {
+  return `
+You are reviewing a rural-economy inbound need for classification quality control.
+Return only valid JSON.
+
+Need record:
+${JSON.stringify({
+  id: need.id,
+  organization_name: need.organization_name,
+  state: need.state,
+  district: need.district,
+  curated_need: parseArray(need.curated_need),
+  problem_statement: need.problem_statement,
+  curation_notes: need.curation_notes,
+  current_rule_thematic_hints: parseArray(need.rule_thematic_hints),
+  current_ai_thematic_area: need.ai_thematic_area,
+  current_ai_application_area: need.ai_application_area,
+  current_ai_need_kind: need.ai_need_kind,
+  current_ai_service_kind: need.ai_service_kind,
+  current_ai_6m_signals: parseArray(need.ai_6m_signals),
+  current_ai_keywords: parseArray(need.ai_keywords),
+}, null, 2)}
+
+Classify the need into:
+- thematic_area: the core theme like dairy, soap, solar, goatery
+- application_area: narrower operational area
+- need_kind: one of service, product, knowledge, finance, mixed
+- service_kind: only if need_kind is service
+- six_m_signals: any of Manpower, Method, Machine, Material, Market, Money
+- keywords: 6 to 12 precise search keywords
+- summary: one concise operational summary
+- conflict_reason: explain briefly why current stored classification may be weak or wrong
+
+Rules:
+- prioritize the core thematic area over generic secondary needs like branding or packaging
+- identify deployable need form clearly
+- output arrays for six_m_signals and keywords
+- output empty string for service_kind if not service
+
+JSON schema:
+{
+  "thematic_area": "",
+  "application_area": "",
+  "need_kind": "",
+  "service_kind": "",
+  "six_m_signals": [],
+  "keywords": [],
+  "summary": "",
+  "conflict_reason": ""
+}`.trim();
+}
+
+function normalizeNeedReviewSuggestion(payload) {
+  return {
+    thematic_area: normalizeText(payload?.thematic_area),
+    application_area: normalizeText(payload?.application_area),
+    need_kind: normalizeText(payload?.need_kind).toLowerCase(),
+    service_kind: normalizeText(payload?.service_kind).toLowerCase(),
+    six_m_signals: uniq(parseArray(payload?.six_m_signals)),
+    keywords: uniq(parseArray(payload?.keywords).map((item) => item.toLowerCase())).slice(0, 12),
+    summary: normalizeText(payload?.summary),
+    conflict_reason: normalizeText(payload?.conflict_reason),
+  };
+}
+
+function getNeedRecommendation(needId) {
+  return state.puterRecommendations?.[needId] || null;
+}
+
+async function runPuterNeedReview(needId) {
+  const need = state.data.aiReviewNeeds.find((item) => item.id === needId) || state.data.needs.find((item) => item.id === needId);
+  if (!need) throw new Error("Need not found for Puter review.");
+  const text = await runPuterChat(buildPuterNeedReviewPrompt(need));
+  const suggestion = normalizeNeedReviewSuggestion(parseJsonObject(text));
+  state.puterRecommendations[needId] = suggestion;
+  renderAdminQueue();
+  return suggestion;
+}
+
 function renderAdminQueue() {
   const pendingNeedsList = byId("pendingNeedsList");
   const pendingUpdatesList = byId("pendingUpdatesList");
@@ -2315,23 +2535,57 @@ function renderAdminQueue() {
     ? state.data.aiReviewNeeds.length
       ? state.data.aiReviewNeeds
           .map(
-            (need) => `
-              <article class="approval-card">
-                <div class="status-row">
-                  <span class="status-pill ${need.ai_validation_status === "flagged" ? "warn" : "info"}">${esc(need.ai_validation_status || "needs review")}</span>
-                  <span class="status-pill info">${esc(`Confidence ${need.ai_confidence ?? 0}`)}</span>
-                  <span class="status-pill ${badgeTone(need.ai_enrichment_status)}">${esc(formatAiEnrichmentStatus(need.ai_enrichment_status))}</span>
-                </div>
-                <h4>${esc(need.organization_name)}</h4>
-                <p class="helper-text">${esc(clipText(need.problem_statement, 170))}</p>
-                <div class="detail-list">
-                  <div><strong>Rule Themes:</strong> ${esc(parseArray(need.rule_thematic_hints).join(", ") || "None")}</div>
-                  <div><strong>AI Theme:</strong> ${esc(need.ai_thematic_area || "Not set")}</div>
-                  <div><strong>Need Kind:</strong> ${esc(need.ai_need_kind || "Not set")}${need.ai_service_kind ? ` / ${esc(need.ai_service_kind)}` : ""}</div>
-                  <div><strong>Flags:</strong> ${esc(parseArray(need.ai_validation_flags).join(", ") || "None")}</div>
-                </div>
-              </article>
-            `,
+            (need) => {
+              const recommendation = getNeedRecommendation(need.id);
+              const currentTheme = getEffectiveNeedThematicArea(need) || "Not set";
+              const currentApplication = getEffectiveNeedApplicationArea(need) || "Not set";
+              const currentNeedKind = getEffectiveNeedKind(need) || "Not set";
+              const currentServiceKind = getEffectiveNeedServiceKind(need);
+              const current6M = getEffectiveNeed6MSignals(need).join(", ") || parseArray(need.rule_6m_signals).join(", ") || "None";
+              const overrideBadge = need.override_updated_at ? `<span class="status-pill good">Override active</span>` : "";
+              const recommendationBlock = recommendation
+                ? `
+                  <div class="qa-suggestion-card">
+                    <div class="status-row">
+                      <span class="status-pill info">Puter suggestion</span>
+                      ${recommendation.conflict_reason ? `<span class="helper-text">${esc(recommendation.conflict_reason)}</span>` : ""}
+                    </div>
+                    <div class="detail-list qa-suggestion-list">
+                      <div><strong>Theme:</strong> ${esc(recommendation.thematic_area || "Not set")} <button class="btn btn-secondary btn-mini" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="thematic_area">Accept</button></div>
+                      <div><strong>Application:</strong> ${esc(recommendation.application_area || "Not set")} <button class="btn btn-secondary btn-mini" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="application_area">Accept</button></div>
+                      <div><strong>Need Kind:</strong> ${esc(recommendation.need_kind || "Not set")}${recommendation.service_kind ? ` / ${esc(recommendation.service_kind)}` : ""} <button class="btn btn-secondary btn-mini" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="need_kind">Accept</button></div>
+                      <div><strong>6M:</strong> ${esc(recommendation.six_m_signals.join(", ") || "None")} <button class="btn btn-secondary btn-mini" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="six_m_signals">Accept</button></div>
+                      <div><strong>Keywords:</strong> ${esc(recommendation.keywords.join(", ") || "None")} <button class="btn btn-secondary btn-mini" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="keywords">Accept</button></div>
+                    </div>
+                    <p class="helper-text">${esc(recommendation.summary || "")}</p>
+                    <div class="card-actions">
+                      <button class="btn btn-primary" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="all">Accept All</button>
+                    </div>
+                  </div>
+                `
+                : `<div class="card-actions"><button class="btn btn-secondary" data-action="run-puter-need-review" data-need-id="${esc(need.id)}">Puter Suggest Review</button></div>`;
+              return `
+                <article class="approval-card">
+                  <div class="status-row">
+                    <span class="status-pill ${need.ai_validation_status === "flagged" ? "warn" : "info"}">${esc(need.ai_validation_status || "needs review")}</span>
+                    <span class="status-pill info">${esc(`Confidence ${need.ai_confidence ?? 0}`)}</span>
+                    <span class="status-pill ${badgeTone(need.ai_enrichment_status)}">${esc(formatAiEnrichmentStatus(need.ai_enrichment_status))}</span>
+                    ${overrideBadge}
+                  </div>
+                  <h4>${esc(need.organization_name)}</h4>
+                  <p class="helper-text">${esc(clipText(need.problem_statement, 170))}</p>
+                  <div class="detail-list">
+                    <div><strong>Rule Themes:</strong> ${esc(parseArray(need.rule_thematic_hints).join(", ") || "None")}</div>
+                    <div><strong>Current Theme:</strong> ${esc(currentTheme)}</div>
+                    <div><strong>Current Application:</strong> ${esc(currentApplication)}</div>
+                    <div><strong>Current Need Kind:</strong> ${esc(currentNeedKind)}${currentServiceKind ? ` / ${esc(currentServiceKind)}` : ""}</div>
+                    <div><strong>Current 6M:</strong> ${esc(current6M)}</div>
+                    <div><strong>Flags:</strong> ${esc(parseArray(need.ai_validation_flags).join(", ") || "None")}</div>
+                  </div>
+                  ${recommendationBlock}
+                </article>
+              `;
+            },
           )
           .join("")
       : `<div class="empty-state">No approved needs are currently flagged for AI review.</div>`
@@ -2416,6 +2670,41 @@ async function refreshAll() {
     state.selectedNeedId = displayNeeds[0]?.id || null;
   }
   await rerender();
+}
+
+function buildNeedOverridePatch(needId, field) {
+  const recommendation = getNeedRecommendation(needId);
+  if (!recommendation) throw new Error("No recommendation available for this need yet.");
+  if (field === "thematic_area") {
+    return { override_thematic_area: recommendation.thematic_area || null };
+  }
+  if (field === "application_area") {
+    return { override_application_area: recommendation.application_area || null };
+  }
+  if (field === "need_kind") {
+    return {
+      override_need_kind: recommendation.need_kind || null,
+      override_service_kind: recommendation.need_kind === "service" ? recommendation.service_kind || null : null,
+    };
+  }
+  if (field === "six_m_signals") {
+    return { override_6m_signals: recommendation.six_m_signals || [] };
+  }
+  if (field === "keywords") {
+    return { override_keywords: recommendation.keywords || [] };
+  }
+  if (field === "all") {
+    return {
+      override_thematic_area: recommendation.thematic_area || null,
+      override_application_area: recommendation.application_area || null,
+      override_need_kind: recommendation.need_kind || null,
+      override_service_kind: recommendation.need_kind === "service" ? recommendation.service_kind || null : null,
+      override_6m_signals: recommendation.six_m_signals || [],
+      override_keywords: recommendation.keywords || [],
+      override_summary: recommendation.summary || null,
+    };
+  }
+  throw new Error("Unsupported override field.");
 }
 
 function resetDashboardSelections() {
@@ -2554,6 +2843,10 @@ function bindStaticEvents() {
       state.selectedNeedId = displayNeeds[0]?.id || null;
     }
     await rerender();
+  }));
+
+  byId("refreshPuterModelsBtn")?.addEventListener("click", safeAsync(async () => {
+    await ensurePuterModelsLoaded(true);
   }));
 
   const dialog = byId("needDialog");
@@ -2764,6 +3057,22 @@ function bindStaticEvents() {
       await store.reviewUpdateRequest(button.dataset.requestId, "reject");
       await refreshAll();
       toast("Curator update rejected.");
+    }
+    if (button.dataset.action === "run-puter-need-review") {
+      const status = byId("puterStatus");
+      if (status) status.textContent = `Running Puter review for Need ${button.dataset.needId}...`;
+      await runPuterNeedReview(button.dataset.needId);
+      if (status) status.textContent = `Puter recommendation ready for Need ${button.dataset.needId}.`;
+      toast("Puter recommendation prepared.");
+    }
+    if (button.dataset.action === "accept-need-override") {
+      const needId = button.dataset.needId;
+      const field = button.dataset.overrideField;
+      const patch = buildNeedOverridePatch(needId, field);
+      const recommendation = getNeedRecommendation(needId);
+      await store.applyNeedOverride(needId, patch, recommendation?.conflict_reason || "", field === "all");
+      await refreshAll();
+      toast(field === "all" ? "Recommendation accepted." : "Field override accepted.");
     }
   }));
 

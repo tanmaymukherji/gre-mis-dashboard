@@ -7,8 +7,9 @@
   <link rel="icon" href="data:," />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="./config.js?v=20260503a"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260503a" />
+  <script src="https://js.puter.com/v2/"></script>
+  <script src="./config.js?v=20260503b"></script>
+  <link rel="stylesheet" href="./styles.css?v=20260503b" />
 </head>
 <body class="admin-page">
   <div class="shell">
@@ -73,6 +74,26 @@
                 <p id="sessionStatus" class="helper-text"></p>
               </article>
             </div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Conflict Assist</p>
+                <h3>Puter Review Route</h3>
+              </div>
+            </div>
+            <div class="taxonomy-grid">
+              <label>
+                <span>Puter Model</span>
+                <select id="puterModelSelect">
+                  <option value="">Default Puter model</option>
+                </select>
+              </label>
+              <div></div>
+              <button id="refreshPuterModelsBtn" class="btn btn-secondary">Refresh Puter Models</button>
+            </div>
+            <p id="puterStatus" class="helper-text">Use Puter review for flagged or weak classifications, then accept each recommendation field only if it is correct.</p>
           </section>
         </div>
 
@@ -143,8 +164,8 @@
           <section class="panel panel-large">
             <div class="panel-head">
               <div>
-                <p class="eyebrow">AI Review</p>
-                <h3>Needs Flagged for Enrichment Review</h3>
+                <p class="eyebrow">Match QA</p>
+                <h3>Conflict Cases and Classification Review</h3>
               </div>
             </div>
             <div id="aiReviewList" class="stack-list"></div>
@@ -154,6 +175,6 @@
     </main>
   </div>
 
-  <script src="./app.js?v=20260503a"></script>
+  <script src="./app.js?v=20260503b"></script>
 </body>
 </html>

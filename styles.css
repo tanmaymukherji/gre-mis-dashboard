@@ -714,6 +714,26 @@ textarea { resize: vertical; }
   background: linear-gradient(180deg, #ffffff, #f3f8ef);
 }
 
+.qa-suggestion-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px dashed var(--line);
+  background: #f8fcf4;
+}
+
+.qa-suggestion-list {
+  display: grid;
+  gap: 8px;
+}
+
+.btn-mini {
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+}
+
 .btn {
   border: none;
   cursor: pointer;

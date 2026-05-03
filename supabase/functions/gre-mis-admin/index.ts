@@ -1235,7 +1235,7 @@ async function getAdminSnapshot() {
         .order("created_at", { ascending: false }),
       adminClient
         .from("gre_mis_needs")
-        .select("id, organization_name, state, district, problem_statement, ai_thematic_area, ai_need_kind, ai_service_kind, ai_validation_status, ai_validation_flags, ai_confidence, ai_enrichment_status, ai_engine, ai_enriched_at, rule_thematic_hints, rule_6m_signals")
+        .select("id, organization_name, state, district, problem_statement, curation_notes, curated_need, ai_thematic_area, ai_application_area, ai_need_kind, ai_service_kind, ai_keywords, ai_6m_signals, ai_validation_status, ai_validation_flags, ai_confidence, ai_enrichment_status, ai_engine, ai_enriched_at, rule_thematic_hints, rule_6m_signals, override_thematic_area, override_application_area, override_need_kind, override_service_kind, override_keywords, override_6m_signals, override_summary, override_source, override_conflict_note, override_updated_at")
         .eq("approval_status", "approved")
         .or("ai_validation_status.is.null,ai_validation_status.eq.flagged,ai_enrichment_status.is.null")
         .order("updated_at", { ascending: false })
@@ -1252,6 +1252,59 @@ async function getAdminSnapshot() {
     pendingUpdates: pendingUpdates.data || [],
     aiReviewNeeds: aiReviewNeeds.data || [],
   };
+}
+
+async function applyNeedOverride(
+  needId: string,
+  patchInput: Record<string, unknown>,
+  conflictNote: string,
+  resolveConflict: boolean,
+  actorEmail: string,
+) {
+  const patch: Record<string, unknown> = {};
+  const allowed = new Set([
+    "override_thematic_area",
+    "override_application_area",
+    "override_need_kind",
+    "override_service_kind",
+    "override_keywords",
+    "override_6m_signals",
+    "override_summary",
+  ]);
+
+  Object.entries(patchInput || {}).forEach(([key, value]) => {
+    if (!allowed.has(key)) return;
+    if (key === "override_keywords" || key === "override_6m_signals") {
+      patch[key] = asStringArray(value);
+    } else {
+      patch[key] = requireString(value) || null;
+    }
+  });
+
+  if (!Object.keys(patch).length) throw new Error("No override values were provided.");
+
+  patch.override_source = "puter_review";
+  patch.override_conflict_note = requireString(conflictNote) || null;
+  patch.override_updated_at = new Date().toISOString();
+  patch.override_updated_by = actorEmail;
+  patch.ai_validation_status = resolveConflict ? "ready" : "flagged";
+  patch.ai_validation_flags = resolveConflict ? [] : ["manual_override_partial"];
+  patch.ai_enrichment_status = resolveConflict ? "ready" : "ready_flagged";
+
+  const { error } = await adminClient
+    .from("gre_mis_needs")
+    .update(patch)
+    .eq("id", needId);
+  if (error) throw new Error(error.message);
+
+  await adminClient.from("gre_mis_need_updates").insert({
+    need_id: needId,
+    update_type: "manual_classification_override",
+    note: requireString(conflictNote) || `Manual classification override applied by ${actorEmail}.`,
+    created_by_email: actorEmail,
+  });
+
+  return { ok: true };
 }
 
 async function resolveCuratorId(curatorName: string) {
@@ -2188,11 +2241,21 @@ Deno.serve(async (req) => {
       return jsonResponse(await downloadGreChatbotReport(requireString(payload.reportKind)));
     }
 
-    if (action === "refreshNeedIntelligence") {
-      return jsonResponse(await refreshNeedIntelligence(actorEmail, requireString(payload.aiProvider) || defaultAiProvider));
-    }
+      if (action === "refreshNeedIntelligence") {
+        return jsonResponse(await refreshNeedIntelligence(actorEmail, requireString(payload.aiProvider) || defaultAiProvider));
+      }
 
-    return jsonResponse({ error: "Unsupported action." }, 400);
+      if (action === "applyNeedOverride") {
+        return jsonResponse(await applyNeedOverride(
+          requireString(payload.needId),
+          (payload.patch && typeof payload.patch === "object") ? payload.patch as Record<string, unknown> : {},
+          requireString(payload.conflictNote),
+          Boolean(payload.resolveConflict),
+          actorEmail,
+        ));
+      }
+
+      return jsonResponse({ error: "Unsupported action." }, 400);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Function failed.";
     return jsonResponse({ error: message }, 400);
