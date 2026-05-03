@@ -170,6 +170,7 @@ const ruleThemeSignals = [
   { label: "poultry", patterns: ["poultry", "chicken", "broiler", "layer"] },
   { label: "fisheries", patterns: ["fishery", "fisheries", "aquaculture", "fish farming"] },
   { label: "makhana", patterns: ["makhana", "fox nut"] },
+  { label: "soap", patterns: ["soap", "soaps", "detergent"] },
   { label: "branding", patterns: ["branding", "logo", "packaging", "marketplace onboarding"] },
   { label: "business planning", patterns: ["business plan", "business development plan", "costing", "pricing"] },
 ];

@@ -120,6 +120,18 @@ const SERVICE_PHRASES = [
   "technology",
   "knowledge",
 ];
+const NEED_THEME_RULES = [
+  { label: "dairy", patterns: ["dairy", "milk", "milching", "cow", "cows", "livestock", "fodder"] },
+  { label: "solar", patterns: ["solar", "street light", "street lights", "streetlight"] },
+  { label: "wild mango", patterns: ["wild mango", "mango", "amchur", "ntfp", "forest produce"] },
+  { label: "goatery", patterns: ["goat", "goatery", "goat farming"] },
+  { label: "poultry", patterns: ["poultry", "chicken", "broiler", "layer"] },
+  { label: "fisheries", patterns: ["fishery", "fisheries", "aquaculture", "fish farming"] },
+  { label: "makhana", patterns: ["makhana", "fox nut"] },
+  { label: "soap", patterns: ["soap", "soaps", "detergent"] },
+  { label: "branding", patterns: ["branding", "logo", "packaging", "marketplace onboarding"] },
+  { label: "business planning", patterns: ["business plan", "business development plan", "costing", "pricing"] },
+];
 const INDIA_FALLBACK_CENTER = { lat: 22.9734, lng: 78.6569 };
 const STATE_MAP_CENTERS = {
   "andaman and nicobar islands": { lat: 11.7401, lng: 92.6586 },
@@ -464,6 +476,19 @@ function extractCategoryParts(value) {
   };
 }
 
+function extractNeedRuleThemes(need) {
+  const text = [
+    normalizeText(need?.problem_statement),
+    normalizeText(need?.curation_notes).replace(/\bnull\b/gi, " "),
+    parseArray(need?.curated_need).join(" "),
+  ].join(" | ").toLowerCase();
+  return uniq(
+    NEED_THEME_RULES
+      .filter((rule) => rule.patterns.some((pattern) => text.includes(pattern)))
+      .map((rule) => rule.label),
+  );
+}
+
 function getNeedThemeSignals(need) {
   const themes = [];
   parseArray(need?.curated_need).forEach((item) => {
@@ -503,6 +528,7 @@ function categoryFilterMatches(category, need) {
 function buildNeedMatchProfile(need) {
   const categories = uniq(parseArray(need.curated_need).map((item) => item.toLowerCase()));
   const categoryParts = categories.map((item) => extractCategoryParts(item));
+  const problemThemeSignals = extractNeedRuleThemes(need);
   const ruleThemes = uniq(parseArray(need.rule_thematic_hints).map((item) => item.toLowerCase()).filter(Boolean));
   const ruleServices = uniq(parseArray(need.rule_service_hints).map((item) => item.toLowerCase()).filter(Boolean));
   const ruleKeywords = uniq(parseArray(need.rule_keywords).map((item) => item.toLowerCase()).filter(Boolean));
@@ -535,10 +561,16 @@ function buildNeedMatchProfile(need) {
     ...tokenizeText(need.problem_statement, 4),
     ...tokenizeText(need.curation_notes, 4),
   ]).slice(0, 16);
-  const domainFocusTokens = uniq([...ruleThemes.flatMap((item) => tokenizeText(item, 3)), ...ruleKeywords, ...explicitThemeTokens])
+  const domainFocusTokens = uniq([
+    ...problemThemeSignals.flatMap((item) => tokenizeText(item, 3)),
+    ...ruleThemes.flatMap((item) => tokenizeText(item, 3)),
+    ...ruleKeywords,
+    ...explicitThemeTokens,
+  ])
     .filter((token) => !DOMAIN_MATCH_STOPWORDS.has(token));
   const thematicAreas = uniq([
     ...sharedSolutionHints.phrases,
+    ...problemThemeSignals,
     ...ruleThemes,
     ...categoryThematicAreas,
     ...aiSignals,
@@ -574,6 +606,7 @@ function buildNeedMatchProfile(need) {
     categories,
     categoryParts,
     categoryThematicAreas,
+    problemThemeSignals,
     thematicAreas,
     serviceTerms,
     requiresServiceMatch,
@@ -589,7 +622,7 @@ function buildNeedMatchProfile(need) {
     sharedSolutionHints,
     resolvedNeedKind,
     preferredOfferingKinds,
-    hasStrongTheme: Boolean(ruleThemes.length || categoryThematicAreas.length || normalizeText(need.ai_thematic_area)),
+    hasStrongTheme: Boolean(problemThemeSignals.length || ruleThemes.length || categoryThematicAreas.length || normalizeText(need.ai_thematic_area)),
   };
 }
 
@@ -1111,6 +1144,7 @@ function scoreOfferingMatch(need, profile, offering) {
   let thematicMatched = false;
   let serviceMatched = false;
   let primaryThematicMatched = false;
+  let problemThemeMatched = false;
   const matchedSharedLink =
     profile.sharedSolutionHints.ids.offeringIds.includes(String(offering.offering_id || "")) ||
     profile.sharedSolutionHints.ids.solutionIds.includes(String(offering.solution_id || "")) ||
@@ -1122,6 +1156,29 @@ function scoreOfferingMatch(need, profile, offering) {
     score += 60;
     reasons.push("Already shared with seeker");
   }
+
+  profile.problemThemeSignals.forEach((phrase) => {
+    if (
+      primaryApplication.includes(phrase) ||
+      primaryValuechain.includes(phrase) ||
+      applications.some((item) => item.includes(phrase)) ||
+      valuechains.some((item) => item.includes(phrase)) ||
+      name.includes(phrase) ||
+      solutionName.includes(phrase) ||
+      tags.some((tag) => tag.includes(phrase))
+    ) {
+      thematicMatched = true;
+      primaryThematicMatched = true;
+      problemThemeMatched = true;
+      score += 22;
+      reasons.push(`Theme:${phrase}`);
+    } else if (about.includes(phrase) || aiOfferingApplication.includes(phrase) || aiOfferingTheme.includes(phrase)) {
+      thematicMatched = true;
+      problemThemeMatched = true;
+      score += 10;
+      reasons.push(`Theme:${phrase}`);
+    }
+  });
 
   profile.thematicAreas.forEach((phrase) => {
     if (joined.includes(phrase)) {
@@ -1236,6 +1293,9 @@ function scoreOfferingMatch(need, profile, offering) {
 
   if (profile.domainFocusTokens?.length && !domainMatched) {
     score -= 18;
+  }
+  if (profile.problemThemeSignals.length && !problemThemeMatched) {
+    score -= 16;
   }
   if (profile.domainFocusTokens?.length && thematicMatched && !primaryThematicMatched) {
     score -= 10;
