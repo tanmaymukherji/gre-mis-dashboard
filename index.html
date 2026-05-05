@@ -6,11 +6,68 @@
   <title>GRE MIS Dashboard</title>
   <link rel="icon" href="data:," />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./config.js?v=20260503b"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260503b" />
+  <script src="./config.js?v=20260505a"></script>
+  <link rel="stylesheet" href="./styles.css?v=20260505a" />
 </head>
 <body>
   <div class="shell">
+    <section id="authGate" class="auth-gate panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Account Access</p>
+          <h2>Login to GRE MIS</h2>
+        </div>
+      </div>
+      <div class="auth-grid">
+        <article class="auth-card">
+          <h3>Sign In</h3>
+          <form id="userLoginForm" class="action-form">
+            <label><span>Username or Email</span><input name="identifier" required /></label>
+            <label><span>Password</span><input name="password" type="password" required /></label>
+            <div class="card-actions">
+              <button type="submit" class="btn btn-primary">Sign In</button>
+            </div>
+          </form>
+          <p id="userLoginStatus" class="helper-text"></p>
+        </article>
+
+        <article class="auth-card">
+          <h3>Register New User</h3>
+          <form id="registerUserForm" class="action-form">
+            <label><span>First Name</span><input name="first_name" required /></label>
+            <label><span>Full Name</span><input name="full_name" required /></label>
+            <label><span>Email</span><input name="email" type="email" required /></label>
+            <label><span>Phone</span><input name="phone" /></label>
+            <label><span>Password</span><input name="password" type="password" required /></label>
+            <div class="card-actions">
+              <button type="submit" class="btn btn-secondary">Register</button>
+            </div>
+          </form>
+          <p id="registerStatus" class="helper-text"></p>
+        </article>
+
+        <article class="auth-card">
+          <h3>Password Help</h3>
+          <form id="requestResetForm" class="action-form">
+            <label><span>Email for Reset Code</span><input name="email" type="email" required /></label>
+            <div class="card-actions">
+              <button type="submit" class="btn btn-secondary">Send Reset Code</button>
+            </div>
+          </form>
+          <form id="resetPasswordForm" class="action-form">
+            <label><span>Email</span><input name="email" type="email" required /></label>
+            <label><span>Reset Code</span><input name="code" required /></label>
+            <label><span>New Password</span><input name="new_password" type="password" required /></label>
+            <div class="card-actions">
+              <button type="submit" class="btn btn-secondary">Reset Password</button>
+            </div>
+          </form>
+          <p id="resetStatus" class="helper-text"></p>
+        </article>
+      </div>
+    </section>
+
+    <section id="appShell" class="app-shell hidden">
     <header class="masthead">
       <div class="brand-block">
         <img src="./assets/gre-logo.png" alt="GRE logo" class="brand-logo" />
@@ -19,6 +76,25 @@
           <h1>GRE MIS Control Tower</h1>
           <p class="lede">Live operating dashboard for inbound needs, curator action, admin approvals, solution matching, and closure tracking.</p>
         </div>
+      </div>
+      <div class="access-card">
+        <div class="access-head">
+          <div>
+            <p class="eyebrow">Signed In</p>
+            <h3 id="accountName">GRE MIS User</h3>
+          </div>
+          <span id="accountRoleChip" class="chip muted">User</span>
+        </div>
+        <p id="accountSummary" class="helper-text"></p>
+        <form id="changePasswordForm" class="action-form">
+          <label><span>Current Password</span><input name="current_password" type="password" required /></label>
+          <label><span>New Password</span><input name="new_password" type="password" required /></label>
+          <div class="card-actions">
+            <button type="submit" class="btn btn-secondary">Change Password</button>
+            <button type="button" id="userLogoutBtn" class="btn btn-primary">Sign Out</button>
+          </div>
+        </form>
+        <p id="changePasswordStatus" class="helper-text"></p>
       </div>
     </header>
 
@@ -38,6 +114,7 @@
     <nav class="view-tabs">
       <button class="tab active" data-view="overview">Overview</button>
       <button class="tab" data-view="operations">Operations Desk</button>
+      <button class="tab hidden" data-view="admin">Admin View</button>
     </nav>
 
     <main>
@@ -159,10 +236,130 @@
           </section>
         </div>
       </section>
+
+      <section id="adminView" class="view">
+        <div class="admin-grid admin-grid-top">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Admin Control</p>
+                <h3>Approval and Sync</h3>
+              </div>
+              <span id="adminStatusChip" class="chip muted">Locked</span>
+            </div>
+            <p id="adminStatusText" class="helper-text">Admin approvals and GRE sync controls become available when an admin signs in.</p>
+            <p id="loginStatus" class="helper-text"></p>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Session</p>
+                <h3>Admin Snapshot</h3>
+              </div>
+            </div>
+            <div id="sessionPanel" class="stack-list hidden">
+              <article class="stack-card">
+                <div class="status-row">
+                  <span class="status-pill good">Signed in</span>
+                </div>
+                <p id="sessionStatus" class="helper-text">Admin session is active.</p>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <div id="metricsGridAdmin" class="metrics-grid hidden"></div>
+        <div class="admin-grid admin-grid-main">
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Inbound Sync</p>
+                <h3>Inbound Intake</h3>
+              </div>
+            </div>
+            <div class="taxonomy-grid">
+              <label>
+                <span>Inbound Workbook</span>
+                <input id="inboundWorkbookFile" type="file" accept=".xlsx,.xls" />
+              </label>
+              <label>
+                <span>AI Engine</span>
+                <select id="aiProviderSelect">
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+              </label>
+              <button id="uploadInboundBtn" class="btn btn-primary">Upload and Sync</button>
+              <button id="syncGreInboundsBtn" class="btn btn-secondary">Sync Latest from GRE</button>
+              <button id="refreshAiBtn" class="btn btn-secondary">Refresh AI Signals</button>
+            </div>
+            <p id="syncStatus" class="helper-text"></p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">GRE Chatbot Data</p>
+                <h3>Supplier and Solution Exports</h3>
+              </div>
+            </div>
+            <div class="taxonomy-grid">
+              <button id="syncGreChatbotBtn" class="btn btn-primary">Refresh Chatbot Dataset</button>
+              <button id="downloadGreTraderBtn" class="btn btn-secondary">Download Trader Data</button>
+              <button id="downloadGreSolutionBtn" class="btn btn-secondary">Download Solution Data</button>
+            </div>
+            <p id="chatbotSyncStatus" class="helper-text"></p>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Users</p>
+                <h3>User and Curator Management</h3>
+              </div>
+            </div>
+            <div id="userManagementList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Pending Intake</p>
+                <h3>Needs Awaiting Admin Approval</h3>
+              </div>
+            </div>
+            <div id="pendingNeedsList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Curator Requests</p>
+                <h3>Status Updates Awaiting Approval</h3>
+              </div>
+            </div>
+            <div id="pendingUpdatesList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Match QA</p>
+                <h3>Conflict Cases and Classification Review</h3>
+              </div>
+            </div>
+            <div id="aiReviewList" class="stack-list"></div>
+          </section>
+        </div>
+      </section>
     </main>
     <div class="page-end-actions">
-      <a class="admin-sync-end" href="./admin.html" aria-label="Open admin sync">Admin Sync</a>
+      <a id="adminSyncLink" class="admin-sync-end hidden" href="./admin.html" aria-label="Open admin sync">Admin Sync</a>
     </div>
+    </section>
   </div>
 
   <dialog id="needDialog" class="modal">
@@ -190,6 +387,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260503b"></script>
+  <script type="module" src="./app.js?v=20260505a"></script>
 </body>
 </html>

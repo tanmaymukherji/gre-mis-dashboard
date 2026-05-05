@@ -3,7 +3,7 @@ import * as XLSX from "npm:xlsx@0.18.5";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-gre-admin-session",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-gre-admin-session, x-gre-user-session",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -1141,7 +1141,22 @@ async function sendEmail({
   return data;
 }
 
-async function createAdminSession(username: string) {
+async function createUserSession(userId: string) {
+  const token = generateToken();
+  const tokenHash = await hashToken(token);
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 12).toISOString();
+
+  const { error } = await adminClient.from("gre_mis_web_sessions").insert({
+    user_id: userId,
+    token_hash: tokenHash,
+    expires_at: expiresAt,
+  });
+  if (error) throw new Error(error.message);
+
+  return { token, expiresAt };
+}
+
+async function createLegacyAdminSession(username: string) {
   const token = generateToken();
   const tokenHash = await hashToken(token);
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 12).toISOString();
@@ -1152,11 +1167,42 @@ async function createAdminSession(username: string) {
     expires_at: expiresAt,
   });
   if (error) throw new Error(error.message);
-
   return { token, expiresAt, username };
 }
 
-async function validateAdminSession(token: string) {
+async function validateUserSession(token: string) {
+  const normalized = requireString(token);
+  if (!normalized) return null;
+  const tokenHash = await hashToken(normalized);
+  const { data, error } = await adminClient
+    .from("gre_mis_web_sessions")
+    .select("id, user_id, expires_at, gre_mis_users!inner(id, username, email, first_name, full_name, phone, role, is_active, must_change_password)")
+    .eq("token_hash", tokenHash)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  if (new Date(data.expires_at).getTime() <= Date.now()) {
+    await adminClient.from("gre_mis_web_sessions").delete().eq("id", data.id);
+    return null;
+  }
+
+  await adminClient
+    .from("gre_mis_web_sessions")
+    .update({ last_used_at: new Date().toISOString() })
+    .eq("id", data.id);
+
+  const userRow = Array.isArray(data.gre_mis_users) ? data.gre_mis_users[0] : data.gre_mis_users;
+  if (!userRow?.is_active) return null;
+  return {
+    id: data.id,
+    user_id: data.user_id,
+    expires_at: data.expires_at,
+    user: userRow,
+  };
+}
+
+async function validateLegacyAdminSession(token: string) {
   const normalized = requireString(token);
   if (!normalized) return null;
   const tokenHash = await hashToken(normalized);
@@ -1165,37 +1211,81 @@ async function validateAdminSession(token: string) {
     .select("id, username, expires_at")
     .eq("token_hash", tokenHash)
     .maybeSingle();
-
   if (error || !data) return null;
-
   if (new Date(data.expires_at).getTime() <= Date.now()) {
     await adminClient.from("gre_mis_admin_web_sessions").delete().eq("id", data.id);
     return null;
   }
-
   await adminClient
     .from("gre_mis_admin_web_sessions")
     .update({ last_used_at: new Date().toISOString() })
     .eq("id", data.id);
-
   return data;
 }
 
-async function requireAdminSession(req: Request, bodyToken?: string) {
-  const token = requireString(req.headers.get("x-gre-admin-session")) || requireString(bodyToken);
-  const session = await validateAdminSession(token);
-  if (!session) throw new Error("Admin login required.");
-
-  const { data: adminRow, error } = await adminClient
-    .from("gre_mis_admins")
-    .select("email, display_name")
-    .limit(1)
-    .maybeSingle();
-  if (error || !adminRow) throw new Error("Admin record not found.");
-  return { session, admin: adminRow, token };
+async function requireUserSession(req: Request, bodyToken?: string) {
+  const token =
+    requireString(req.headers.get("x-gre-user-session")) ||
+    requireString(req.headers.get("x-gre-admin-session")) ||
+    requireString(bodyToken);
+  const session = await validateUserSession(token);
+  if (!session) throw new Error("Login required.");
+  return { session, user: session.user, token };
 }
 
-async function verifyAdminPassword(username: string, password: string) {
+function assertRoles(
+  userCtx: { user: { role?: string } },
+  roles: string[],
+  message = "You do not have permission for this action.",
+) {
+  if (!roles.includes(requireString(userCtx.user.role))) {
+    throw new Error(message);
+  }
+}
+
+async function requireAdminSession(req: Request, bodyToken?: string) {
+  const token =
+    requireString(req.headers.get("x-gre-admin-session")) ||
+    requireString(req.headers.get("x-gre-user-session")) ||
+    requireString(bodyToken);
+  try {
+    const userCtx = await requireUserSession(req, bodyToken);
+    assertRoles(userCtx, ["admin"], "Admin login required.");
+    return {
+      ...userCtx,
+      admin: {
+        email: userCtx.user.email,
+        display_name: userCtx.user.full_name || userCtx.user.first_name || userCtx.user.username,
+      },
+    };
+  } catch {
+    const legacySession = await validateLegacyAdminSession(token);
+    if (!legacySession) throw new Error("Admin login required.");
+    const { data: adminRow, error } = await adminClient
+      .from("gre_mis_admins")
+      .select("email, display_name")
+      .limit(1)
+      .maybeSingle();
+    if (error || !adminRow) throw new Error("Admin record not found.");
+    return {
+      session: legacySession,
+      user: { id: "", username: legacySession.username, email: adminRow.email, role: "admin" },
+      admin: adminRow,
+      token,
+    };
+  }
+}
+
+async function verifyUserPassword(identifier: string, password: string) {
+  const { data, error } = await adminClient.rpc("gre_mis_user_password_matches", {
+    p_identifier: identifier,
+    p_password: password,
+  });
+  if (error) throw new Error(`Password verification failed: ${error.message}`);
+  return Boolean(data);
+}
+
+async function verifyLegacyAdminPassword(username: string, password: string) {
   const { data, error } = await adminClient.rpc("grameee_admin_password_matches", {
     p_username: username,
     p_password: password,
@@ -1204,25 +1294,64 @@ async function verifyAdminPassword(username: string, password: string) {
   return Boolean(data);
 }
 
-async function adminLogin(username: string, password: string) {
+async function userLogin(identifier: string, password: string, requiredRole?: string) {
   if (!password) throw new Error("Password is required.");
-  const normalizedUsername = requireString(username) || "admin";
-  const valid = await verifyAdminPassword(normalizedUsername, password);
-  if (!valid) throw new Error("Incorrect admin password.");
-  const session = await createAdminSession(normalizedUsername);
-  return { ok: true, ...session };
+  const normalizedIdentifier = requireString(identifier).toLowerCase();
+  if (!normalizedIdentifier) throw new Error("Username or email is required.");
+  const valid = await verifyUserPassword(normalizedIdentifier, password);
+  if (!valid) throw new Error("Incorrect username or password.");
+
+  const { data: user, error } = await adminClient
+    .from("gre_mis_users")
+    .select("id, username, email, first_name, full_name, phone, role, is_active, must_change_password")
+    .or(`username.eq.${normalizedIdentifier},email.eq.${normalizedIdentifier}`)
+    .maybeSingle();
+  if (error || !user) throw new Error(error?.message || "User record not found.");
+  if (!user.is_active) throw new Error("This account is inactive.");
+  if (requiredRole && user.role !== requiredRole) throw new Error(`${requiredRole} access is required.`);
+
+  const session = await createUserSession(user.id);
+  await adminClient.from("gre_mis_users").update({ last_login_at: new Date().toISOString() }).eq("id", user.id);
+  return { ok: true, ...session, user };
 }
 
-async function adminLogout(token: string) {
+async function userLogout(token: string) {
   const normalized = requireString(token);
   if (!normalized) return { ok: true };
   const tokenHash = await hashToken(normalized);
-  await adminClient.from("gre_mis_admin_web_sessions").delete().eq("token_hash", tokenHash);
+  await adminClient.from("gre_mis_web_sessions").delete().eq("token_hash", tokenHash);
+  return { ok: true };
+}
+
+async function adminLogin(username: string, password: string) {
+  try {
+    const result = await userLogin(requireString(username) || "admin", password, "admin");
+    return {
+      ok: true,
+      token: result.token,
+      expiresAt: result.expiresAt,
+      username: result.user.username,
+    };
+  } catch (error) {
+    const normalizedUsername = requireString(username) || "admin";
+    const valid = await verifyLegacyAdminPassword(normalizedUsername, password);
+    if (!valid) throw error instanceof Error ? error : new Error("Incorrect admin password.");
+    return { ok: true, ...(await createLegacyAdminSession(normalizedUsername)) };
+  }
+}
+
+async function adminLogout(token: string) {
+  await userLogout(token);
+  const normalized = requireString(token);
+  if (normalized) {
+    const tokenHash = await hashToken(normalized);
+    await adminClient.from("gre_mis_admin_web_sessions").delete().eq("token_hash", tokenHash);
+  }
   return { ok: true };
 }
 
 async function getAdminSnapshot() {
-  const [pendingNeeds, pendingUpdates, aiReviewNeeds] = await Promise.all([
+  const [pendingNeeds, pendingUpdates, aiReviewNeeds, users] = await Promise.all([
     adminClient
       .from("gre_mis_needs")
       .select("id, organization_name, state, district, status, internal_status, requested_on, curator_id, problem_statement, source_kind")
@@ -1240,18 +1369,178 @@ async function getAdminSnapshot() {
         .or("ai_validation_status.is.null,ai_validation_status.eq.flagged,ai_enrichment_status.is.null")
         .order("updated_at", { ascending: false })
         .limit(60),
+      adminClient
+        .from("gre_mis_users")
+        .select("id, username, first_name, full_name, email, phone, role, is_active, must_change_password, last_login_at, created_at")
+        .order("role", { ascending: true })
+        .order("first_name", { ascending: true }),
     ]);
 
   if (pendingNeeds.error) throw new Error(pendingNeeds.error.message);
   if (pendingUpdates.error) throw new Error(pendingUpdates.error.message);
   if (aiReviewNeeds.error) throw new Error(aiReviewNeeds.error.message);
+  if (users.error) throw new Error(users.error.message);
 
   return {
     ok: true,
     pendingNeeds: pendingNeeds.data || [],
     pendingUpdates: pendingUpdates.data || [],
     aiReviewNeeds: aiReviewNeeds.data || [],
+    users: users.data || [],
   };
+}
+
+async function registerUser(payload: Record<string, unknown>) {
+  const firstName = requireString(payload.firstName);
+  const fullName = requireString(payload.fullName) || firstName;
+  const email = requireString(payload.email).toLowerCase();
+  const phone = requireString(payload.phone);
+  const password = requireString(payload.password);
+  const usernameSource = requireString(payload.username) || firstName || email.split("@")[0];
+  const username = usernameSource.toLowerCase().replace(/[^a-z0-9._-]/g, "");
+  if (!firstName || !email || !password) throw new Error("Name, email, and password are required.");
+  if (password.length < 8) throw new Error("Password must be at least 8 characters.");
+
+  const { data: userId, error } = await adminClient.rpc("gre_mis_register_user", {
+    p_username: username,
+    p_first_name: firstName,
+    p_full_name: fullName,
+    p_email: email,
+    p_phone: phone || null,
+    p_password: password,
+  });
+  if (error) {
+    const message = error.message.toLowerCase().includes("duplicate")
+      ? "An account with this username or email already exists."
+      : error.message;
+    throw new Error(message);
+  }
+  return { ok: true, userId };
+}
+
+async function requestPasswordReset(email: string) {
+  const normalizedEmail = requireString(email).toLowerCase();
+  if (!normalizedEmail) throw new Error("Email is required.");
+  const { data: user, error } = await adminClient
+    .from("gre_mis_users")
+    .select("id, first_name, email")
+    .eq("email", normalizedEmail)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!user) return { ok: true, message: "If the email exists, a reset code has been sent." };
+
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const codeHash = await hashToken(code);
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 20).toISOString();
+
+  await adminClient
+    .from("gre_mis_password_reset_requests")
+    .delete()
+    .eq("email", normalizedEmail)
+    .is("used_at", null);
+
+  const { error: insertError } = await adminClient.from("gre_mis_password_reset_requests").insert({
+    user_id: user.id,
+    email: normalizedEmail,
+    code_hash: codeHash,
+    expires_at: expiresAt,
+  });
+  if (insertError) throw new Error(insertError.message);
+
+  await sendEmail({
+    to: normalizedEmail,
+    subject: "GRE MIS password reset code",
+    body: [
+      `Hello ${user.first_name || "there"},`,
+      "",
+      `Your GRE MIS password reset code is: ${code}`,
+      "This code will expire in 20 minutes.",
+      "",
+      "Regards,",
+      "Green Rural Economy",
+    ].join("\n"),
+  });
+  return { ok: true, message: "If the email exists, a reset code has been sent." };
+}
+
+async function resetPassword(email: string, code: string, newPassword: string) {
+  const normalizedEmail = requireString(email).toLowerCase();
+  const normalizedCode = requireString(code);
+  if (!normalizedEmail || !normalizedCode || !newPassword) throw new Error("Email, code, and new password are required.");
+  if (newPassword.length < 8) throw new Error("Password must be at least 8 characters.");
+
+  const codeHash = await hashToken(normalizedCode);
+  const { data: requestRow, error } = await adminClient
+    .from("gre_mis_password_reset_requests")
+    .select("id, user_id, expires_at, used_at")
+    .eq("email", normalizedEmail)
+    .eq("code_hash", codeHash)
+    .is("used_at", null)
+    .order("created_at", { ascending: false })
+    .maybeSingle();
+  if (error || !requestRow) throw new Error("Invalid or expired reset code.");
+  if (new Date(requestRow.expires_at).getTime() <= Date.now()) {
+    throw new Error("Reset code has expired.");
+  }
+
+  const { error: passwordError } = await adminClient.rpc("gre_mis_user_set_password", {
+    p_user_id: requestRow.user_id,
+    p_password: newPassword,
+    p_must_change_password: false,
+  });
+  if (passwordError) throw new Error(passwordError.message);
+
+  await adminClient
+    .from("gre_mis_password_reset_requests")
+    .update({ used_at: new Date().toISOString() })
+    .eq("id", requestRow.id);
+
+  return { ok: true };
+}
+
+async function changePassword(userCtx: { user: Record<string, unknown> }, currentPassword: string, newPassword: string) {
+  if (!currentPassword || !newPassword) throw new Error("Current and new passwords are required.");
+  if (newPassword.length < 8) throw new Error("Password must be at least 8 characters.");
+  const identifier = requireString(userCtx.user.email) || requireString(userCtx.user.username);
+  const valid = await verifyUserPassword(identifier, currentPassword);
+  if (!valid) throw new Error("Current password is incorrect.");
+  const { error } = await adminClient.rpc("gre_mis_user_set_password", {
+    p_user_id: requireString(userCtx.user.id),
+    p_password: newPassword,
+    p_must_change_password: false,
+  });
+  if (error) throw new Error(error.message);
+  return { ok: true };
+}
+
+async function promoteUserToCurator(userId: string) {
+  const { data: user, error } = await adminClient
+    .from("gre_mis_users")
+    .select("id, first_name, full_name, email, phone")
+    .eq("id", userId)
+    .single();
+  if (error || !user) throw new Error(error?.message || "User not found.");
+
+  const { error: userUpdateError } = await adminClient
+    .from("gre_mis_users")
+    .update({ role: "curator", updated_at: new Date().toISOString() })
+    .eq("id", userId);
+  if (userUpdateError) throw new Error(userUpdateError.message);
+
+  const { error: curatorError } = await adminClient.from("gre_mis_curators").upsert({
+    user_id: user.id,
+    display_name: user.full_name,
+    first_name: user.first_name,
+    email: user.email,
+    phone: user.phone,
+    is_active: true,
+    gre_sync_status: "pending",
+    gre_sync_message: "Awaiting GRE curator-directory sync mapping.",
+    gre_synced_at: null,
+  }, { onConflict: "email" });
+  if (curatorError) throw new Error(curatorError.message);
+
+  return { ok: true };
 }
 
 async function applyNeedOverride(
@@ -1986,6 +2275,108 @@ async function submitUpdateRequest(payload: Record<string, unknown>) {
   return { ok: true };
 }
 
+function normalizeBooleanInput(value: unknown) {
+  if (typeof value === "boolean") return value;
+  const normalized = requireString(value).toLowerCase();
+  if (!normalized) return null;
+  if (["true", "yes", "1"].includes(normalized)) return true;
+  if (["false", "no", "0"].includes(normalized)) return false;
+  return null;
+}
+
+async function applyApprovedNeedPatch(requestRow: Record<string, unknown>, actorEmail: string) {
+  const greSyncResult = await syncApprovedUpdateToGre(requestRow);
+
+  const nextNeedPatch: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  const changeParts: string[] = [];
+
+  if (requestRow.proposed_status) {
+    nextNeedPatch.status = requestRow.proposed_status;
+    nextNeedPatch.last_status_change_at = new Date().toISOString();
+    changeParts.push(`Status -> ${requestRow.proposed_status}`);
+  }
+  if (requestRow.proposed_internal_status) {
+    nextNeedPatch.internal_status = requestRow.proposed_internal_status;
+    nextNeedPatch.last_status_change_at = new Date().toISOString();
+    changeParts.push(`Internal status -> ${requestRow.proposed_internal_status}`);
+  }
+  if (requestRow.proposed_next_action) {
+    nextNeedPatch.next_action = requestRow.proposed_next_action;
+    changeParts.push(`Next action -> ${requestRow.proposed_next_action}`);
+  }
+  if (requestRow.proposed_curation_notes) nextNeedPatch.curation_notes = requestRow.proposed_curation_notes;
+  if (requestRow.proposed_curation_call_date) nextNeedPatch.curation_call_date = requestRow.proposed_curation_call_date;
+  if (requestRow.proposed_demand_broadcast_needed !== null && requestRow.proposed_demand_broadcast_needed !== undefined) {
+    nextNeedPatch.demand_broadcast_needed = requestRow.proposed_demand_broadcast_needed;
+  }
+  if (Number.isInteger(requestRow.proposed_solutions_shared_count)) {
+    nextNeedPatch.solutions_shared_count = requestRow.proposed_solutions_shared_count;
+  }
+  if (Number.isInteger(requestRow.proposed_invited_providers_count)) {
+    nextNeedPatch.invited_providers_count = requestRow.proposed_invited_providers_count;
+  }
+
+  const { error: patchError } = await adminClient.from("gre_mis_needs").update(nextNeedPatch).eq("id", requestRow.need_id);
+  if (patchError) throw new Error(patchError.message);
+
+  await adminClient.from("gre_mis_need_updates").insert({
+    need_id: requestRow.need_id,
+    update_type: "curation_updated",
+    note: [
+      changeParts.join(" | ") || "Curation update saved.",
+      "Synced to GRE website.",
+      greSyncResult.unsupportedFields?.length ? `Not synced to GRE: ${greSyncResult.unsupportedFields.join(", ")}.` : "",
+    ].filter(Boolean).join(" "),
+    created_by_email: actorEmail,
+  });
+
+  return greSyncResult;
+}
+
+async function directCuratorUpdate(payload: Record<string, unknown>, userCtx: { user: Record<string, unknown> }) {
+  const needId = requireString(payload.needId);
+  if (!needId) throw new Error("Need ID is required.");
+  const actorEmail = requireString(userCtx.user.email).toLowerCase();
+
+  const { data: need, error: needError } = await adminClient
+    .from("gre_mis_needs")
+    .select("id, approval_status, curator_id, gre_mis_curators:curator_id(user_id, email)")
+    .eq("id", needId)
+    .single();
+  if (needError || !need) throw new Error(needError?.message || "Need not found.");
+  if (need.approval_status !== "approved") throw new Error("Only approved needs can be updated.");
+
+  const curatorRow = Array.isArray(need.gre_mis_curators) ? need.gre_mis_curators[0] : need.gre_mis_curators;
+  const assignedUserId = requireString(curatorRow?.user_id);
+  const assignedEmail = requireString(curatorRow?.email).toLowerCase();
+  if (assignedUserId !== requireString(userCtx.user.id) && assignedEmail !== actorEmail) {
+    throw new Error("You can edit curation only for needs assigned to you.");
+  }
+
+  const requestRow = {
+    need_id: needId,
+    proposed_status: requireString(payload.proposedStatus) || null,
+    proposed_internal_status: requireString(payload.proposedInternalStatus) || null,
+    proposed_next_action: requireString(payload.proposedNextAction) || null,
+    proposed_curation_notes: requireString(payload.proposedCurationNotes) || null,
+    proposed_curation_call_date: requireString(payload.proposedCurationCallDate) || null,
+    proposed_demand_broadcast_needed: normalizeBooleanInput(payload.proposedDemandBroadcastNeeded),
+    proposed_solutions_shared_count: null,
+    proposed_invited_providers_count: null,
+  };
+
+  const greSyncResult = await applyApprovedNeedPatch(requestRow, actorEmail);
+  return {
+    ok: true,
+    greSync: {
+      synced: true,
+      unsupportedFields: greSyncResult.unsupportedFields || [],
+    },
+  };
+}
+
 async function reviewUpdateRequest(requestId: string, decision: string, reviewNotes: string, actorEmail: string) {
   const { data: requestRow, error: requestError } = await adminClient
     .from("gre_mis_update_requests")
@@ -2008,45 +2399,7 @@ async function reviewUpdateRequest(requestId: string, decision: string, reviewNo
     return { ok: true };
   }
 
-  const greSyncResult = await syncApprovedUpdateToGre(requestRow);
-
-  const nextNeedPatch: Record<string, unknown> = {
-    updated_at: new Date().toISOString(),
-  };
-  const changeParts: string[] = [];
-
-  if (requestRow.proposed_status) {
-    nextNeedPatch.status = requestRow.proposed_status;
-    nextNeedPatch.last_status_change_at = new Date().toISOString();
-    changeParts.push(`Status -> ${requestRow.proposed_status}`);
-  }
-  if (requestRow.proposed_internal_status) {
-    nextNeedPatch.internal_status = requestRow.proposed_internal_status;
-    nextNeedPatch.last_status_change_at = new Date().toISOString();
-    changeParts.push(`Internal status -> ${requestRow.proposed_internal_status}`);
-  }
-  if (requestRow.proposed_next_action) {
-    nextNeedPatch.next_action = requestRow.proposed_next_action;
-    changeParts.push(`Next action -> ${requestRow.proposed_next_action}`);
-  }
-  if (requestRow.proposed_curation_notes) {
-    nextNeedPatch.curation_notes = requestRow.proposed_curation_notes;
-  }
-  if (requestRow.proposed_curation_call_date) {
-    nextNeedPatch.curation_call_date = requestRow.proposed_curation_call_date;
-  }
-  if (requestRow.proposed_demand_broadcast_needed !== null) {
-    nextNeedPatch.demand_broadcast_needed = requestRow.proposed_demand_broadcast_needed;
-  }
-  if (Number.isInteger(requestRow.proposed_solutions_shared_count)) {
-    nextNeedPatch.solutions_shared_count = requestRow.proposed_solutions_shared_count;
-  }
-  if (Number.isInteger(requestRow.proposed_invited_providers_count)) {
-    nextNeedPatch.invited_providers_count = requestRow.proposed_invited_providers_count;
-  }
-
-  const { error: patchError } = await adminClient.from("gre_mis_needs").update(nextNeedPatch).eq("id", requestRow.need_id);
-  if (patchError) throw new Error(patchError.message);
+  const greSyncResult = await applyApprovedNeedPatch(requestRow, actorEmail);
 
   const { error: reviewError } = await adminClient
     .from("gre_mis_update_requests")
@@ -2058,19 +2411,6 @@ async function reviewUpdateRequest(requestId: string, decision: string, reviewNo
     })
     .eq("id", requestId);
   if (reviewError) throw new Error(reviewError.message);
-
-  await adminClient.from("gre_mis_need_updates").insert({
-    need_id: requestRow.need_id,
-    update_type: "curator_update_approved",
-    note: [
-      changeParts.join(" | ") || "Curator update approved.",
-      "Synced to GRE website.",
-      greSyncResult.unsupportedFields?.length
-        ? `Not synced to GRE: ${greSyncResult.unsupportedFields.join(", ")}.`
-        : "",
-    ].filter(Boolean).join(" "),
-    created_by_email: actorEmail,
-  });
 
   return {
     ok: true,
@@ -2119,10 +2459,12 @@ async function upsertOption(optionType: string, label: string) {
 async function sendProviderIntro(needId: string, providerEmail: string, actorEmail: string) {
   const { data: need, error: needError } = await adminClient
     .from("gre_mis_needs")
-    .select("id, organization_name, seeker_email, contact_person, problem_statement, state, district, curated_need")
+    .select("id, organization_name, seeker_email, contact_person, problem_statement, state, district, curated_need, gre_mis_curators:curator_id(email, display_name)")
     .eq("id", needId)
     .single();
   if (needError || !need) throw new Error(needError?.message || "Need not found.");
+  const curator = Array.isArray(need.gre_mis_curators) ? need.gre_mis_curators[0] : need.gre_mis_curators;
+  const curatorEmail = requireString(curator?.email).toLowerCase();
 
   const subject = `GRE introduction: ${need.organization_name} challenge for your consideration`;
   const body = [
@@ -2146,7 +2488,7 @@ async function sendProviderIntro(needId: string, providerEmail: string, actorEma
 
   await sendEmail({
     to: providerEmail,
-    cc: need.seeker_email,
+    cc: [need.seeker_email, curatorEmail].filter(Boolean).join(", "),
     subject,
     body,
   });
@@ -2154,7 +2496,7 @@ async function sendProviderIntro(needId: string, providerEmail: string, actorEma
   await adminClient.from("gre_mis_email_log").insert({
     need_id: need.id,
     recipient_email: providerEmail,
-    cc_email: need.seeker_email,
+    cc_email: [need.seeker_email, curatorEmail].filter(Boolean).join(", "),
     subject,
     body_preview: body.slice(0, 1000),
     sent_by_email: actorEmail,
@@ -2170,6 +2512,63 @@ async function sendProviderIntro(needId: string, providerEmail: string, actorEma
   return { ok: true, message: `Provider introduction email sent from ${gmailSenderEmail}.` };
 }
 
+async function sendCuratorMessage(
+  needId: string,
+  actorName: string,
+  actorEmail: string,
+  message: string,
+) {
+  const { data: need, error } = await adminClient
+    .from("gre_mis_needs")
+    .select("id, organization_name, seeker_email, contact_person, problem_statement, state, district, gre_mis_curators:curator_id(email, display_name)")
+    .eq("id", needId)
+    .single();
+  if (error || !need) throw new Error(error?.message || "Need not found.");
+  const curator = Array.isArray(need.gre_mis_curators) ? need.gre_mis_curators[0] : need.gre_mis_curators;
+  const curatorEmail = requireString(curator?.email).toLowerCase();
+  if (!curatorEmail) throw new Error("No curator is assigned to this need yet.");
+
+  const subject = `GRE MIS message on Need ${need.id}: ${need.organization_name}`;
+  const body = [
+    `Hello ${curator?.display_name || "Curator"},`,
+    "",
+    `${actorName || actorEmail} has sent a message from the GRE MIS dashboard regarding the need below.`,
+    "",
+    `Organization: ${need.organization_name}`,
+    `Contact person: ${need.contact_person || "Not provided"}`,
+    `Location: ${need.state || "Not provided"}${need.district ? ` / ${need.district}` : ""}`,
+    "",
+    "Problem statement:",
+    `${need.problem_statement}`,
+    "",
+    "Message:",
+    message || "No additional message provided.",
+    "",
+    `Reply to: ${actorEmail}`,
+    "",
+    "Regards,",
+    "Green Rural Economy",
+  ].join("\n");
+
+  await sendEmail({
+    to: curatorEmail,
+    cc: actorEmail,
+    subject,
+    body,
+  });
+
+  await adminClient.from("gre_mis_email_log").insert({
+    need_id: need.id,
+    recipient_email: curatorEmail,
+    cc_email: actorEmail,
+    subject,
+    body_preview: body.slice(0, 1000),
+    sent_by_email: actorEmail,
+  });
+
+  return { ok: true, message: `Message sent to ${curator?.display_name || "the curator"}.` };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -2179,13 +2578,55 @@ Deno.serve(async (req) => {
     const payload = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const action = requireString(payload.action);
 
+    if (action === "userLogin") {
+      return jsonResponse(await userLogin(requireString(payload.identifier), requireString(payload.password)));
+    }
+
+    if (action === "registerUser") {
+      return jsonResponse(await registerUser(payload));
+    }
+
+    if (action === "requestPasswordReset") {
+      return jsonResponse(await requestPasswordReset(requireString(payload.email)));
+    }
+
+    if (action === "resetPassword") {
+      return jsonResponse(await resetPassword(requireString(payload.email), requireString(payload.code), requireString(payload.newPassword)));
+    }
+
     if (action === "adminLogin") {
       return jsonResponse(await adminLogin(requireString(payload.username), requireString(payload.password)));
     }
 
+    if (action === "validateUserSession") {
+      const userCtx = await requireUserSession(req, requireString(payload.userSessionToken));
+      return jsonResponse({
+        ok: true,
+        user: {
+          id: userCtx.user.id,
+          username: userCtx.user.username,
+          email: userCtx.user.email,
+          firstName: userCtx.user.first_name,
+          fullName: userCtx.user.full_name,
+          phone: userCtx.user.phone,
+          role: userCtx.user.role,
+          mustChangePassword: userCtx.user.must_change_password,
+        },
+      });
+    }
+
     if (action === "validateAdminSession") {
       const session = await requireAdminSession(req, requireString(payload.adminSessionToken));
-      return jsonResponse({ ok: true, username: session.session.username, email: session.admin.email });
+      return jsonResponse({ ok: true, username: session.user.username, email: session.admin.email });
+    }
+
+    if (action === "userLogout") {
+      return jsonResponse(await userLogout(
+        requireString(payload.userSessionToken) ||
+        requireString(payload.adminSessionToken) ||
+        requireString(req.headers.get("x-gre-user-session")) ||
+        requireString(req.headers.get("x-gre-admin-session")),
+      ));
     }
 
     if (action === "adminLogout") {
@@ -2196,41 +2637,69 @@ Deno.serve(async (req) => {
       return jsonResponse(await submitUpdateRequest(payload));
     }
 
+    const userCtx = await requireUserSession(req, requireString(payload.userSessionToken) || requireString(payload.adminSessionToken));
+    const actorEmail = requireString(userCtx.user.email).toLowerCase();
+    const actorName = requireString(userCtx.user.full_name) || requireString(userCtx.user.first_name) || actorEmail;
+
+    if (action === "changePassword") {
+      return jsonResponse(await changePassword(userCtx, requireString(payload.currentPassword), requireString(payload.newPassword)));
+    }
+
+    if (action === "sendCuratorMessage") {
+      return jsonResponse(await sendCuratorMessage(
+        requireString(payload.needId),
+        actorName,
+        actorEmail,
+        requireString(payload.message),
+      ));
+    }
+
+    if (action === "directCuratorUpdate") {
+      assertRoles(userCtx, ["curator", "admin"], "Curator or admin access is required.");
+      return jsonResponse(await directCuratorUpdate(payload, userCtx));
+    }
+
+    if (action === "sendProviderIntro") {
+      assertRoles(userCtx, ["curator", "admin"], "Curator or admin access is required.");
+      return jsonResponse(await sendProviderIntro(requireString(payload.needId), requireString(payload.providerEmail), actorEmail));
+    }
+
+    if (action === "promoteUserToCurator") {
+      assertRoles(userCtx, ["admin"], "Admin login required.");
+      return jsonResponse(await promoteUserToCurator(requireString(payload.userId)));
+    }
+
     const adminCtx = await requireAdminSession(req, requireString(payload.adminSessionToken));
-    const actorEmail = adminCtx.admin.email;
+    const adminActorEmail = adminCtx.admin.email;
 
     if (action === "adminSnapshot") {
       return jsonResponse(await getAdminSnapshot());
     }
 
     if (action === "assignCurator") {
-      return jsonResponse(await assignCurator(requireString(payload.needId), requireString(payload.curatorId) || null, actorEmail));
+      return jsonResponse(await assignCurator(requireString(payload.needId), requireString(payload.curatorId) || null, adminActorEmail));
     }
 
     if (action === "approveNeed") {
-      return jsonResponse(await approveNeed(requireString(payload.needId), requireString(payload.decision), requireString(payload.reviewNotes), actorEmail));
+      return jsonResponse(await approveNeed(requireString(payload.needId), requireString(payload.decision), requireString(payload.reviewNotes), adminActorEmail));
     }
 
     if (action === "reviewUpdateRequest") {
-      return jsonResponse(await reviewUpdateRequest(requireString(payload.requestId), requireString(payload.decision), requireString(payload.reviewNotes), actorEmail));
+      return jsonResponse(await reviewUpdateRequest(requireString(payload.requestId), requireString(payload.decision), requireString(payload.reviewNotes), adminActorEmail));
     }
 
     if (action === "upsertOption") {
       return jsonResponse(await upsertOption(requireString(payload.optionType), requireString(payload.label)));
     }
 
-    if (action === "sendProviderIntro") {
-      return jsonResponse(await sendProviderIntro(requireString(payload.needId), requireString(payload.providerEmail), actorEmail));
-    }
-
     if (action === "importInboundWorkbook") {
       return jsonResponse(
-        await importInboundWorkbook(payload.rows, requireString(payload.fileName) || "GRE inbound workbook", actorEmail, requireString(payload.aiProvider) || defaultAiProvider),
+        await importInboundWorkbook(payload.rows, requireString(payload.fileName) || "GRE inbound workbook", adminActorEmail, requireString(payload.aiProvider) || defaultAiProvider),
       );
     }
 
     if (action === "syncGreLiveInbounds") {
-      return jsonResponse(await syncGreLiveInbounds(actorEmail, requireString(payload.aiProvider) || defaultAiProvider));
+      return jsonResponse(await syncGreLiveInbounds(adminActorEmail, requireString(payload.aiProvider) || defaultAiProvider));
     }
 
     if (action === "syncGreChatbotData") {
@@ -2242,7 +2711,7 @@ Deno.serve(async (req) => {
     }
 
       if (action === "refreshNeedIntelligence") {
-        return jsonResponse(await refreshNeedIntelligence(actorEmail, requireString(payload.aiProvider) || defaultAiProvider));
+        return jsonResponse(await refreshNeedIntelligence(adminActorEmail, requireString(payload.aiProvider) || defaultAiProvider));
       }
 
       if (action === "applyNeedOverride") {
@@ -2251,7 +2720,7 @@ Deno.serve(async (req) => {
           (payload.patch && typeof payload.patch === "object") ? payload.patch as Record<string, unknown> : {},
           requireString(payload.conflictNote),
           Boolean(payload.resolveConflict),
-          actorEmail,
+          adminActorEmail,
         ));
       }
 

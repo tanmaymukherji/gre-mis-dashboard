@@ -31,6 +31,21 @@ body {
 }
 
 .shell { max-width: 1540px; margin: 0 auto; padding: 28px; }
+.app-shell { display: grid; gap: 0; }
+.auth-gate { padding: 22px; }
+.auth-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.auth-card {
+  padding: 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #ffffff, #f7faf4);
+  display: grid;
+  gap: 14px;
+}
 .masthead,
 .hero-strip,
 .panel,
@@ -107,6 +122,7 @@ h2 { font-size: 1.35rem; }
 .chip.muted { background: var(--amber-soft); color: #7d5600; }
 .chip.good { background: var(--green-soft); color: var(--green); }
 .chip.warn { background: var(--red-soft); color: #8d2f21; }
+.chip.info { background: var(--blue-soft); color: #27475f; }
 
 .hero-strip {
   margin-top: 18px;
@@ -794,6 +810,7 @@ textarea { resize: vertical; }
 }
 
 @media (max-width: 1280px) {
+  .auth-grid,
   .metrics-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .overview-insight-grid,
   .operations-grid,
@@ -806,6 +823,7 @@ textarea { resize: vertical; }
 
 @media (max-width: 920px) {
   .shell { padding: 16px; }
+  .auth-grid,
   .masthead,
   .operations-grid,
   .overview-insight-grid,

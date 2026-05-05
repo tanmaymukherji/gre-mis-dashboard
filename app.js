@@ -1,8 +1,8 @@
 const FALLBACK_CURATORS = [
   { id: "fallback-1", display_name: "Tanmay Mukherji", email: "tanmay@greenruraleconomy.in" },
   { id: "fallback-2", display_name: "Phaneesh K", email: "agri@greenruraleconomy.in" },
-  { id: "fallback-3", display_name: "Swati Singh", email: "swati@greenruraleconomy.in" },
-  { id: "fallback-4", display_name: "Shaifali Nagar", email: "shaifali@greenruraleconomy.in" },
+  { id: "fallback-3", display_name: "Swati Singh", email: "solution@greenruraleconomy.in" },
+  { id: "fallback-4", display_name: "Shaifali Nagar", email: "help@greenruraleconomy.in" },
 ];
 
 const state = {
@@ -27,8 +27,10 @@ const state = {
     state: [],
     category: [],
   },
-  adminToken: localStorage.getItem("gre-mis-admin-token") || "",
-    adminSession: null,
+  userToken: localStorage.getItem("gre-mis-user-token") || localStorage.getItem("gre-mis-admin-token") || "",
+  adminToken: "",
+  userSession: null,
+  adminSession: null,
     puterModelsLoaded: false,
     puterModels: [],
     puterRecommendations: {},
@@ -46,6 +48,7 @@ const state = {
       pendingNeeds: [],
       pendingUpdates: [],
       aiReviewNeeds: [],
+      users: [],
     },
   };
 
@@ -256,6 +259,41 @@ function safeAsync(handler) {
 
 function normalizeText(value) {
   return String(value ?? "").trim();
+}
+
+function syncSessionState(user, token = state.userToken) {
+  state.userSession = user || null;
+  state.userToken = token || "";
+  const isAdmin = user?.role === "admin";
+  state.adminToken = isAdmin ? state.userToken : "";
+  state.adminSession = isAdmin
+    ? { username: user?.username || "admin", email: user?.email || "" }
+    : null;
+
+  if (state.userToken) {
+    localStorage.setItem("gre-mis-user-token", state.userToken);
+    if (isAdmin) localStorage.setItem("gre-mis-admin-token", state.userToken);
+    else localStorage.removeItem("gre-mis-admin-token");
+  } else {
+    localStorage.removeItem("gre-mis-user-token");
+    localStorage.removeItem("gre-mis-admin-token");
+  }
+}
+
+function isLoggedIn() {
+  return Boolean(state.userSession);
+}
+
+function isAdminUser() {
+  return state.userSession?.role === "admin";
+}
+
+function isCuratorUser() {
+  return state.userSession?.role === "curator";
+}
+
+function canSeeCurationDetails() {
+  return isAdminUser() || isCuratorUser();
 }
 
 function parseArray(value) {
@@ -1190,7 +1228,7 @@ function getOverviewFocusPayload() {
     tone: activeMetrics.includes("stuck") || activePipelines.includes("stuck") ? "bad" : activeMetrics.includes("admin_queue") ? "warn" : "info",
     items: orderedCases,
     cards,
-    emptyText: activeMetrics.includes("admin_queue") && !state.adminToken
+    emptyText: activeMetrics.includes("admin_queue") && !isAdminUser()
       ? "Sign in through Admin Sync to inspect pending approvals and curator requests."
       : "No cases match the current combination of filters.",
   };
@@ -1495,6 +1533,7 @@ class GreMisStore {
       apikey: String(this.config.SUPABASE_ANON_KEY || ""),
       Authorization: `Bearer ${String(this.config.SUPABASE_ANON_KEY || "")}`,
     };
+    if (state.userToken) headers["x-gre-user-session"] = state.userToken;
     if (state.adminToken) headers["x-gre-admin-session"] = state.adminToken;
     const response = await fetch(`${this.config.SUPABASE_URL}/functions/v1/${this.config.ADMIN_FUNCTION || "gre-mis-admin"}`, {
       method: "POST",
@@ -1502,6 +1541,7 @@ class GreMisStore {
       body: JSON.stringify({
         action,
         ...body,
+        userSessionToken: state.userToken || undefined,
         adminSessionToken: state.adminToken || undefined,
       }),
     });
@@ -1511,52 +1551,85 @@ class GreMisStore {
       data = rawText ? JSON.parse(rawText) : {};
     } catch {}
     if (!response.ok) throw new Error(data.error || rawText || `Request failed (${response.status}).`);
-    if (requireAdmin && !state.adminToken) throw new Error("Admin login required.");
+    if (requireAdmin && !isAdminUser()) throw new Error("Admin login required.");
     return data;
   }
 
-  async adminLogin(username, password) {
-    const data = await this.callAdmin("adminLogin", { username, password });
-    state.adminToken = data.token;
-    state.adminSession = { username: data.username, email: "tanmay@greenruraleconomy.in" };
-    localStorage.setItem("gre-mis-admin-token", data.token);
+  async userLogin(identifier, password) {
+    const data = await this.callAdmin("userLogin", { identifier, password });
+    syncSessionState(data.user, data.token);
     return data;
   }
 
-  async validateAdminSession() {
-    if (!state.adminToken) return false;
+  async validateUserSession() {
+    if (!state.userToken) return false;
     try {
-      const data = await this.callAdmin("validateAdminSession");
-      state.adminSession = { username: data.username, email: data.email };
+      const data = await this.callAdmin("validateUserSession");
+      syncSessionState({
+        id: data.user.id,
+        username: data.user.username,
+        email: data.user.email,
+        first_name: data.user.firstName,
+        full_name: data.user.fullName,
+        phone: data.user.phone,
+        role: data.user.role,
+        must_change_password: data.user.mustChangePassword,
+      });
       return true;
     } catch {
-      state.adminToken = "";
-      state.adminSession = null;
-      localStorage.removeItem("gre-mis-admin-token");
+      syncSessionState(null, "");
       return false;
     }
   }
 
-  async adminLogout() {
-    if (state.adminToken) {
-      await this.callAdmin("adminLogout");
+  async userLogout() {
+    if (state.userToken) {
+      await this.callAdmin("userLogout");
     }
-    state.adminToken = "";
-    state.adminSession = null;
-    localStorage.removeItem("gre-mis-admin-token");
+    syncSessionState(null, "");
+  }
+
+  async registerUser(payload) {
+    return this.callAdmin("registerUser", payload);
+  }
+
+  async requestPasswordReset(email) {
+    return this.callAdmin("requestPasswordReset", { email });
+  }
+
+  async resetPassword(email, code, newPassword) {
+    return this.callAdmin("resetPassword", { email, code, newPassword });
+  }
+
+  async changePassword(currentPassword, newPassword) {
+    return this.callAdmin("changePassword", { currentPassword, newPassword });
+  }
+
+  async adminLogin(username, password) {
+    return this.userLogin(username, password);
+  }
+
+  async validateAdminSession() {
+    return this.validateUserSession();
+  }
+
+  async adminLogout() {
+    return this.userLogout();
   }
 
   async loadAdminSnapshot() {
-    if (!state.adminToken) {
+    if (!isAdminUser()) {
       state.data.pendingNeeds = [];
       state.data.pendingUpdates = [];
       state.data.aiReviewNeeds = [];
+      state.data.users = [];
       return;
     }
     const data = await this.callAdmin("adminSnapshot", {}, true);
     state.data.pendingNeeds = ensureList(data.pendingNeeds);
     state.data.pendingUpdates = ensureList(data.pendingUpdates);
     state.data.aiReviewNeeds = ensureList(data.aiReviewNeeds);
+    state.data.users = ensureList(data.users);
   }
 
   async applyNeedOverride(needId, patch, conflictNote = "", resolveConflict = false) {
@@ -1612,7 +1685,19 @@ class GreMisStore {
   }
 
   async sendProviderIntro(needId, providerEmail) {
-    return this.callAdmin("sendProviderIntro", { needId, providerEmail }, true);
+    return this.callAdmin("sendProviderIntro", { needId, providerEmail });
+  }
+
+  async sendCuratorMessage(needId, message) {
+    return this.callAdmin("sendCuratorMessage", { needId, message });
+  }
+
+  async directCuratorUpdate(payload) {
+    return this.callAdmin("directCuratorUpdate", payload);
+  }
+
+  async promoteUserToCurator(userId) {
+    return this.callAdmin("promoteUserToCurator", { userId }, true);
   }
 
   async importInboundWorkbook(fileName, rows, aiProvider) {
@@ -1811,6 +1896,23 @@ const store = new GreMisStore();
 
 function getCuratorById(id) {
   return state.data.curators.find((curator) => curator.id === id) || null;
+}
+
+function getCuratorByUser(user = state.userSession) {
+  if (!user) return null;
+  return state.data.curators.find(
+    (curator) =>
+      curator.user_id === user.id ||
+      String(curator.email || "").toLowerCase() === String(user.email || "").toLowerCase(),
+  ) || null;
+}
+
+function canEditNeedCuration(need) {
+  if (!need || !state.userSession) return false;
+  if (isAdminUser()) return true;
+  if (!isCuratorUser()) return false;
+  const myCurator = getCuratorByUser();
+  return Boolean(myCurator && need.curator_id === myCurator.id);
 }
 
 function getDisplayNeeds() {
@@ -2113,6 +2215,7 @@ function renderNeedDetail() {
   const curator = getCuratorById(need.curator_id);
   const solutionLinks = extractUrls(need.curation_notes);
   const noteText = stripUrls(need.curation_notes);
+  const canInspectCuration = canSeeCurationDetails();
   const summaryBadges = [
     { label: need.status, tone: badgeTone(need.status) },
     { label: need.internal_status, tone: badgeTone(need.internal_status) },
@@ -2153,42 +2256,55 @@ function renderNeedDetail() {
         </div>
       </article>
 
-      <article class="detail-card detail-stack-card">
-        <h4>Curation Snapshot</h4>
-        <div class="kv-grid">
-          <div><span>Assigned Curator</span><strong>${esc(curator?.display_name || "Unassigned")}</strong></div>
-          <div><span>Next Action</span><strong>${esc(need.next_action || "Not set")}</strong></div>
-          <div><span>Curation Call</span><strong>${esc(need.curation_call_date || "Not set")}</strong></div>
-          <div><span>Broadcast Needed</span><strong>${need.demand_broadcast_needed ? "Yes" : "No"}</strong></div>
-          <div><span>Solutions Shared</span><strong>${esc(need.solutions_shared_count || 0)}</strong></div>
-          <div><span>Invited Providers</span><strong>${esc(need.invited_providers_count || 0)}</strong></div>
-        </div>
-      </article>
+      ${canInspectCuration
+        ? `<article class="detail-card detail-stack-card">
+            <h4>Curation Snapshot</h4>
+            <div class="kv-grid">
+              <div><span>Assigned Curator</span><strong>${esc(curator?.display_name || "Unassigned")}</strong></div>
+              <div><span>Next Action</span><strong>${esc(need.next_action || "Not set")}</strong></div>
+              <div><span>Curation Call</span><strong>${esc(need.curation_call_date || "Not set")}</strong></div>
+              <div><span>Broadcast Needed</span><strong>${need.demand_broadcast_needed ? "Yes" : "No"}</strong></div>
+              <div><span>Solutions Shared</span><strong>${esc(need.solutions_shared_count || 0)}</strong></div>
+              <div><span>Invited Providers</span><strong>${esc(need.invited_providers_count || 0)}</strong></div>
+            </div>
+          </article>`
+        : `<article class="detail-card detail-stack-card">
+            <h4>Curator Handling</h4>
+            <div class="kv-grid">
+              <div><span>Assigned Curator</span><strong>${esc(curator?.display_name || "Unassigned")}</strong></div>
+              <div><span>Curator Email</span><strong>${esc(curator?.email || "Not set")}</strong></div>
+              <div><span>Status</span><strong>${esc(need.status || "Not set")}</strong></div>
+              <div><span>Current Stage</span><strong>${esc(need.internal_status || "Not set")}</strong></div>
+            </div>
+            <p class="helper-text">Detailed curation notes and internal actioning are visible only to curators and admins.</p>
+          </article>`}
 
       <article class="detail-card detail-stack-card">
         <h4>Categories</h4>
         <div class="tag-row">${parseArray(need.curated_need).map((item) => `<span>${esc(item)}</span>`).join("") || `<span>Unclassified</span>`}</div>
       </article>
 
-      <article class="detail-card detail-stack-card">
-        <h4>Curation Notes</h4>
-        ${noteText ? `<p class="detail-note">${esc(noteText)}</p>` : `<p class="detail-note">No curation notes have been recorded yet.</p>`}
-        ${
-          solutionLinks.length
-            ? `<div class="detail-links">
-                <p class="signal-heading">Solution Links Shared with Seeker</p>
-                <ol class="detail-link-list">
-                  ${solutionLinks
-                    .map(
-                      (link, index) =>
-                        `<li><a href="${esc(link)}" target="_blank" rel="noreferrer">Solution Link ${index + 1}</a></li>`,
-                    )
-                    .join("")}
-                </ol>
-              </div>`
-            : ""
-        }
-      </article>
+      ${canInspectCuration
+        ? `<article class="detail-card detail-stack-card">
+            <h4>Curation Notes</h4>
+            ${noteText ? `<p class="detail-note">${esc(noteText)}</p>` : `<p class="detail-note">No curation notes have been recorded yet.</p>`}
+            ${
+              solutionLinks.length
+                ? `<div class="detail-links">
+                    <p class="signal-heading">Solution Links Shared with Seeker</p>
+                    <ol class="detail-link-list">
+                      ${solutionLinks
+                        .map(
+                          (link, index) =>
+                            `<li><a href="${esc(link)}" target="_blank" rel="noreferrer">Solution Link ${index + 1}</a></li>`,
+                        )
+                        .join("")}
+                    </ol>
+                  </div>`
+                : ""
+            }
+          </article>`
+        : ""}
 
     </div>
   `;
@@ -2246,9 +2362,9 @@ async function renderMatches() {
               <p class="meta-text">${esc(parseArray(match.geographies).slice(0, 3).join(", ") || "Geography not listed")}</p>
               <div class="card-actions">
                 ${match.gre_link ? `<a class="btn btn-secondary" href="${esc(match.gre_link)}" target="_blank" rel="noreferrer">Open GRE Link</a>` : `<span></span>`}
-                ${window.APP_CONFIG?.ENABLE_EMAIL_ACTIONS && state.adminToken && email
+                ${window.APP_CONFIG?.ENABLE_EMAIL_ACTIONS && (isAdminUser() || isCuratorUser()) && email
                   ? `<button class="btn btn-primary" data-action="email-provider" data-provider-email="${esc(email)}">Email This Provider</button>`
-                  : `<button class="btn btn-primary" type="button" disabled title="Provider outreach is available only in an active admin session.">Email This Provider</button>`}
+                  : `<button class="btn btn-primary" type="button" disabled title="Provider outreach is available only to signed-in curators and admins.">Email This Provider</button>`}
               </div>
             </article>
           `;
@@ -2282,74 +2398,118 @@ function renderWorkbench() {
   const currentInternalStatusLabel = normalizeText(need.internal_status) || "Not set";
   const currentNextActionLabel = normalizeText(need.next_action) || "Not set";
   const curatorOptions = [`<option value="">Unassigned</option>`, ...state.data.curators.map((item) => `<option value="${esc(item.id)}" ${item.id === need.curator_id ? "selected" : ""}>${esc(item.display_name)}</option>`)].join("");
+  const canEdit = canEditNeedCuration(need);
+  const isCurator = isCuratorUser();
+  const isAdmin = isAdminUser();
+  const canMessageCurator = isLoggedIn() && !canEdit;
 
   workbench.innerHTML = `
-    <article class="action-card">
-      <p class="eyebrow">Admin Assignment</p>
-      <h4>Curator Allocation</h4>
-      <label>
-        <span>Assigned Curator</span>
-        <select id="assignCuratorSelect">${curatorOptions}</select>
-      </label>
-      <button class="btn btn-secondary" id="assignCuratorBtn" ${state.adminToken ? "" : "disabled"}>Save Curator Assignment</button>
-      <p class="helper-text">${state.adminToken ? "Admin can rebalance or assign needs directly." : "Login as admin to change curator allocation."}</p>
-    </article>
-    <article class="action-card">
-      <p class="eyebrow">Curator Update Request</p>
-      <h4>Submit Status Change for Approval</h4>
-      <form id="updateRequestForm" class="action-form">
+    ${isAdmin ? `
+      <article class="action-card">
+        <p class="eyebrow">Admin Assignment</p>
+        <h4>Curator Allocation</h4>
         <label>
-          <span>Curator</span>
-          <input name="curator_name" value="${esc(curator?.display_name || "")}" ${curator ? "readonly" : "readonly"} />
+          <span>Assigned Curator</span>
+          <select id="assignCuratorSelect">${curatorOptions}</select>
         </label>
-        <label>
-          <span>Curator Email</span>
-          <input name="curator_email" value="${esc(curator?.email || "")}" ${curator ? "readonly" : "readonly"} />
-        </label>
-        <label>
-          <span>Proposed Status</span>
-          <select name="proposed_status">
-            <option value="">Current: ${esc(currentStatusLabel)}</option>
-            ${statusOptions.map((item) => `<option value="${esc(item.label)}">${esc(item.label)}</option>`).join("")}
-          </select>
-        </label>
-        <label>
-          <span>Proposed Internal Status</span>
-          <select name="proposed_internal_status">
-            <option value="">Current: ${esc(currentInternalStatusLabel)}</option>
-            ${internalOptions.map((item) => `<option value="${esc(item.label)}">${esc(item.label)}</option>`).join("")}
-          </select>
-        </label>
-        <label>
-          <span>Proposed Next Action</span>
-          <select name="proposed_next_action">
-            <option value="">Current: ${esc(currentNextActionLabel)}</option>
-            ${nextActionOptions.map((item) => `<option value="${esc(item.label)}">${esc(item.label)}</option>`).join("")}
-          </select>
-        </label>
-        <label>
-          <span>Curation Call Date</span>
-          <input name="proposed_curation_call_date" type="date" />
-        </label>
-        <label class="wide">
-          <span>Curator Notes</span>
-          <textarea name="proposed_curation_notes" rows="4" placeholder="Describe what changed and why."></textarea>
-        </label>
-        <label>
-          <span>Broadcast Needed</span>
-          <select name="proposed_demand_broadcast_needed">
+        <button class="btn btn-secondary" id="assignCuratorBtn">Save Curator Assignment</button>
+        <p class="helper-text">Admin can rebalance or assign needs directly.</p>
+      </article>` : ""}
+
+    ${(canEdit || isAdmin) ? `
+      <article class="action-card">
+        <p class="eyebrow">${isAdmin ? "Admin Curation Update" : "Curator Update"}</p>
+        <h4>${isAdmin ? "Update Any Curation Directly" : "Update Your Assigned Need"}</h4>
+        <form id="directUpdateForm" class="action-form">
+          <label>
+            <span>Curator</span>
+            <input name="curator_name" value="${esc(curator?.display_name || state.userSession?.full_name || "")}" readonly />
+          </label>
+          <label>
+            <span>Curator Email</span>
+            <input name="curator_email" value="${esc(curator?.email || state.userSession?.email || "")}" readonly />
+          </label>
+          <label>
+            <span>Updated Status</span>
+            <select name="proposed_status">
+              <option value="">Current: ${esc(currentStatusLabel)}</option>
+              ${statusOptions.map((item) => `<option value="${esc(item.label)}">${esc(item.label)}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            <span>Updated Internal Status</span>
+            <select name="proposed_internal_status">
+              <option value="">Current: ${esc(currentInternalStatusLabel)}</option>
+              ${internalOptions.map((item) => `<option value="${esc(item.label)}">${esc(item.label)}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            <span>Updated Next Action</span>
+            <select name="proposed_next_action">
+              <option value="">Current: ${esc(currentNextActionLabel)}</option>
+              ${nextActionOptions.map((item) => `<option value="${esc(item.label)}">${esc(item.label)}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            <span>Curation Call Date</span>
+            <input name="proposed_curation_call_date" type="date" />
+          </label>
+          <label class="wide">
+            <span>Curation Notes</span>
+            <textarea name="proposed_curation_notes" rows="4" placeholder="Describe what changed and why."></textarea>
+          </label>
+          <label>
+            <span>Broadcast Needed</span>
+            <select name="proposed_demand_broadcast_needed">
               <option value="">Current: ${need.demand_broadcast_needed ? "Yes" : "No"}</option>
               <option value="true">Yes</option>
               <option value="false">No</option>
             </select>
           </label>
           <div class="wide">
-            <button class="btn btn-primary" type="submit" ${curator ? "" : "disabled"}>Submit Update for Admin Approval</button>
-            <p class="helper-text">Solution and invited-provider counts are derived from the logged activity and are not edited in this form.</p>
+            <button class="btn btn-primary" type="submit">${isAdmin ? "Save Curation Update" : "Save and Sync to GRE"}</button>
+            <p class="helper-text">${isAdmin ? "Admin can directly update any curator's curation details." : "Your curation update will sync to the GRE website immediately."}</p>
           </div>
-      </form>
-      <p class="helper-text">${curator ? "Only the currently assigned curator can submit an update request for this need." : "Assign a curator first so status changes can flow through approval."}</p>
-    </article>
+        </form>
+      </article>` : ""}
+
+    ${(isCurator && !canEdit) ? `
+      <article class="action-card">
+        <p class="eyebrow">Curator Access</p>
+        <h4>Need Owned by Another Curator</h4>
+        <p class="helper-text">You can inspect the need and mail the assigned curator or a provider, but only the assigned curator can edit curation here.</p>
+      </article>` : ""}
+
+    ${(isAdmin || isCurator) ? `
+      <article class="action-card">
+        <p class="eyebrow">Provider Outreach</p>
+        <h4>Send Need Details by Email</h4>
+        <form id="manualProviderForm" class="action-form">
+          <label>
+            <span>Provider Email</span>
+            <input name="provider_email" type="email" placeholder="provider@example.org" required />
+          </label>
+          <div class="wide">
+            <button class="btn btn-secondary" type="submit">Send Need Details</button>
+          </div>
+        </form>
+        <p class="helper-text">The mail is sent from help@greenruraleconomy.in, with the seeker and actual curator copied.</p>
+      </article>` : ""}
+
+    ${canMessageCurator ? `
+      <article class="action-card">
+        <p class="eyebrow">Message Curator</p>
+        <h4>Send a Custom Message</h4>
+        <form id="curatorMessageForm" class="action-form">
+          <label class="wide">
+            <span>Message to ${esc(curator?.display_name || "the curator")}</span>
+            <textarea name="message" rows="4" placeholder="Write a message to the curator about this need." required></textarea>
+          </label>
+          <div class="wide">
+            <button class="btn btn-secondary" type="submit">Mail Curator</button>
+          </div>
+        </form>
+      </article>` : ""}
   `;
 }
 
@@ -2479,7 +2639,7 @@ function renderAdminQueue() {
   const aiReviewList = byId("aiReviewList");
   if (!pendingNeedsList || !pendingUpdatesList || !aiReviewList) return;
 
-  pendingNeedsList.innerHTML = state.adminToken
+  pendingNeedsList.innerHTML = isAdminUser()
     ? state.data.pendingNeeds.length
       ? state.data.pendingNeeds
           .map(
@@ -2503,7 +2663,7 @@ function renderAdminQueue() {
       : `<div class="empty-state">No intake records are waiting for admin approval.</div>`
     : `<div class="empty-state">Login as admin to view the intake approval queue.</div>`;
 
-  pendingUpdatesList.innerHTML = state.adminToken
+  pendingUpdatesList.innerHTML = isAdminUser()
     ? state.data.pendingUpdates.length
       ? state.data.pendingUpdates
           .map(
@@ -2531,7 +2691,7 @@ function renderAdminQueue() {
       : `<div class="empty-state">No curator update requests are waiting for approval.</div>`
       : `<div class="empty-state">Login as admin to view curator-submitted status changes.</div>`;
 
-  aiReviewList.innerHTML = state.adminToken
+  aiReviewList.innerHTML = isAdminUser()
     ? state.data.aiReviewNeeds.length
       ? state.data.aiReviewNeeds
           .map(
@@ -2593,29 +2753,85 @@ function renderAdminQueue() {
 
 }
 
+function renderUserManagement() {
+  const list = byId("userManagementList");
+  if (!list) return;
+  list.innerHTML = isAdminUser()
+    ? ensureList(state.data.users).length
+      ? ensureList(state.data.users).map((user) => `
+          <article class="approval-card">
+            <div class="status-row">
+              <span class="status-pill ${badgeTone(user.role)}">${esc(user.role)}</span>
+              <span class="status-pill info">${esc(user.is_active ? "Active" : "Inactive")}</span>
+            </div>
+            <h4>${esc(user.full_name || user.first_name || user.username)}</h4>
+            <div class="detail-list">
+              <div><strong>Username:</strong> ${esc(user.username)}</div>
+              <div><strong>Email:</strong> ${esc(user.email || "Not set")}</div>
+              <div><strong>Phone:</strong> ${esc(user.phone || "Not set")}</div>
+            </div>
+            <div class="card-actions">
+              ${user.role === "user" ? `<button class="btn btn-primary" data-action="promote-user" data-user-id="${esc(user.id)}">Promote to Curator</button>` : `<span class="helper-text">Already ${esc(user.role)}</span>`}
+            </div>
+          </article>
+        `).join("")
+      : `<div class="empty-state">No user records found.</div>`
+    : `<div class="empty-state">Login as admin to manage users.</div>`;
+}
+
+function renderAuthState() {
+  const authGate = byId("authGate");
+  const appShell = byId("appShell");
+  const roleTab = document.querySelector('.tab[data-view="admin"]');
+  const adminSyncLink = byId("adminSyncLink");
+  const accountName = byId("accountName");
+  const accountRoleChip = byId("accountRoleChip");
+  const accountSummary = byId("accountSummary");
+
+  if (authGate) authGate.classList.toggle("hidden", isLoggedIn());
+  if (appShell) appShell.classList.toggle("hidden", !isLoggedIn());
+  roleTab?.classList.toggle("hidden", !isAdminUser());
+  adminSyncLink?.classList.toggle("hidden", !isAdminUser());
+  if (!isAdminUser() && state.view === "admin") {
+    state.view = "overview";
+  }
+
+  if (accountName) {
+    accountName.textContent = state.userSession
+      ? (state.userSession.full_name || state.userSession.first_name || state.userSession.username || "GRE MIS User")
+      : "GRE MIS User";
+  }
+  if (accountRoleChip) {
+    accountRoleChip.textContent = state.userSession ? state.userSession.role : "User";
+    accountRoleChip.className = `chip ${isAdminUser() ? "good" : isCuratorUser() ? "info" : "muted"}`;
+  }
+  if (accountSummary) {
+    accountSummary.textContent = state.userSession
+      ? `${state.userSession.email || ""}${state.userSession.must_change_password ? " • Please change your default password." : ""}`
+      : "";
+  }
+}
+
 function renderAdminState() {
   const chip = byId("adminStatusChip");
   const text = byId("adminStatusText");
-  const logout = byId("adminLogoutBtn");
   const loginStatus = byId("loginStatus");
   const sessionPanel = byId("sessionPanel");
-  if (!chip || !text || !logout) return;
+  if (!chip || !text) return;
 
-  if (state.adminSession) {
+  if (isAdminUser()) {
     chip.textContent = "Unlocked";
     chip.className = "chip good";
-    text.textContent = `Admin session active for ${state.adminSession.username}. Intake approvals and curator update approvals are available below.`;
-    logout.classList.remove("hidden");
+    text.textContent = `Admin session active for ${state.userSession?.full_name || state.userSession?.username}. Intake approvals, sync controls, and user management are available below.`;
     sessionPanel?.classList.remove("hidden");
   } else {
     chip.textContent = "Locked";
     chip.className = "chip muted";
     text.textContent = "Admin approval is required for new intake records and curator-submitted status updates.";
-    logout.classList.add("hidden");
     sessionPanel?.classList.add("hidden");
   }
 
-  if (loginStatus && !state.adminSession && !loginStatus.textContent) {
+  if (loginStatus && !isAdminUser() && !loginStatus.textContent) {
     loginStatus.textContent = "";
   }
 }
@@ -2631,6 +2847,7 @@ function switchView(nextView) {
 
 async function rerender(options = {}) {
   const { includeMatches = state.view === "operations" } = options;
+  renderAuthState();
   renderMetrics();
   renderOverview();
   renderFilters();
@@ -2638,6 +2855,7 @@ async function rerender(options = {}) {
   renderNeedDetail();
   renderWorkbench();
   renderAdminQueue();
+  renderUserManagement();
   renderAdminState();
   if (!byId("overviewView") && byId("adminView")) {
     const headline = byId("datasetHeadline");
@@ -2653,17 +2871,19 @@ async function rerender(options = {}) {
 async function refreshAll() {
   await Promise.all([
     store.loadBaseData(),
-      state.adminToken
+      isAdminUser()
         ? store.loadAdminSnapshot().catch(() => {
             state.data.pendingNeeds = [];
             state.data.pendingUpdates = [];
             state.data.aiReviewNeeds = [];
+            state.data.users = [];
           })
         : Promise.resolve().then(() => {
             state.data.pendingNeeds = [];
             state.data.pendingUpdates = [];
             state.data.aiReviewNeeds = [];
-          }),
+            state.data.users = [];
+        }),
   ]);
   const displayNeeds = getDisplayNeeds();
   if (!displayNeeds.find((need) => need.id === state.selectedNeedId)) {
@@ -2824,7 +3044,7 @@ function bindStaticEvents() {
   byId("refreshBtn")?.addEventListener("click", safeAsync(async () => {
     resetDashboardSelections();
     await rerender({ includeMatches: false });
-    if (byId("adminView") && state.adminToken) {
+    if (byId("adminView") && isAdminUser()) {
       const provider = byId("aiProviderSelect")?.value || "openrouter";
       const syncStatus = byId("syncStatus");
       if (syncStatus) syncStatus.textContent = "Refreshing AI need intelligence...";
@@ -2863,6 +3083,67 @@ function bindStaticEvents() {
     toast("Need submitted to the admin approval queue.");
   }));
 
+  byId("userLoginForm")?.addEventListener("submit", safeAsync(async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const status = byId("userLoginStatus");
+    if (status) status.textContent = "Signing in...";
+    await store.userLogin(form.get("identifier"), form.get("password"));
+    event.target.reset();
+    await refreshAll();
+    if (status) status.textContent = "Signed in successfully.";
+  }));
+
+  byId("registerUserForm")?.addEventListener("submit", safeAsync(async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const status = byId("registerStatus");
+    if (status) status.textContent = "Creating account...";
+    await store.registerUser({
+      firstName: form.get("first_name"),
+      fullName: form.get("full_name"),
+      email: form.get("email"),
+      phone: form.get("phone"),
+      password: form.get("password"),
+    });
+    event.target.reset();
+    if (status) status.textContent = "Account created. You can sign in now.";
+  }));
+
+  byId("requestResetForm")?.addEventListener("submit", safeAsync(async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const status = byId("resetStatus");
+    if (status) status.textContent = "Sending reset code...";
+    const result = await store.requestPasswordReset(form.get("email"));
+    if (status) status.textContent = result.message || "If the email exists, a reset code has been sent.";
+  }));
+
+  byId("resetPasswordForm")?.addEventListener("submit", safeAsync(async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const status = byId("resetStatus");
+    if (status) status.textContent = "Resetting password...";
+    await store.resetPassword(form.get("email"), form.get("code"), form.get("new_password"));
+    event.target.reset();
+    if (status) status.textContent = "Password reset complete. Please sign in.";
+  }));
+
+  byId("changePasswordForm")?.addEventListener("submit", safeAsync(async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const status = byId("changePasswordStatus");
+    if (status) status.textContent = "Updating password...";
+    await store.changePassword(form.get("current_password"), form.get("new_password"));
+    event.target.reset();
+    if (status) status.textContent = "Password changed successfully.";
+  }));
+
+  byId("userLogoutBtn")?.addEventListener("click", safeAsync(async () => {
+    await store.userLogout();
+    await refreshAll();
+  }));
+
   byId("adminLoginForm")?.addEventListener("submit", safeAsync(async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -2871,7 +3152,7 @@ function bindStaticEvents() {
     await store.adminLogin(form.get("username"), form.get("password"));
     event.target.reset();
     await refreshAll();
-    if (byId("adminView")) switchView("admin");
+    if (document.querySelector('.tab[data-view="admin"]')) switchView("admin");
     if (loginStatus) loginStatus.textContent = "Signed in successfully.";
     toast("Admin access unlocked.");
   }));
@@ -2885,7 +3166,7 @@ function bindStaticEvents() {
   }));
 
   byId("saveOptionBtn")?.addEventListener("click", safeAsync(async () => {
-    if (!state.adminToken) {
+    if (!isAdminUser()) {
       toast("Login as admin to manage taxonomy options.");
       return;
     }
@@ -2902,7 +3183,7 @@ function bindStaticEvents() {
   }));
 
   byId("uploadInboundBtn")?.addEventListener("click", safeAsync(async () => {
-    if (!state.adminToken) {
+    if (!isAdminUser()) {
       toast("Login as admin first.");
       return;
     }
@@ -2922,7 +3203,7 @@ function bindStaticEvents() {
   }));
 
   byId("syncGreInboundsBtn")?.addEventListener("click", safeAsync(async () => {
-    if (!state.adminToken) {
+    if (!isAdminUser()) {
       toast("Login as admin first.");
       return;
     }
@@ -2939,7 +3220,7 @@ function bindStaticEvents() {
   }));
 
   byId("refreshAiBtn")?.addEventListener("click", safeAsync(async () => {
-    if (!state.adminToken) {
+    if (!isAdminUser()) {
       toast("Login as admin first.");
       return;
     }
@@ -2953,7 +3234,7 @@ function bindStaticEvents() {
   }));
 
   byId("syncGreChatbotBtn")?.addEventListener("click", safeAsync(async () => {
-    if (!state.adminToken) {
+    if (!isAdminUser()) {
       toast("Login as admin first.");
       return;
     }
@@ -2969,7 +3250,7 @@ function bindStaticEvents() {
   }));
 
   byId("downloadGreTraderBtn")?.addEventListener("click", safeAsync(async () => {
-    if (!state.adminToken) {
+    if (!isAdminUser()) {
       toast("Login as admin first.");
       return;
     }
@@ -2981,7 +3262,7 @@ function bindStaticEvents() {
   }));
 
   byId("downloadGreSolutionBtn")?.addEventListener("click", safeAsync(async () => {
-    if (!state.adminToken) {
+    if (!isAdminUser()) {
       toast("Login as admin first.");
       return;
     }
@@ -2997,7 +3278,7 @@ function bindStaticEvents() {
     if (!button) return;
 
     if (button.id === "assignCuratorBtn") {
-      if (!state.adminToken) {
+      if (!isAdminUser()) {
         toast("Login as admin to assign curators.");
         return;
       }
@@ -3008,33 +3289,48 @@ function bindStaticEvents() {
   }));
 
   byId("actionWorkbench")?.addEventListener("submit", safeAsync(async (event) => {
-    if (event.target.id !== "updateRequestForm") return;
-    event.preventDefault();
-    const need = getNeedById(state.selectedNeedId);
-    const form = new FormData(event.target);
-    await store.submitUpdateRequest({
-      needId: need.id,
-      curatorName: form.get("curator_name"),
-      curatorEmail: form.get("curator_email"),
-      proposedStatus: form.get("proposed_status"),
-      proposedInternalStatus: form.get("proposed_internal_status"),
-      proposedNextAction: form.get("proposed_next_action"),
-      proposedCurationNotes: form.get("proposed_curation_notes"),
-      proposedCurationCallDate: form.get("proposed_curation_call_date"),
-      proposedDemandBroadcastNeeded:
-        form.get("proposed_demand_broadcast_needed") === ""
-          ? null
-          : form.get("proposed_demand_broadcast_needed") === "true",
-    });
-    event.target.reset();
-    await refreshAll();
-    toast("Curator update submitted for admin approval.");
+    if (event.target.id === "directUpdateForm") {
+      event.preventDefault();
+      const need = getNeedById(state.selectedNeedId);
+      const form = new FormData(event.target);
+      await store.directCuratorUpdate({
+        needId: need.id,
+        proposedStatus: form.get("proposed_status"),
+        proposedInternalStatus: form.get("proposed_internal_status"),
+        proposedNextAction: form.get("proposed_next_action"),
+        proposedCurationNotes: form.get("proposed_curation_notes"),
+        proposedCurationCallDate: form.get("proposed_curation_call_date"),
+        proposedDemandBroadcastNeeded:
+          form.get("proposed_demand_broadcast_needed") === ""
+            ? null
+            : form.get("proposed_demand_broadcast_needed") === "true",
+      });
+      event.target.reset();
+      await refreshAll();
+      toast("Curation update saved and synced to GRE.");
+      return;
+    }
+    if (event.target.id === "curatorMessageForm") {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      const result = await store.sendCuratorMessage(state.selectedNeedId, form.get("message"));
+      event.target.reset();
+      toast(result.message || "Message sent to curator.");
+      return;
+    }
+    if (event.target.id === "manualProviderForm") {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      const result = await store.sendProviderIntro(state.selectedNeedId, form.get("provider_email"));
+      event.target.reset();
+      toast(result.message || "Provider outreach email triggered.");
+    }
   }));
 
   byId("adminView")?.addEventListener("click", safeAsync(async (event) => {
     const button = event.target.closest("[data-action]");
     if (!button) return;
-    if (!state.adminToken) {
+    if (!isAdminUser()) {
       toast("Login as admin first.");
       return;
     }
@@ -3074,13 +3370,18 @@ function bindStaticEvents() {
       await refreshAll();
       toast(field === "all" ? "Recommendation accepted." : "Field override accepted.");
     }
+    if (button.dataset.action === "promote-user") {
+      await store.promoteUserToCurator(button.dataset.userId);
+      await refreshAll();
+      toast("User promoted to curator.");
+    }
   }));
 
   byId("matchResults")?.addEventListener("click", safeAsync(async (event) => {
     const button = event.target.closest("[data-action='email-provider']");
     if (!button) return;
-    if (!state.adminToken) {
-      toast("Login as admin to send provider outreach from the GRE mailbox.");
+    if (!(isAdminUser() || isCuratorUser())) {
+      toast("Login as curator or admin to send provider outreach from the GRE mailbox.");
       return;
     }
     const result = await store.sendProviderIntro(state.selectedNeedId, button.dataset.providerEmail);
@@ -3090,7 +3391,7 @@ function bindStaticEvents() {
 
 async function init() {
   bindStaticEvents();
-  await store.validateAdminSession();
+  await store.validateUserSession();
   await refreshAll();
 }
 
