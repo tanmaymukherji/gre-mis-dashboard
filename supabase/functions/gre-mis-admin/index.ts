@@ -1294,11 +1294,64 @@ async function verifyLegacyAdminPassword(username: string, password: string) {
   return Boolean(data);
 }
 
+async function ensureAdminUserFromLegacyPassword(password: string) {
+  const { data: existingUser, error: existingError } = await adminClient
+    .from("gre_mis_users")
+    .select("id, username, email")
+    .eq("username", "admin")
+    .maybeSingle();
+  if (existingError) throw new Error(existingError.message);
+
+  let userId = existingUser?.id || null;
+  if (!userId) {
+    const { data: insertedUser, error: insertError } = await adminClient
+      .from("gre_mis_users")
+      .insert({
+        username: "admin",
+        first_name: "Admin",
+        full_name: "GRE Admin",
+        email: "tanmay@greenruraleconomy.in",
+        role: "admin",
+        is_active: true,
+        must_change_password: false,
+        password_hash: "placeholder",
+      })
+      .select("id")
+      .single();
+    if (insertError) throw new Error(insertError.message);
+    userId = insertedUser.id;
+  }
+
+  const { error: passwordError } = await adminClient.rpc("gre_mis_user_set_password", {
+    p_user_id: userId,
+    p_password: password,
+    p_must_change_password: false,
+  });
+  if (passwordError) throw new Error(passwordError.message);
+
+  const { data: refreshedUser, error: refreshedError } = await adminClient
+    .from("gre_mis_users")
+    .select("id, username, email, first_name, full_name, phone, role, is_active, must_change_password")
+    .eq("id", userId)
+    .single();
+  if (refreshedError || !refreshedUser) throw new Error(refreshedError?.message || "Admin user could not be refreshed.");
+  return refreshedUser;
+}
+
 async function userLogin(identifier: string, password: string, requiredRole?: string) {
   if (!password) throw new Error("Password is required.");
   const normalizedIdentifier = requireString(identifier).toLowerCase();
   if (!normalizedIdentifier) throw new Error("Username or email is required.");
-  const valid = await verifyUserPassword(normalizedIdentifier, password);
+  let valid = await verifyUserPassword(normalizedIdentifier, password);
+  let usedLegacyAdminFallback = false;
+  if (!valid && normalizedIdentifier === "admin") {
+    const legacyValid = await verifyLegacyAdminPassword("admin", password).catch(() => false);
+    if (legacyValid) {
+      await ensureAdminUserFromLegacyPassword(password);
+      valid = true;
+      usedLegacyAdminFallback = true;
+    }
+  }
   if (!valid) throw new Error("Incorrect username or password.");
 
   const { data: user, error } = await adminClient
@@ -1312,7 +1365,7 @@ async function userLogin(identifier: string, password: string, requiredRole?: st
 
   const session = await createUserSession(user.id);
   await adminClient.from("gre_mis_users").update({ last_login_at: new Date().toISOString() }).eq("id", user.id);
-  return { ok: true, ...session, user };
+  return { ok: true, ...session, user, usedLegacyAdminFallback };
 }
 
 async function userLogout(token: string) {
@@ -1351,7 +1404,7 @@ async function adminLogout(token: string) {
 }
 
 async function getAdminSnapshot() {
-  const [pendingNeeds, pendingUpdates, aiReviewNeeds, users] = await Promise.all([
+  const [pendingNeeds, pendingUpdates, aiReviewNeeds, users, pendingFormSubmissions] = await Promise.all([
     adminClient
       .from("gre_mis_needs")
       .select("id, organization_name, state, district, status, internal_status, requested_on, curator_id, problem_statement, source_kind")
@@ -1374,12 +1427,18 @@ async function getAdminSnapshot() {
         .select("id, username, first_name, full_name, email, phone, role, is_active, must_change_password, last_login_at, created_at")
         .order("role", { ascending: true })
         .order("first_name", { ascending: true }),
+      adminClient
+        .from("gre_mis_form_submissions")
+        .select("*")
+        .eq("approval_status", "pending_admin")
+        .order("created_at", { ascending: false }),
     ]);
 
   if (pendingNeeds.error) throw new Error(pendingNeeds.error.message);
   if (pendingUpdates.error) throw new Error(pendingUpdates.error.message);
   if (aiReviewNeeds.error) throw new Error(aiReviewNeeds.error.message);
   if (users.error) throw new Error(users.error.message);
+  if (pendingFormSubmissions.error) throw new Error(pendingFormSubmissions.error.message);
 
   return {
     ok: true,
@@ -1387,6 +1446,7 @@ async function getAdminSnapshot() {
     pendingUpdates: pendingUpdates.data || [],
     aiReviewNeeds: aiReviewNeeds.data || [],
     users: users.data || [],
+    pendingFormSubmissions: pendingFormSubmissions.data || [],
   };
 }
 
@@ -1540,6 +1600,143 @@ async function promoteUserToCurator(userId: string) {
   }, { onConflict: "email" });
   if (curatorError) throw new Error(curatorError.message);
 
+  return { ok: true };
+}
+
+async function submitFormSubmission(
+  submissionType: string,
+  payload: Record<string, unknown>,
+  sourceMode = "shared_link",
+  userCtx?: { user?: Record<string, unknown> | null } | null,
+) {
+  const normalizedType = requireString(submissionType).toLowerCase();
+  if (!["need", "solution"].includes(normalizedType)) throw new Error("Unsupported submission type.");
+  const organizationName = requireString(payload.organization_name || payload.organizationName);
+  const existingTraderId = requireString(payload.existing_trader_id || payload.existingTraderId);
+  const existingTraderName = requireString(payload.existing_trader_name || payload.existingTraderName);
+  const submitterName = requireString(payload.submitter_name || payload.submitterName || userCtx?.user?.full_name || userCtx?.user?.first_name);
+  const submitterEmail = requireString(payload.submitter_email || payload.submitterEmail || userCtx?.user?.email).toLowerCase();
+  const submitterPhone = requireString(payload.submitter_phone || payload.submitterPhone || userCtx?.user?.phone);
+  const shareContext = requireString(payload.share_context || payload.shareContext);
+
+  if (!organizationName) throw new Error("Organization name is required.");
+  if (!existingTraderId) throw new Error("Please select an existing GRE supplier organization first.");
+
+  const { data: trader, error: traderError } = await adminClient
+    .from("traders")
+    .select("trader_id, organisation_name, trader_name")
+    .eq("trader_id", existingTraderId)
+    .maybeSingle();
+  if (traderError) throw new Error(traderError.message);
+  if (!trader) throw new Error("Selected GRE supplier organization could not be found.");
+
+  const submissionRow = {
+    submission_type: normalizedType,
+    source_mode: sourceMode === "signed_in" ? "signed_in" : "shared_link",
+    submitter_name: submitterName || null,
+    submitter_email: submitterEmail || null,
+    submitter_phone: submitterPhone || null,
+    submitter_user_id: requireString(userCtx?.user?.id) || null,
+    organization_name: organizationName,
+    existing_trader_id: trader.trader_id,
+    existing_trader_name: trader.organisation_name || trader.trader_name || existingTraderName || organizationName,
+    org_exists_on_gre: true,
+    payload,
+    share_context: shareContext || null,
+  };
+
+  const { data, error } = await adminClient
+    .from("gre_mis_form_submissions")
+    .insert(submissionRow)
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+
+  return {
+    ok: true,
+    id: data.id,
+    message: "Submission saved for admin review.",
+  };
+}
+
+async function approveFormSubmission(submissionId: string, decision: string, reviewNotes: string, actorEmail: string) {
+  const { data: submission, error } = await adminClient
+    .from("gre_mis_form_submissions")
+    .select("*")
+    .eq("id", submissionId)
+    .single();
+  if (error || !submission) throw new Error(error?.message || "Form submission not found.");
+
+  if (decision === "reject") {
+    const { error: rejectError } = await adminClient
+      .from("gre_mis_form_submissions")
+      .update({
+        approval_status: "rejected",
+        admin_review_notes: reviewNotes || "Rejected by admin.",
+        reviewed_by_email: actorEmail,
+        reviewed_at: new Date().toISOString(),
+        gre_sync_status: "rejected",
+        gre_sync_message: reviewNotes || "Rejected by admin.",
+      })
+      .eq("id", submissionId);
+    if (rejectError) throw new Error(rejectError.message);
+    return { ok: true };
+  }
+
+  const payload = (submission.payload && typeof submission.payload === "object") ? submission.payload as Record<string, unknown> : {};
+
+  if (submission.submission_type === "need") {
+    const nextNeedId = `FORM-${Date.now()}`;
+    const curatedNeed = asStringArray(payload.curated_need || payload.categories);
+    const row = {
+      id: nextNeedId,
+      organization_name: requireString(payload.organization_name || submission.organization_name),
+      contact_person: requireString(payload.contact_person),
+      seeker_email: requireString(payload.seeker_email).toLowerCase(),
+      seeker_phone: requireString(payload.seeker_phone),
+      state: requireString(payload.state),
+      district: requireString(payload.district),
+      problem_statement: requireString(payload.problem_statement),
+      status: "New",
+      internal_status: "Need solution providers",
+      curated_need: curatedNeed,
+      approval_status: "approved",
+      source_kind: "shared_form_submission",
+      next_action: "Allocate curator and sync to GRE",
+      requested_on: new Date().toISOString(),
+      last_status_change_at: new Date().toISOString(),
+    };
+    const { error: insertError } = await adminClient.from("gre_mis_needs").insert(row);
+    if (insertError) throw new Error(insertError.message);
+
+    const { error: approveError } = await adminClient
+      .from("gre_mis_form_submissions")
+      .update({
+        approval_status: "approved",
+        admin_review_notes: reviewNotes || "Approved by admin.",
+        reviewed_by_email: actorEmail,
+        reviewed_at: new Date().toISOString(),
+        target_need_id: nextNeedId,
+        gre_sync_status: "pending_gre_create_verification",
+        gre_sync_message: "Local need created. GRE request create API still needs explicit create-flow verification.",
+      })
+      .eq("id", submissionId);
+    if (approveError) throw new Error(approveError.message);
+    return { ok: true, targetNeedId: nextNeedId };
+  }
+
+  const { error: approveError } = await adminClient
+    .from("gre_mis_form_submissions")
+    .update({
+      approval_status: "approved",
+      admin_review_notes: reviewNotes || "Approved by admin.",
+      reviewed_by_email: actorEmail,
+      reviewed_at: new Date().toISOString(),
+      gre_sync_status: "pending_gre_solution_create_verification",
+      gre_sync_message: "Queued for GRE solution create after API flow verification.",
+    })
+    .eq("id", submissionId);
+  if (approveError) throw new Error(approveError.message);
   return { ok: true };
 }
 
@@ -2188,6 +2385,13 @@ async function refreshNeedIntelligence(actorEmail: string, provider: string) {
 }
 
 async function assignCurator(needId: string, curatorId: string | null, actorEmail: string) {
+  const { data: needRow, error: needFetchError } = await adminClient
+    .from("gre_mis_needs")
+    .select("id, source_kind")
+    .eq("id", needId)
+    .single();
+  if (needFetchError || !needRow) throw new Error(needFetchError?.message || "Need not found.");
+
   const { error } = await adminClient
     .from("gre_mis_needs")
     .update({
@@ -2204,6 +2408,35 @@ async function assignCurator(needId: string, curatorId: string | null, actorEmai
     note: curatorId ? `Curator assigned by ${actorEmail}.` : `Curator unassigned by ${actorEmail}.`,
     created_by_email: actorEmail,
   });
+
+  if (/^\d+$/.test(requireString(needRow.id)) && needRow.source_kind !== "shared_form_submission") {
+    const { sessionId, data: greRequest } = await fetchGreJson(`/commons-request-management-service/api/v1/request?id=${encodeURIComponent(needId)}`);
+    const payload = structuredClone(greRequest);
+    const curationList = Array.isArray(payload.curationList) ? payload.curationList : [];
+    const primaryCuration = curationList[0] || { requestId: Number(needId) };
+    if (curatorId) {
+      const { data: curatorRow } = await adminClient
+        .from("gre_mis_curators")
+        .select("display_name")
+        .eq("id", curatorId)
+        .maybeSingle();
+      primaryCuration.curatorUserName = curatorRow?.display_name || primaryCuration.curatorUserName || null;
+    } else {
+      primaryCuration.curatorUserName = null;
+      primaryCuration.curatorUserId = null;
+    }
+    payload.curationList = [primaryCuration, ...curationList.slice(1)];
+    try {
+      await patchGreJson("/commons-request-management-service/api/v1/request", payload, sessionId);
+    } catch (syncError) {
+      await adminClient.from("gre_mis_need_updates").insert({
+        need_id: needId,
+        update_type: "curator_assignment_sync_warning",
+        note: `Curator assignment saved in MIS, but GRE sync needs review: ${syncError instanceof Error ? syncError.message : "unknown error"}`,
+        created_by_email: actorEmail,
+      });
+    }
+  }
 
   return { ok: true };
 }
@@ -2590,6 +2823,15 @@ Deno.serve(async (req) => {
       return jsonResponse(await requestPasswordReset(requireString(payload.email)));
     }
 
+    if (action === "submitSharedForm") {
+      return jsonResponse(await submitFormSubmission(
+        requireString(payload.submissionType),
+        (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
+        requireString(payload.sourceMode) || "shared_link",
+        null,
+      ));
+    }
+
     if (action === "resetPassword") {
       return jsonResponse(await resetPassword(requireString(payload.email), requireString(payload.code), requireString(payload.newPassword)));
     }
@@ -2654,6 +2896,15 @@ Deno.serve(async (req) => {
       ));
     }
 
+    if (action === "submitSignedInForm") {
+      return jsonResponse(await submitFormSubmission(
+        requireString(payload.submissionType),
+        (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
+        "signed_in",
+        userCtx,
+      ));
+    }
+
     if (action === "directCuratorUpdate") {
       assertRoles(userCtx, ["curator", "admin"], "Curator or admin access is required.");
       return jsonResponse(await directCuratorUpdate(payload, userCtx));
@@ -2686,6 +2937,15 @@ Deno.serve(async (req) => {
 
     if (action === "reviewUpdateRequest") {
       return jsonResponse(await reviewUpdateRequest(requireString(payload.requestId), requireString(payload.decision), requireString(payload.reviewNotes), adminActorEmail));
+    }
+
+    if (action === "reviewFormSubmission") {
+      return jsonResponse(await approveFormSubmission(
+        requireString(payload.submissionId),
+        requireString(payload.decision),
+        requireString(payload.reviewNotes),
+        adminActorEmail,
+      ));
     }
 
     if (action === "upsertOption") {

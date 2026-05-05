@@ -7,6 +7,11 @@ const FALLBACK_CURATORS = [
 
 const state = {
   view: "overview",
+  sharedFormMode: new URLSearchParams(window.location.search).get("sharedForm") === "solution"
+    ? "solution"
+    : new URLSearchParams(window.location.search).get("sharedForm") === "need"
+      ? "need-intake"
+      : "",
   selectedNeedId: null,
   queueNeedsScrollIntoView: false,
   overviewPage: 1,
@@ -42,11 +47,13 @@ const state = {
   },
     data: {
       curators: [],
+      traders: [],
       options: [],
       needs: [],
       needUpdates: [],
       pendingNeeds: [],
       pendingUpdates: [],
+      pendingFormSubmissions: [],
       aiReviewNeeds: [],
       users: [],
     },
@@ -284,12 +291,20 @@ function isLoggedIn() {
   return Boolean(state.userSession);
 }
 
+function isSharedFormMode() {
+  return state.sharedFormMode === "solution" || state.sharedFormMode === "need-intake";
+}
+
 function isAdminUser() {
   return state.userSession?.role === "admin";
 }
 
 function isCuratorUser() {
   return state.userSession?.role === "curator";
+}
+
+function canAccessOperationsDesk() {
+  return isLoggedIn();
 }
 
 function canSeeCurationDetails() {
@@ -1499,6 +1514,7 @@ class GreMisStore {
     const client = this.getClient();
     if (!client) {
       state.data.curators = FALLBACK_CURATORS;
+      state.data.traders = [];
       state.data.options = [];
       state.data.needs = [];
       state.data.needUpdates = [];
@@ -1506,18 +1522,20 @@ class GreMisStore {
       return;
     }
 
-    const [curators, options, needs, updates] = await Promise.all([
+    const [curators, traders, options, needs, updates] = await Promise.all([
       client.from("gre_mis_curators").select("id, display_name, email").eq("is_active", true).order("display_name"),
+      client.from("traders").select("trader_id,trader_name,organisation_name,email,website,association_status").order("organisation_name"),
       client.from("gre_mis_options").select("id, option_type, label, sort_order").eq("is_active", true).order("sort_order"),
       client.from("gre_mis_needs").select("*").eq("approval_status", "approved").order("requested_on", { ascending: false }),
       client.from("gre_mis_need_updates").select("*").order("created_at", { ascending: false }),
     ]);
 
-    if (curators.error || options.error || needs.error || updates.error) {
-      throw new Error(curators.error?.message || options.error?.message || needs.error?.message || updates.error?.message || "Could not load live dashboard data.");
+    if (curators.error || traders.error || options.error || needs.error || updates.error) {
+      throw new Error(curators.error?.message || traders.error?.message || options.error?.message || needs.error?.message || updates.error?.message || "Could not load live dashboard data.");
     }
 
     state.data.curators = ensureList(curators.data);
+    state.data.traders = ensureList(traders.data);
     state.data.options = ensureList(options.data);
     state.data.needs = ensureList(needs.data).map((need) => ({
       ...need,
@@ -1621,6 +1639,7 @@ class GreMisStore {
     if (!isAdminUser()) {
       state.data.pendingNeeds = [];
       state.data.pendingUpdates = [];
+      state.data.pendingFormSubmissions = [];
       state.data.aiReviewNeeds = [];
       state.data.users = [];
       return;
@@ -1628,6 +1647,7 @@ class GreMisStore {
     const data = await this.callAdmin("adminSnapshot", {}, true);
     state.data.pendingNeeds = ensureList(data.pendingNeeds);
     state.data.pendingUpdates = ensureList(data.pendingUpdates);
+    state.data.pendingFormSubmissions = ensureList(data.pendingFormSubmissions);
     state.data.aiReviewNeeds = ensureList(data.aiReviewNeeds);
     state.data.users = ensureList(data.users);
   }
@@ -1698,6 +1718,18 @@ class GreMisStore {
 
   async promoteUserToCurator(userId) {
     return this.callAdmin("promoteUserToCurator", { userId }, true);
+  }
+
+  async submitSharedForm(submissionType, payload) {
+    return this.callAdmin("submitSharedForm", { submissionType, payload, sourceMode: "shared_link" });
+  }
+
+  async submitSignedInForm(submissionType, payload) {
+    return this.callAdmin("submitSignedInForm", { submissionType, payload });
+  }
+
+  async reviewFormSubmission(submissionId, decision, reviewNotes = "") {
+    return this.callAdmin("reviewFormSubmission", { submissionId, decision, reviewNotes }, true);
   }
 
   async importInboundWorkbook(fileName, rows, aiProvider) {
@@ -1971,6 +2003,115 @@ function countBy(items, pick) {
 
 function topEntries(mapLike, limit = 6) {
   return Object.entries(mapLike).sort((a, b) => b[1] - a[1]).slice(0, limit);
+}
+
+function getSupplierOptions() {
+  return ensureList(state.data.traders)
+    .filter((row) => (row.association_status || "").toLowerCase() !== "rejected")
+    .sort((a, b) => String(a.organisation_name || a.trader_name || "").localeCompare(String(b.organisation_name || b.trader_name || "")));
+}
+
+function getTraderById(traderId) {
+  return getSupplierOptions().find((row) => String(row.trader_id) === String(traderId)) || null;
+}
+
+function findSupplierByName(name) {
+  const normalized = normalizeText(name).toLowerCase();
+  if (!normalized) return null;
+  return getSupplierOptions().find((row) => {
+    const org = normalizeText(row.organisation_name).toLowerCase();
+    const trader = normalizeText(row.trader_name).toLowerCase();
+    return org === normalized || trader === normalized;
+  }) || null;
+}
+
+function buildSupplierOptionsHtml(selectedId = "") {
+  const options = [`<option value="">Choose approved GRE supplier</option>`];
+  getSupplierOptions().forEach((row) => {
+    const label = row.organisation_name || row.trader_name || `Supplier ${row.trader_id}`;
+    options.push(`<option value="${esc(row.trader_id)}" ${String(row.trader_id) === String(selectedId) ? "selected" : ""}>${esc(label)}</option>`);
+  });
+  return options.join("");
+}
+
+function fillSupplierSelect(selectId, orgInputId) {
+  const select = byId(selectId);
+  const orgInput = byId(orgInputId);
+  if (!select) return;
+  const currentValue = select.value;
+  select.innerHTML = buildSupplierOptionsHtml(currentValue);
+  if (orgInput && !orgInput.value && select.value) {
+    const trader = getTraderById(select.value);
+    if (trader) orgInput.value = trader.organisation_name || trader.trader_name || "";
+  }
+}
+
+function openMissingOrgDialog(orgName = "") {
+  const dialog = byId("missingOrgDialog");
+  const text = byId("missingOrgText");
+  if (text) {
+    text.textContent = orgName
+      ? `${orgName} is not in the approved GRE supplier list yet. Please create the organisation account on the GRE platform first, then return here to submit the form.`
+      : "This organisation is not in the approved GRE supplier list yet. Please create the organisation account on the GRE platform first, then return here to submit the form.";
+  }
+  dialog?.showModal();
+}
+
+function getShareUrl(mode) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("sharedForm", mode === "solution" ? "solution" : "need");
+  return url.toString();
+}
+
+function renderSharePanel(targetId, mode) {
+  const target = byId(targetId);
+  if (!target) return;
+  const label = mode === "solution" ? "Add Solution" : "Solution Need Form";
+  const shareUrl = getShareUrl(mode);
+  const mailto = `mailto:?subject=${encodeURIComponent(`GRE ${label} intake link`)}&body=${encodeURIComponent(`Please use this GRE MIS form link to share your ${label.toLowerCase()} input:\n\n${shareUrl}`)}`;
+  target.innerHTML = `
+    <article class="stack-card share-card">
+      <p class="helper-text">Use this public link to collect ${esc(label.toLowerCase())} inputs from other contributors. Their submission will go to admin review first.</p>
+      <div class="share-link-box">${esc(shareUrl)}</div>
+      <div class="card-actions">
+        <button type="button" class="btn btn-secondary" data-copy-share-url="${escAttr(shareUrl)}">Copy Link</button>
+        <a class="btn btn-primary" href="${esc(mailto)}">Mail This Link</a>
+      </div>
+    </article>
+  `;
+}
+
+function populateSubmissionDefaults(form) {
+  if (!form || !state.userSession) return;
+  [
+    ["submitter_name", state.userSession.full_name || state.userSession.first_name || ""],
+    ["submitter_email", state.userSession.email || ""],
+    ["submitter_phone", state.userSession.phone || ""],
+    ["contact_person", state.userSession.full_name || state.userSession.first_name || ""],
+    ["seeker_email", state.userSession.email || ""],
+    ["seeker_phone", state.userSession.phone || ""],
+  ].forEach(([name, value]) => {
+    const input = form.querySelector(`[name="${name}"]`);
+    if (input && !input.value && value) input.value = value;
+  });
+}
+
+function renderSubmissionViews() {
+  fillSupplierSelect("solutionTraderSelect", "solutionOrgName");
+  fillSupplierSelect("needTraderSelect", "needOrgName");
+  renderSharePanel("solutionSharePanel", "solution");
+  renderSharePanel("needSharePanel", "need");
+  populateSubmissionDefaults(byId("solutionSubmissionForm"));
+  populateSubmissionDefaults(byId("needSubmissionForm"));
+
+  const solutionTitle = document.querySelector('#solutionView h3');
+  const needTitle = document.querySelector('#need-intakeView h3');
+  if (solutionTitle) {
+    solutionTitle.textContent = isSharedFormMode() ? "Share a Solution with GRE" : "Add Solution to GRE Review Queue";
+  }
+  if (needTitle) {
+    needTitle.textContent = isSharedFormMode() ? "Share a Need with GRE" : "Add Need to GRE Review Queue";
+  }
 }
 
 function renderMetrics() {
@@ -2636,8 +2777,9 @@ async function runPuterNeedReview(needId) {
 function renderAdminQueue() {
   const pendingNeedsList = byId("pendingNeedsList");
   const pendingUpdatesList = byId("pendingUpdatesList");
+  const pendingFormSubmissionsList = byId("pendingFormSubmissionsList");
   const aiReviewList = byId("aiReviewList");
-  if (!pendingNeedsList || !pendingUpdatesList || !aiReviewList) return;
+  if (!pendingNeedsList || !pendingUpdatesList || !pendingFormSubmissionsList || !aiReviewList) return;
 
   pendingNeedsList.innerHTML = isAdminUser()
     ? state.data.pendingNeeds.length
@@ -2690,6 +2832,42 @@ function renderAdminQueue() {
           .join("")
       : `<div class="empty-state">No curator update requests are waiting for approval.</div>`
       : `<div class="empty-state">Login as admin to view curator-submitted status changes.</div>`;
+
+  pendingFormSubmissionsList.innerHTML = isAdminUser()
+    ? ensureList(state.data.pendingFormSubmissions).length
+      ? ensureList(state.data.pendingFormSubmissions)
+          .map((submission) => {
+            const payload = submission.payload && typeof submission.payload === "object" ? submission.payload : {};
+            const isNeed = submission.submission_type === "need";
+            const summaryText = isNeed
+              ? normalizeText(payload.problem_statement || "")
+              : normalizeText(payload.about_offering_text || payload.solution_name || payload.offering_name || "");
+            const categoryLine = isNeed
+              ? [payload.need_kind, payload.service_kind, payload.thematic_area, payload.application_area].filter(Boolean).join(" / ")
+              : [payload.offering_kind, payload.service_kind, payload.thematic_area, payload.application_area].filter(Boolean).join(" / ");
+            return `
+              <article class="approval-card">
+                <div class="status-row">
+                  <span class="status-pill warn">${esc(isNeed ? "Need submission" : "Solution submission")}</span>
+                  <span class="status-pill info">${esc(submission.source_mode || "shared_link")}</span>
+                </div>
+                <h4>${esc(submission.organization_name || payload.organization_name || "Untitled submission")}</h4>
+                <div class="detail-list">
+                  <div><strong>Submitter:</strong> ${esc(submission.submitter_name || submission.submitter_email || "Anonymous shared link")}</div>
+                  <div><strong>GRE Supplier:</strong> ${esc(submission.existing_trader_name || "Not selected")}</div>
+                  ${categoryLine ? `<div><strong>Classification:</strong> ${esc(categoryLine)}</div>` : ""}
+                  ${summaryText ? `<div><strong>Summary:</strong> ${esc(clipText(summaryText, 220))}</div>` : ""}
+                </div>
+                <div class="card-actions">
+                  <button class="btn btn-primary" data-action="approve-form-submission" data-submission-id="${esc(submission.id)}">Approve</button>
+                  <button class="btn btn-danger" data-action="reject-form-submission" data-submission-id="${esc(submission.id)}">Reject</button>
+                </div>
+              </article>
+            `;
+          })
+          .join("")
+      : `<div class="empty-state">No shared solution or need forms are waiting for admin review.</div>`
+    : `<div class="empty-state">Login as admin to review shared form submissions.</div>`;
 
   aiReviewList.innerHTML = isAdminUser()
     ? state.data.aiReviewNeeds.length
@@ -2782,17 +2960,40 @@ function renderUserManagement() {
 function renderAuthState() {
   const authGate = byId("authGate");
   const appShell = byId("appShell");
+  const masthead = document.querySelector(".masthead");
+  const heroStrip = document.querySelector(".hero-strip");
+  const overviewTab = document.querySelector('.tab[data-view="overview"]');
+  const operationsTab = document.querySelector('.tab[data-view="operations"]');
+  const solutionTab = document.querySelector('.tab[data-view="solution"]');
+  const needTab = document.querySelector('.tab[data-view="need-intake"]');
   const roleTab = document.querySelector('.tab[data-view="admin"]');
+  const newNeedBtn = byId("newNeedBtn");
   const adminSyncLink = byId("adminSyncLink");
   const accountName = byId("accountName");
   const accountRoleChip = byId("accountRoleChip");
   const accountSummary = byId("accountSummary");
+  const sharedMode = isSharedFormMode();
+  const loggedIn = isLoggedIn();
+  const showShell = loggedIn || sharedMode;
 
-  if (authGate) authGate.classList.toggle("hidden", isLoggedIn());
-  if (appShell) appShell.classList.toggle("hidden", !isLoggedIn());
-  roleTab?.classList.toggle("hidden", !isAdminUser());
+  if (authGate) authGate.classList.toggle("hidden", showShell);
+  if (appShell) appShell.classList.toggle("hidden", !showShell);
+  masthead?.classList.toggle("hidden", sharedMode);
+  heroStrip?.classList.toggle("hidden", sharedMode);
+  overviewTab?.classList.toggle("hidden", sharedMode);
+  operationsTab?.classList.toggle("hidden", sharedMode || !canAccessOperationsDesk());
+  solutionTab?.classList.toggle("hidden", sharedMode && state.sharedFormMode !== "solution");
+  needTab?.classList.toggle("hidden", sharedMode && state.sharedFormMode !== "need-intake");
+  roleTab?.classList.toggle("hidden", sharedMode || !isAdminUser());
   adminSyncLink?.classList.toggle("hidden", !isAdminUser());
-  if (!isAdminUser() && state.view === "admin") {
+  if (newNeedBtn) newNeedBtn.classList.toggle("hidden", !loggedIn);
+  if (sharedMode) {
+    state.view = state.sharedFormMode;
+  } else if (!loggedIn) {
+    state.view = "overview";
+  } else if (!isAdminUser() && state.view === "admin") {
+    state.view = canAccessOperationsDesk() ? "operations" : "overview";
+  } else if (!canAccessOperationsDesk() && state.view === "operations") {
     state.view = "overview";
   }
 
@@ -2810,6 +3011,8 @@ function renderAuthState() {
       ? `${state.userSession.email || ""}${state.userSession.must_change_password ? " • Please change your default password." : ""}`
       : "";
   }
+  document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
+  document.querySelectorAll(".view").forEach((section) => section.classList.toggle("active", section.id === `${state.view}View`));
 }
 
 function renderAdminState() {
@@ -2837,6 +3040,15 @@ function renderAdminState() {
 }
 
 function switchView(nextView) {
+  if (isSharedFormMode()) {
+    nextView = state.sharedFormMode;
+  }
+  if (nextView === "operations" && !canAccessOperationsDesk()) {
+    nextView = "overview";
+  }
+  if (nextView === "admin" && !isAdminUser()) {
+    nextView = canAccessOperationsDesk() ? "operations" : "overview";
+  }
   state.view = nextView;
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.view === nextView));
   document.querySelectorAll(".view").forEach((section) => section.classList.toggle("active", section.id === `${nextView}View`));
@@ -2848,6 +3060,7 @@ function switchView(nextView) {
 async function rerender(options = {}) {
   const { includeMatches = state.view === "operations" } = options;
   renderAuthState();
+  renderSubmissionViews();
   renderMetrics();
   renderOverview();
   renderFilters();
@@ -2875,12 +3088,14 @@ async function refreshAll() {
         ? store.loadAdminSnapshot().catch(() => {
             state.data.pendingNeeds = [];
             state.data.pendingUpdates = [];
+            state.data.pendingFormSubmissions = [];
             state.data.aiReviewNeeds = [];
             state.data.users = [];
           })
         : Promise.resolve().then(() => {
             state.data.pendingNeeds = [];
             state.data.pendingUpdates = [];
+            state.data.pendingFormSubmissions = [];
             state.data.aiReviewNeeds = [];
             state.data.users = [];
         }),
@@ -2942,6 +3157,25 @@ function resetDashboardSelections() {
     curator: "all",
     state: "all",
     search: "",
+  };
+}
+
+function collectSubmissionPayload(form) {
+  const entries = Object.fromEntries(new FormData(form).entries());
+  const traderId = normalizeText(entries.existing_trader_id);
+  const trader = getTraderById(traderId);
+  if (!trader) {
+    openMissingOrgDialog(entries.organization_name || "");
+    throw new Error("Please select an approved GRE supplier before submitting.");
+  }
+  return {
+    ...entries,
+    existing_trader_id: trader.trader_id,
+    existing_trader_name: trader.organisation_name || trader.trader_name || entries.organization_name || "",
+    organization_name: entries.organization_name || trader.organisation_name || trader.trader_name || "",
+    keywords: parseArray(entries.keywords),
+    six_m_signals: parseArray(entries.six_m_signals),
+    curated_need: parseArray(entries.curated_need),
   };
 }
 
@@ -3070,8 +3304,32 @@ function bindStaticEvents() {
   }));
 
   const dialog = byId("needDialog");
+  const missingOrgDialog = byId("missingOrgDialog");
   byId("newNeedBtn")?.addEventListener("click", () => dialog?.showModal());
   byId("closeNeedDialog")?.addEventListener("click", () => dialog?.close());
+  byId("closeMissingOrgDialog")?.addEventListener("click", () => missingOrgDialog?.close());
+
+  ["solution", "need"].forEach((kind) => {
+    const selectId = kind === "solution" ? "solutionTraderSelect" : "needTraderSelect";
+    const orgInputId = kind === "solution" ? "solutionOrgName" : "needOrgName";
+    byId(selectId)?.addEventListener("change", (event) => {
+      const trader = getTraderById(event.target.value);
+      const orgInput = byId(orgInputId);
+      if (orgInput && trader) orgInput.value = trader.organisation_name || trader.trader_name || "";
+    });
+    byId(orgInputId)?.addEventListener("blur", (event) => {
+      const orgName = normalizeText(event.target.value);
+      const select = byId(selectId);
+      if (!orgName) return;
+      const matchingSupplier = findSupplierByName(orgName);
+      if (matchingSupplier && select) {
+        select.value = matchingSupplier.trader_id;
+        event.target.value = matchingSupplier.organisation_name || matchingSupplier.trader_name || orgName;
+      } else if (!matchingSupplier && !(select && select.value)) {
+        openMissingOrgDialog(orgName);
+      }
+    });
+  });
 
   byId("needForm")?.addEventListener("submit", safeAsync(async (event) => {
     event.preventDefault();
@@ -3081,6 +3339,55 @@ function bindStaticEvents() {
     dialog?.close();
     await refreshAll();
     toast("Need submitted to the admin approval queue.");
+  }));
+
+  byId("solutionSubmissionForm")?.addEventListener("submit", safeAsync(async (event) => {
+    event.preventDefault();
+    const status = byId("solutionSubmissionStatus");
+    if (status) status.textContent = "Submitting solution for admin review...";
+    const payload = collectSubmissionPayload(event.target);
+    const result = isLoggedIn()
+      ? await store.submitSignedInForm("solution", payload)
+      : await store.submitSharedForm("solution", payload);
+    event.target.reset();
+    fillSupplierSelect("solutionTraderSelect", "solutionOrgName");
+    if (status) status.textContent = result.message || "Solution submission sent to admin review.";
+    if (isAdminUser()) await refreshAll();
+    toast("Solution submission queued for admin review.");
+  }));
+
+  byId("needSubmissionForm")?.addEventListener("submit", safeAsync(async (event) => {
+    event.preventDefault();
+    const status = byId("needSubmissionStatus");
+    if (status) status.textContent = "Submitting need for admin review...";
+    const payload = collectSubmissionPayload(event.target);
+    const result = isLoggedIn()
+      ? await store.submitSignedInForm("need", payload)
+      : await store.submitSharedForm("need", payload);
+    event.target.reset();
+    fillSupplierSelect("needTraderSelect", "needOrgName");
+    if (status) status.textContent = result.message || "Need submission sent to admin review.";
+    if (isAdminUser()) await refreshAll();
+    toast("Need submission queued for admin review.");
+  }));
+
+  byId("shareSolutionFormBtn")?.addEventListener("click", safeAsync(async () => {
+    const shareUrl = getShareUrl("solution");
+    await navigator.clipboard?.writeText(shareUrl);
+    toast("Solution form link copied.");
+  }));
+
+  byId("shareNeedFormBtn")?.addEventListener("click", safeAsync(async () => {
+    const shareUrl = getShareUrl("need");
+    await navigator.clipboard?.writeText(shareUrl);
+    toast("Need form link copied.");
+  }));
+
+  byId("appShell")?.addEventListener("click", safeAsync(async (event) => {
+    const button = event.target.closest("[data-copy-share-url]");
+    if (!button) return;
+    await navigator.clipboard?.writeText(button.dataset.copyShareUrl);
+    toast("Form link copied.");
   }));
 
   byId("userLoginForm")?.addEventListener("submit", safeAsync(async (event) => {
@@ -3353,6 +3660,16 @@ function bindStaticEvents() {
       await store.reviewUpdateRequest(button.dataset.requestId, "reject");
       await refreshAll();
       toast("Curator update rejected.");
+    }
+    if (button.dataset.action === "approve-form-submission") {
+      const result = await store.reviewFormSubmission(button.dataset.submissionId, "approve");
+      await refreshAll();
+      toast(result.targetNeedId ? `Submission approved as Need ${result.targetNeedId}.` : "Form submission approved.");
+    }
+    if (button.dataset.action === "reject-form-submission") {
+      await store.reviewFormSubmission(button.dataset.submissionId, "reject");
+      await refreshAll();
+      toast("Form submission rejected.");
     }
     if (button.dataset.action === "run-puter-need-review") {
       const status = byId("puterStatus");

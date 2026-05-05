@@ -6,8 +6,8 @@
   <title>GRE MIS Dashboard</title>
   <link rel="icon" href="data:," />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./config.js?v=20260505a"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260505a" />
+  <script src="./config.js?v=20260505b"></script>
+  <link rel="stylesheet" href="./styles.css?v=20260505b" />
 </head>
 <body>
   <div class="shell">
@@ -114,6 +114,8 @@
     <nav class="view-tabs">
       <button class="tab active" data-view="overview">Overview</button>
       <button class="tab" data-view="operations">Operations Desk</button>
+      <button class="tab" data-view="solution">Add Solution</button>
+      <button class="tab" data-view="need-intake">Solution Need Form</button>
       <button class="tab hidden" data-view="admin">Admin View</button>
     </nav>
 
@@ -237,6 +239,192 @@
         </div>
       </section>
 
+      <section id="solutionView" class="view">
+        <div class="operations-grid intake-grid">
+          <section class="panel panel-detail">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Solution Upload</p>
+                <h3>Add Solution to GRE Review Queue</h3>
+              </div>
+            </div>
+            <form id="solutionSubmissionForm" class="form-grid">
+              <label>
+                <span>Approved GRE Supplier</span>
+                <select id="solutionTraderSelect" name="existing_trader_id" required></select>
+              </label>
+              <label>
+                <span>Organisation Name</span>
+                <input name="organization_name" id="solutionOrgName" required />
+              </label>
+              <label>
+                <span>Contact Person</span>
+                <input name="submitter_name" />
+              </label>
+              <label>
+                <span>Contact Email</span>
+                <input name="submitter_email" type="email" />
+              </label>
+              <label>
+                <span>Contact Phone</span>
+                <input name="submitter_phone" />
+              </label>
+              <label>
+                <span>Solution Name</span>
+                <input name="solution_name" required />
+              </label>
+              <label>
+                <span>Offering Name</span>
+                <input name="offering_name" required />
+              </label>
+              <label>
+                <span>Offering Kind</span>
+                <select name="offering_kind">
+                  <option value="service">Service</option>
+                  <option value="product">Product</option>
+                  <option value="knowledge">Knowledge</option>
+                  <option value="finance">Finance</option>
+                </select>
+              </label>
+              <label>
+                <span>Service Type</span>
+                <input name="service_kind" placeholder="Training, Consulting, Mentoring" />
+              </label>
+              <label>
+                <span>Thematic Area</span>
+                <input name="thematic_area" placeholder="Dairy, Solar, Soap, Wild Mango" />
+              </label>
+              <label>
+                <span>Application Area</span>
+                <input name="application_area" placeholder="Milching cows, Soap production, Solar street lights" />
+              </label>
+              <label>
+                <span>Primary Geography</span>
+                <input name="geographies" placeholder="State, district, country" />
+              </label>
+              <label class="wide">
+                <span>6M Signals</span>
+                <input name="six_m_signals" placeholder="Manpower, Method, Machine, Material, Market, Money" />
+              </label>
+              <label class="wide">
+                <span>Short Description</span>
+                <textarea name="about_offering_text" rows="5" required></textarea>
+              </label>
+              <label class="wide">
+                <span>Tags / Keywords</span>
+                <input name="keywords" placeholder="Comma-separated keywords" />
+              </label>
+              <div class="wide intake-actions">
+                <button type="submit" class="btn btn-primary">Submit Solution to Admin Review</button>
+                <button type="button" id="shareSolutionFormBtn" class="btn btn-secondary">Share Page Link</button>
+              </div>
+              <p id="solutionSubmissionStatus" class="helper-text wide"></p>
+            </form>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Sharing</p>
+                <h3>External Submission Link</h3>
+              </div>
+            </div>
+            <div id="solutionSharePanel" class="stack-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="need-intakeView" class="view">
+        <div class="operations-grid intake-grid">
+          <section class="panel panel-detail">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Request Solution</p>
+                <h3>Add Need to GRE Review Queue</h3>
+              </div>
+            </div>
+            <form id="needSubmissionForm" class="form-grid">
+              <label>
+                <span>Approved GRE Supplier</span>
+                <select id="needTraderSelect" name="existing_trader_id" required></select>
+              </label>
+              <label>
+                <span>Organisation Name</span>
+                <input name="organization_name" id="needOrgName" required />
+              </label>
+              <label>
+                <span>Contact Person</span>
+                <input name="contact_person" required />
+              </label>
+              <label>
+                <span>Email</span>
+                <input name="seeker_email" type="email" required />
+              </label>
+              <label>
+                <span>Phone</span>
+                <input name="seeker_phone" />
+              </label>
+              <label>
+                <span>State</span>
+                <input name="state" required />
+              </label>
+              <label>
+                <span>District</span>
+                <input name="district" />
+              </label>
+              <label>
+                <span>Need Kind</span>
+                <select name="need_kind">
+                  <option value="service">Service</option>
+                  <option value="product">Product</option>
+                  <option value="knowledge">Knowledge</option>
+                  <option value="finance">Finance</option>
+                </select>
+              </label>
+              <label>
+                <span>Service Type</span>
+                <input name="service_kind" placeholder="Training, Consulting, Mentoring" />
+              </label>
+              <label>
+                <span>Thematic Area</span>
+                <input name="thematic_area" placeholder="Dairy, Solar, Soap, Wild Mango" />
+              </label>
+              <label>
+                <span>Application Area</span>
+                <input name="application_area" placeholder="Milching cows, Solar street lights, Goatery" />
+              </label>
+              <label class="wide">
+                <span>Initial Categories / Curated Need</span>
+                <input name="curated_need" placeholder="Capacity building, Training, Consulting" />
+              </label>
+              <label class="wide">
+                <span>6M Signals</span>
+                <input name="six_m_signals" placeholder="Manpower, Method, Machine, Material, Market, Money" />
+              </label>
+              <label class="wide">
+                <span>Problem Statement</span>
+                <textarea name="problem_statement" rows="6" required></textarea>
+              </label>
+              <div class="wide intake-actions">
+                <button type="submit" class="btn btn-primary">Submit Need to Admin Review</button>
+                <button type="button" id="shareNeedFormBtn" class="btn btn-secondary">Share Page Link</button>
+              </div>
+              <p id="needSubmissionStatus" class="helper-text wide"></p>
+            </form>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Sharing</p>
+                <h3>External Submission Link</h3>
+              </div>
+            </div>
+            <div id="needSharePanel" class="stack-list"></div>
+          </section>
+        </div>
+      </section>
+
       <section id="adminView" class="view">
         <div class="admin-grid admin-grid-top">
           <section class="panel">
@@ -347,6 +535,16 @@
           <section class="panel panel-large">
             <div class="panel-head">
               <div>
+                <p class="eyebrow">Shared Forms</p>
+                <h3>Pending Need and Solution Submissions</h3>
+              </div>
+            </div>
+            <div id="pendingFormSubmissionsList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
                 <p class="eyebrow">Match QA</p>
                 <h3>Conflict Cases and Classification Review</h3>
               </div>
@@ -387,6 +585,19 @@
     </form>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260505a"></script>
+  <dialog id="missingOrgDialog" class="modal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Supplier Missing</p>
+          <h3>Create the Organisation on GRE First</h3>
+        </div>
+        <button type="button" id="closeMissingOrgDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <p id="missingOrgText" class="helper-text">This form can sync only for organisations already present in the approved GRE supplier list. Please create the organisation account on the GRE platform first, then return and submit the form.</p>
+    </div>
+  </dialog>
+
+  <script type="module" src="./app.js?v=20260505b"></script>
 </body>
 </html>
