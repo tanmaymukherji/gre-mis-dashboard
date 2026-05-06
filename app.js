@@ -246,6 +246,11 @@ function toast(message) {
   window.alert(message);
 }
 
+function setText(id, message = "") {
+  const el = byId(id);
+  if (el) el.textContent = message;
+}
+
 function safeAsync(handler) {
   return async (...args) => {
     try {
@@ -254,8 +259,17 @@ function safeAsync(handler) {
       console.error(error);
       const loginStatus = byId("loginStatus");
       const sessionStatus = byId("sessionStatus");
-      if (loginStatus && args[0]?.target?.id === "adminLoginForm") {
+      const formId = args[0]?.target?.id;
+      if (loginStatus && formId === "adminLoginForm") {
         loginStatus.textContent = error?.message || "Admin login failed.";
+      } else if (formId === "userLoginForm") {
+        setText("userLoginStatus", error?.message || "Sign in failed.");
+      } else if (formId === "registerUserForm") {
+        setText("registerStatus", error?.message || "Registration failed.");
+      } else if (formId === "requestResetForm" || formId === "resetPasswordForm") {
+        setText("resetStatus", error?.message || "Password reset flow failed.");
+      } else if (formId === "changePasswordForm") {
+        setText("changePasswordStatus", error?.message || "Password change failed.");
       } else if (sessionStatus) {
         sessionStatus.textContent = error?.message || "Something went wrong.";
       }
@@ -3011,6 +3025,9 @@ function renderAuthState() {
       ? `${state.userSession.email || ""}${state.userSession.must_change_password ? " • Please change your default password." : ""}`
       : "";
   }
+  if (!isLoggedIn()) {
+    setText("changePasswordStatus", "");
+  }
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
   document.querySelectorAll(".view").forEach((section) => section.classList.toggle("active", section.id === `${state.view}View`));
 }
@@ -3305,9 +3322,21 @@ function bindStaticEvents() {
 
   const dialog = byId("needDialog");
   const missingOrgDialog = byId("missingOrgDialog");
+  const registerDialog = byId("registerDialog");
+  const passwordHelpDialog = byId("passwordHelpDialog");
   byId("newNeedBtn")?.addEventListener("click", () => dialog?.showModal());
   byId("closeNeedDialog")?.addEventListener("click", () => dialog?.close());
   byId("closeMissingOrgDialog")?.addEventListener("click", () => missingOrgDialog?.close());
+  byId("openRegisterDialogBtn")?.addEventListener("click", () => {
+    setText("registerStatus", "");
+    registerDialog?.showModal();
+  });
+  byId("closeRegisterDialog")?.addEventListener("click", () => registerDialog?.close());
+  byId("openPasswordHelpDialogBtn")?.addEventListener("click", () => {
+    setText("resetStatus", "");
+    passwordHelpDialog?.showModal();
+  });
+  byId("closePasswordHelpDialog")?.addEventListener("click", () => passwordHelpDialog?.close());
 
   ["solution", "need"].forEach((kind) => {
     const selectId = kind === "solution" ? "solutionTraderSelect" : "needTraderSelect";
@@ -3393,19 +3422,17 @@ function bindStaticEvents() {
   byId("userLoginForm")?.addEventListener("submit", safeAsync(async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
-    const status = byId("userLoginStatus");
-    if (status) status.textContent = "Signing in...";
+    setText("userLoginStatus", "Signing in...");
     await store.userLogin(form.get("identifier"), form.get("password"));
     event.target.reset();
     await refreshAll();
-    if (status) status.textContent = "Signed in successfully.";
+    setText("userLoginStatus", isLoggedIn() ? "Signed in successfully." : "");
   }));
 
   byId("registerUserForm")?.addEventListener("submit", safeAsync(async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
-    const status = byId("registerStatus");
-    if (status) status.textContent = "Creating account...";
+    setText("registerStatus", "Creating account...");
     await store.registerUser({
       firstName: form.get("first_name"),
       fullName: form.get("full_name"),
@@ -3414,26 +3441,25 @@ function bindStaticEvents() {
       password: form.get("password"),
     });
     event.target.reset();
-    if (status) status.textContent = "Account created. You can sign in now.";
+    setText("registerStatus", "Account created. You can sign in now.");
+    byId("registerDialog")?.close();
   }));
 
   byId("requestResetForm")?.addEventListener("submit", safeAsync(async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
-    const status = byId("resetStatus");
-    if (status) status.textContent = "Sending reset code...";
+    setText("resetStatus", "Sending reset code...");
     const result = await store.requestPasswordReset(form.get("email"));
-    if (status) status.textContent = result.message || "If the email exists, a reset code has been sent.";
+    setText("resetStatus", result.message || "If the email exists, a reset code has been sent.");
   }));
 
   byId("resetPasswordForm")?.addEventListener("submit", safeAsync(async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
-    const status = byId("resetStatus");
-    if (status) status.textContent = "Resetting password...";
+    setText("resetStatus", "Resetting password...");
     await store.resetPassword(form.get("email"), form.get("code"), form.get("new_password"));
     event.target.reset();
-    if (status) status.textContent = "Password reset complete. Please sign in.";
+    setText("resetStatus", "Password reset complete. Please sign in.");
   }));
 
   byId("changePasswordForm")?.addEventListener("submit", safeAsync(async (event) => {
@@ -3707,6 +3733,10 @@ function bindStaticEvents() {
 }
 
 async function init() {
+  setText("userLoginStatus", "");
+  setText("registerStatus", "");
+  setText("resetStatus", "");
+  setText("changePasswordStatus", "");
   bindStaticEvents();
   await store.validateUserSession();
   await refreshAll();

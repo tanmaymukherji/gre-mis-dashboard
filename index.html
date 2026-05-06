@@ -7,62 +7,43 @@
   <link rel="icon" href="data:," />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260505b"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260505b" />
+  <link rel="stylesheet" href="./styles.css?v=20260506a" />
 </head>
 <body>
   <div class="shell">
     <section id="authGate" class="auth-gate panel">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">Account Access</p>
-          <h2>Login to GRE MIS</h2>
+      <div class="auth-hero">
+        <div class="auth-brand">
+          <img src="./assets/gre-logo.png" alt="GRE logo" class="auth-logo" />
+          <div class="auth-copy">
+            <p class="eyebrow">Green Rural Economy</p>
+            <h2>Welcome to the GRE MIS</h2>
+            <p class="auth-lede">Track live inbounds, understand curator movement, surface solution matches, and coordinate the day’s action from one cleaner workspace.</p>
+            <div class="auth-highlight-row">
+              <span class="auth-highlight">Live needs intelligence</span>
+              <span class="auth-highlight">Curator coordination</span>
+              <span class="auth-highlight">GRE sync workflows</span>
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="auth-grid">
-        <article class="auth-card">
-          <h3>Sign In</h3>
-          <form id="userLoginForm" class="action-form">
-            <label><span>Username or Email</span><input name="identifier" required /></label>
-            <label><span>Password</span><input name="password" type="password" required /></label>
-            <div class="card-actions">
-              <button type="submit" class="btn btn-primary">Sign In</button>
+        <article class="auth-login-card">
+          <div class="auth-login-head">
+            <p class="eyebrow">Account Access</p>
+            <h3>Sign In</h3>
+            <p class="helper-text">Use your GRE MIS username or email to continue.</p>
+          </div>
+          <form id="userLoginForm" class="action-form auth-login-form">
+            <label><span>Username or Email</span><input name="identifier" autocomplete="username" required /></label>
+            <label><span>Password</span><input name="password" type="password" autocomplete="current-password" required /></label>
+            <div class="auth-login-actions">
+              <button type="submit" class="btn btn-primary auth-login-btn">Sign In</button>
             </div>
           </form>
-          <p id="userLoginStatus" class="helper-text"></p>
-        </article>
-
-        <article class="auth-card">
-          <h3>Register New User</h3>
-          <form id="registerUserForm" class="action-form">
-            <label><span>First Name</span><input name="first_name" required /></label>
-            <label><span>Full Name</span><input name="full_name" required /></label>
-            <label><span>Email</span><input name="email" type="email" required /></label>
-            <label><span>Phone</span><input name="phone" /></label>
-            <label><span>Password</span><input name="password" type="password" required /></label>
-            <div class="card-actions">
-              <button type="submit" class="btn btn-secondary">Register</button>
-            </div>
-          </form>
-          <p id="registerStatus" class="helper-text"></p>
-        </article>
-
-        <article class="auth-card">
-          <h3>Password Help</h3>
-          <form id="requestResetForm" class="action-form">
-            <label><span>Email for Reset Code</span><input name="email" type="email" required /></label>
-            <div class="card-actions">
-              <button type="submit" class="btn btn-secondary">Send Reset Code</button>
-            </div>
-          </form>
-          <form id="resetPasswordForm" class="action-form">
-            <label><span>Email</span><input name="email" type="email" required /></label>
-            <label><span>Reset Code</span><input name="code" required /></label>
-            <label><span>New Password</span><input name="new_password" type="password" required /></label>
-            <div class="card-actions">
-              <button type="submit" class="btn btn-secondary">Reset Password</button>
-            </div>
-          </form>
-          <p id="resetStatus" class="helper-text"></p>
+          <p id="userLoginStatus" class="helper-text auth-status"></p>
+          <div class="auth-links">
+            <button type="button" id="openRegisterDialogBtn" class="text-link">Register New User</button>
+            <button type="button" id="openPasswordHelpDialogBtn" class="text-link">Forgot Password?</button>
+          </div>
         </article>
       </div>
     </section>
@@ -598,6 +579,60 @@
     </div>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260505b"></script>
+  <dialog id="registerDialog" class="modal">
+    <form id="registerUserForm" class="modal-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Create Account</p>
+          <h3>Register New User</h3>
+        </div>
+        <button type="button" id="closeRegisterDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div class="form-grid">
+        <label><span>First Name</span><input name="first_name" required /></label>
+        <label><span>Full Name</span><input name="full_name" required /></label>
+        <label><span>Email</span><input name="email" type="email" required /></label>
+        <label><span>Phone</span><input name="phone" /></label>
+        <label class="wide"><span>Password</span><input name="password" type="password" required /></label>
+      </div>
+      <p id="registerStatus" class="helper-text"></p>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary">Create Account</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="passwordHelpDialog" class="modal">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Password Help</p>
+          <h3>Reset Access</h3>
+        </div>
+        <button type="button" id="closePasswordHelpDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div class="auth-support-grid">
+        <form id="requestResetForm" class="action-form auth-support-card">
+          <h4>Request Reset Code</h4>
+          <label><span>Email for Reset Code</span><input name="email" type="email" required /></label>
+          <div class="card-actions">
+            <button type="submit" class="btn btn-secondary">Send Reset Code</button>
+          </div>
+        </form>
+        <form id="resetPasswordForm" class="action-form auth-support-card">
+          <h4>Set New Password</h4>
+          <label><span>Email</span><input name="email" type="email" required /></label>
+          <label><span>Reset Code</span><input name="code" required /></label>
+          <label><span>New Password</span><input name="new_password" type="password" required /></label>
+          <div class="card-actions">
+            <button type="submit" class="btn btn-primary">Reset Password</button>
+          </div>
+        </form>
+      </div>
+      <p id="resetStatus" class="helper-text"></p>
+    </div>
+  </dialog>
+
+  <script type="module" src="./app.js?v=20260506a"></script>
 </body>
 </html>
