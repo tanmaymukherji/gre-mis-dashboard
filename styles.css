@@ -292,7 +292,7 @@ h2 { font-size: 1.35rem; }
 }
 .dataset-stat-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 .dataset-stat-card {
@@ -1108,6 +1108,9 @@ textarea { resize: vertical; }
     overflow-x: auto;
     padding-bottom: 4px;
     scroll-snap-type: x proximity;
+  }
+  .dataset-stat-grid {
+    grid-template-columns: 1fr;
   }
   .metric-card {
     scroll-snap-align: start;
