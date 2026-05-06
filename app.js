@@ -2143,6 +2143,7 @@ function renderMetrics() {
   if (byId("adminView")) {
     metrics.push(["ai_review", "Match QA", state.data.aiReviewNeeds.length, "Approved needs flagged for conflict review, missing validation, or weak classification."]);
   }
+  metricsGrid.style.setProperty("--metric-count", String(metrics.length));
 
   metricsGrid.innerHTML = metrics
     .map(
@@ -2162,8 +2163,25 @@ function renderOverview() {
   const needs = getDisplayNeeds();
   const headline = byId("datasetHeadline");
   const subline = byId("datasetSubline");
-  if (headline) headline.textContent = `${needs.length} active inbound needs loaded from GRE operations data`;
-  if (subline) subline.textContent = `${state.data.pendingNeeds.length} intake records and ${state.data.pendingUpdates.length} curator updates are waiting for admin action.${state.showClosedNeeds ? " Closed needs are currently visible." : " Closed needs are currently hidden."}`;
+  if (headline) headline.textContent = `${needs.length} Active Inbound Needs loaded from GRE Operations Data`;
+  if (subline) {
+    const adminStats = [
+      ["Admin Action Awaited", state.data.pendingNeeds.length + state.data.pendingUpdates.length],
+      ["Intake Records", state.data.pendingNeeds.length],
+      ["Curator Updates", state.data.pendingUpdates.length],
+      ["Closed Display", state.showClosedNeeds ? "Visible" : "Hidden"],
+    ];
+    subline.innerHTML = adminStats
+      .map(
+        ([label, value]) => `
+          <article class="dataset-stat-card">
+            <span>${esc(label)}</span>
+            <strong>${esc(value)}</strong>
+          </article>
+        `,
+      )
+      .join("");
+  }
   const closedToggleBtn = byId("closedToggleBtn");
   if (closedToggleBtn) closedToggleBtn.textContent = `Show Closed: ${state.showClosedNeeds ? "On" : "Off"}`;
 

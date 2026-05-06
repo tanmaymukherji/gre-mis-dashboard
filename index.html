@@ -6,8 +6,8 @@
   <title>GRE MIS Dashboard</title>
   <link rel="icon" href="data:," />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./config.js?v=20260506b"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260506b" />
+  <script src="./config.js?v=20260506c"></script>
+  <link rel="stylesheet" href="./styles.css?v=20260506c" />
 </head>
 <body>
   <div class="shell">
@@ -50,12 +50,19 @@
 
     <section id="appShell" class="app-shell hidden">
     <header class="masthead">
+      <div class="masthead-topline">
+        <div class="hero-account-inline masthead-account-inline">
+          <span id="accountRoleChip" class="chip muted">User</span>
+          <strong id="accountName">GRE MIS User</strong>
+          <button type="button" id="userLogoutBtn" class="btn btn-secondary btn-compact">Sign Out</button>
+        </div>
+      </div>
       <div class="brand-block">
         <img src="./assets/gre-logo.png" alt="GRE logo" class="brand-logo" />
-        <div>
+        <div class="brand-copy">
           <p class="eyebrow">Green Rural Economy</p>
           <h1>GRE MIS Control Tower</h1>
-          <p class="lede">Live operating dashboard for inbound needs, curator action, admin approvals, solution matching, and closure tracking.</p>
+          <p class="lede">Live Operating Dashboard for Inbound Needs, Curator Action, Admin Approvals, Solution Matching, and Closure Tracking</p>
         </div>
       </div>
     </header>
@@ -64,20 +71,11 @@
       <article class="hero-summary">
         <p class="eyebrow">Live Dataset</p>
         <h2 id="datasetHeadline">Loading GRE inbound records…</h2>
-        <p id="datasetSubline" class="helper-text"></p>
+        <div id="datasetSubline" class="dataset-stat-grid"></div>
       </article>
       <div class="hero-actions">
-        <div class="hero-account-inline">
-          <div class="hero-account-copy">
-            <strong id="accountName">GRE MIS User</strong>
-            <p id="accountSummary" class="helper-text"></p>
-          </div>
-          <span id="accountRoleChip" class="chip muted">User</span>
-        </div>
         <button id="closedToggleBtn" class="btn btn-secondary">Show Closed: Off</button>
         <button id="refreshBtn" class="btn btn-secondary">Refresh & Reset</button>
-        <button id="newNeedBtn" class="btn btn-primary">Log New Need</button>
-        <button type="button" id="userLogoutBtn" class="btn btn-secondary">Sign Out</button>
       </div>
     </section>
 
@@ -645,6 +643,6 @@
     </div>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260506b"></script>
+  <script type="module" src="./app.js?v=20260506c"></script>
 </body>
 </html>
