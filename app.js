@@ -1730,8 +1730,8 @@ class GreMisStore {
     return this.callAdmin("directCuratorUpdate", payload);
   }
 
-  async promoteUserToCurator(userId) {
-    return this.callAdmin("promoteUserToCurator", { userId }, true);
+  async updateUserRole(userId, role) {
+    return this.callAdmin("updateUserRole", { userId, role }, true);
   }
 
   async submitSharedForm(submissionType, payload) {
@@ -2975,6 +2975,7 @@ function renderUserManagement() {
             <div class="status-row">
               <span class="status-pill ${badgeTone(user.role)}">${esc(user.role)}</span>
               <span class="status-pill info">${esc(user.is_active ? "Active" : "Inactive")}</span>
+              ${user.gre_sync_status ? `<span class="status-pill ${badgeTone(user.gre_sync_status)}">${esc(user.gre_sync_status.replaceAll("_", " "))}</span>` : ""}
             </div>
             <h4>${esc(user.full_name || user.first_name || user.username)}</h4>
             <div class="detail-list user-detail-grid">
@@ -2983,8 +2984,21 @@ function renderUserManagement() {
               <div><strong>Phone:</strong> ${esc(user.phone || "Not set")}</div>
               <div><strong>Role:</strong> ${esc(user.role || "Not set")}</div>
             </div>
+            <div class="detail-list user-detail-grid user-sync-grid">
+              <div><strong>GRE Login:</strong> ${esc(user.gre_login_name || "Not mapped")}</div>
+              <div><strong>GRE User ID:</strong> ${esc(user.gre_user_id || "Not mapped")}</div>
+              <div><strong>GRE Sync:</strong> ${esc(user.gre_sync_status ? user.gre_sync_status.replaceAll("_", " ") : "Not attempted")}</div>
+              <div><strong>Synced At:</strong> ${esc(user.gre_synced_at ? formatDate(user.gre_synced_at) : "Not synced")}</div>
+            </div>
+            ${user.gre_sync_message ? `<p class="helper-text">${esc(user.gre_sync_message)}</p>` : ""}
             <div class="card-actions">
-              ${user.role === "user" ? `<button class="btn btn-primary" data-action="promote-user" data-user-id="${esc(user.id)}">Promote to Curator</button>` : `<span class="helper-text">Already ${esc(user.role)}</span>`}
+              <label class="inline-select">
+                <span class="helper-text">Assign role</span>
+                <select data-role-select data-user-id="${esc(user.id)}">
+                  ${["user", "curator", "admin"].map((role) => `<option value="${role}" ${user.role === role ? "selected" : ""}>${role[0].toUpperCase()}${role.slice(1)}</option>`).join("")}
+                </select>
+              </label>
+              <button class="btn btn-primary" data-action="update-user-role" data-user-id="${esc(user.id)}">Update Role</button>
             </div>
           </article>
         `).join("")
@@ -3732,10 +3746,14 @@ function bindStaticEvents() {
       await refreshAll();
       toast(field === "all" ? "Recommendation accepted." : "Field override accepted.");
     }
-    if (button.dataset.action === "promote-user") {
-      await store.promoteUserToCurator(button.dataset.userId);
+    if (button.dataset.action === "update-user-role") {
+      const userId = button.dataset.userId;
+      const card = button.closest(".approval-card");
+      const select = card?.querySelector("[data-role-select]");
+      const nextRole = select?.value || "";
+      const result = await store.updateUserRole(userId, nextRole);
       await refreshAll();
-      toast("User promoted to curator.");
+      toast(result.message || "User role updated.");
     }
   }));
 
