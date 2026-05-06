@@ -6,8 +6,8 @@
   <title>GRE MIS Dashboard</title>
   <link rel="icon" href="data:," />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./config.js?v=20260505b"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260506a" />
+  <script src="./config.js?v=20260506b"></script>
+  <link rel="stylesheet" href="./styles.css?v=20260506b" />
 </head>
 <body>
   <div class="shell">
@@ -58,25 +58,6 @@
           <p class="lede">Live operating dashboard for inbound needs, curator action, admin approvals, solution matching, and closure tracking.</p>
         </div>
       </div>
-      <div class="access-card">
-        <div class="access-head">
-          <div>
-            <p class="eyebrow">Signed In</p>
-            <h3 id="accountName">GRE MIS User</h3>
-          </div>
-          <span id="accountRoleChip" class="chip muted">User</span>
-        </div>
-        <p id="accountSummary" class="helper-text"></p>
-        <form id="changePasswordForm" class="action-form">
-          <label><span>Current Password</span><input name="current_password" type="password" required /></label>
-          <label><span>New Password</span><input name="new_password" type="password" required /></label>
-          <div class="card-actions">
-            <button type="submit" class="btn btn-secondary">Change Password</button>
-            <button type="button" id="userLogoutBtn" class="btn btn-primary">Sign Out</button>
-          </div>
-        </form>
-        <p id="changePasswordStatus" class="helper-text"></p>
-      </div>
     </header>
 
     <section class="hero-strip">
@@ -86,9 +67,17 @@
         <p id="datasetSubline" class="helper-text"></p>
       </article>
       <div class="hero-actions">
+        <div class="hero-account-inline">
+          <div class="hero-account-copy">
+            <strong id="accountName">GRE MIS User</strong>
+            <p id="accountSummary" class="helper-text"></p>
+          </div>
+          <span id="accountRoleChip" class="chip muted">User</span>
+        </div>
         <button id="closedToggleBtn" class="btn btn-secondary">Show Closed: Off</button>
         <button id="refreshBtn" class="btn btn-secondary">Refresh & Reset</button>
         <button id="newNeedBtn" class="btn btn-primary">Log New Need</button>
+        <button type="button" id="userLogoutBtn" class="btn btn-secondary">Sign Out</button>
       </div>
     </section>
 
@@ -532,6 +521,29 @@
             </div>
             <div id="aiReviewList" class="stack-list"></div>
           </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Account</p>
+                <h3>Password and Session</h3>
+              </div>
+            </div>
+            <div class="account-settings-panel">
+              <div class="account-settings-copy">
+                <strong>Manage your GRE MIS password</strong>
+                <p class="helper-text">Use this section when you need to rotate the current password for this account.</p>
+              </div>
+              <form id="changePasswordForm" class="action-form account-settings-form">
+                <label><span>Current Password</span><input name="current_password" type="password" required /></label>
+                <label><span>New Password</span><input name="new_password" type="password" required /></label>
+                <div class="card-actions">
+                  <button type="submit" class="btn btn-primary">Change Password</button>
+                </div>
+              </form>
+              <p id="changePasswordStatus" class="helper-text"></p>
+            </div>
+          </section>
         </div>
       </section>
     </main>
@@ -633,6 +645,6 @@
     </div>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260506a"></script>
+  <script type="module" src="./app.js?v=20260506b"></script>
 </body>
 </html>
