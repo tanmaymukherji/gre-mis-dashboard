@@ -172,12 +172,10 @@ body {
 .modal-card { background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
 
 .masthead {
-  display: block;
-}
-.masthead-topline {
-  display: flex;
-  justify-content: flex-end;
-  padding: 18px 28px 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: stretch;
 }
 .masthead-account-panel {
   display: grid;
@@ -187,6 +185,7 @@ body {
   border: 1px solid var(--line);
   background: linear-gradient(180deg, #ffffff, #f7faf4);
   min-width: 360px;
+  align-self: center;
 }
 .masthead-admin {
   grid-template-columns: 1.2fr 1fr;
@@ -201,7 +200,7 @@ body {
 .match-card,
 .modal-card { border-radius: var(--radius); }
 
-.brand-block { display: flex; gap: 18px; align-items: center; padding: 10px 28px 24px; }
+.brand-block { display: flex; gap: 18px; align-items: center; padding: 24px 28px; min-width: 0; }
 .brand-copy {
   display: grid;
   gap: 8px;
@@ -1080,6 +1079,9 @@ textarea { resize: vertical; }
     min-width: 0;
     width: 100%;
   }
+  .masthead {
+    grid-template-columns: 1fr;
+  }
   .hero-account-inline {
     justify-content: space-between;
   }
@@ -1089,9 +1091,6 @@ textarea { resize: vertical; }
   }
   .masthead-control-row .btn {
     flex: 1 1 0;
-  }
-  .masthead-topline {
-    padding: 16px 16px 0;
   }
   .brand-logo { width: 88px; }
   .auth-brand {

@@ -3008,11 +3008,12 @@ function renderAuthState() {
   const sharedMode = isSharedFormMode();
   const loggedIn = isLoggedIn();
   const showShell = loggedIn || sharedMode;
+  const isAdminDatasetVisible = isAdminUser() && state.view === "admin";
 
   if (authGate) authGate.classList.toggle("hidden", showShell);
   if (appShell) appShell.classList.toggle("hidden", !showShell);
   masthead?.classList.toggle("hidden", sharedMode);
-  heroStrip?.classList.toggle("hidden", sharedMode || !isAdminUser() || state.view !== "admin");
+  heroStrip?.classList.toggle("hidden", sharedMode || !isAdminDatasetVisible);
   overviewTab?.classList.toggle("hidden", sharedMode);
   operationsTab?.classList.toggle("hidden", sharedMode || !canAccessOperationsDesk());
   solutionTab?.classList.toggle("hidden", sharedMode && state.sharedFormMode !== "solution");
