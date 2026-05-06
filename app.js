@@ -1258,7 +1258,7 @@ function getOverviewFocusPayload() {
     items: orderedCases,
     cards,
     emptyText: activeMetrics.includes("admin_queue") && !isAdminUser()
-      ? "Sign in through Admin Sync to inspect pending approvals and curator requests."
+      ? "Sign in as admin to inspect pending approvals and curator requests."
       : "No cases match the current combination of filters.",
   };
 }
@@ -2275,27 +2275,29 @@ function renderOverview() {
       <span class="status-pill ${focusPayload.tone}">${esc(focusPayload.cards.length)} cases</span>
     </div>
     <div class="pipeline-drilldown-split">
-      <div class="pipeline-drilldown-list">
-        ${focusPayload.cards.length
-          ? visibleCards.join("")
-          : `<div class="empty-state">${esc(focusPayload.emptyText || "No cases are currently sitting in this selection.")}</div>`}
+      <div class="pipeline-drilldown-sidebar">
+        <div class="pipeline-drilldown-list">
+          ${focusPayload.cards.length
+            ? visibleCards.join("")
+            : `<div class="empty-state">${esc(focusPayload.emptyText || "No cases are currently sitting in this selection.")}</div>`}
+        </div>
+        ${
+          focusPayload.cards.length
+            ? `<div class="pipeline-pagination pipeline-pagination-left">
+                <span class="meta-text">Showing ${esc(pageStart + 1)}-${esc(Math.min(pageStart + pageSize, focusPayload.cards.length))} of ${esc(focusPayload.cards.length)}</span>
+                <div class="pipeline-pagination-actions">
+                  <button class="btn btn-secondary" data-page-action="prev" ${state.overviewPage <= 1 ? "disabled" : ""}>Prev</button>
+                  <span class="meta-text">Page ${esc(state.overviewPage)} of ${esc(totalPages)}</span>
+                  <button class="btn btn-secondary" data-page-action="next" ${state.overviewPage >= totalPages ? "disabled" : ""}>Next</button>
+                </div>
+              </div>`
+            : ""
+        }
       </div>
       <div id="categoryCasesMap" class="pipeline-drilldown-map">
         <div id="caseMapLocationPanel" class="case-map-location-panel hidden"></div>
       </div>
     </div>
-    ${
-      focusPayload.cards.length
-        ? `<div class="pipeline-pagination">
-            <span class="meta-text">Showing ${esc(pageStart + 1)}-${esc(Math.min(pageStart + pageSize, focusPayload.cards.length))} of ${esc(focusPayload.cards.length)}</span>
-            <div class="pipeline-pagination-actions">
-              <button class="btn btn-secondary" data-page-action="prev" ${state.overviewPage <= 1 ? "disabled" : ""}>Prev</button>
-              <span class="meta-text">Page ${esc(state.overviewPage)} of ${esc(totalPages)}</span>
-              <button class="btn btn-secondary" data-page-action="next" ${state.overviewPage >= totalPages ? "disabled" : ""}>Next</button>
-            </div>
-          </div>`
-        : ""
-    }
   `;
   renderCaseMap(focusNeeds);
 }
@@ -3000,7 +3002,6 @@ function renderAuthState() {
   const needTab = document.querySelector('.tab[data-view="need-intake"]');
   const roleTab = document.querySelector('.tab[data-view="admin"]');
   const newNeedBtn = byId("newNeedBtn");
-  const adminSyncLink = byId("adminSyncLink");
   const accountName = byId("accountName");
   const accountRoleChip = byId("accountRoleChip");
   const accountSummary = byId("accountSummary");
@@ -3017,7 +3018,6 @@ function renderAuthState() {
   solutionTab?.classList.toggle("hidden", sharedMode && state.sharedFormMode !== "solution");
   needTab?.classList.toggle("hidden", sharedMode && state.sharedFormMode !== "need-intake");
   roleTab?.classList.toggle("hidden", sharedMode || !isAdminUser());
-  adminSyncLink?.classList.toggle("hidden", !isAdminUser());
   if (newNeedBtn) newNeedBtn.classList.toggle("hidden", !loggedIn);
   if (sharedMode) {
     state.view = state.sharedFormMode;

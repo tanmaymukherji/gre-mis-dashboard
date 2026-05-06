@@ -420,6 +420,12 @@ h2 { font-size: 1.35rem; }
   gap: 16px;
   align-items: start;
 }
+.pipeline-drilldown-sidebar {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px;
+  min-height: 760px;
+}
 .pipeline-drilldown-map {
   position: relative;
   min-height: 760px;
@@ -527,7 +533,13 @@ h2 { font-size: 1.35rem; }
 }
 .pipeline-drilldown-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  align-content: start;
+  overflow: auto;
+  min-height: 0;
+  max-height: 760px;
+  padding-right: 4px;
 }
 .pipeline-pagination {
   display: flex;
@@ -535,6 +547,9 @@ h2 { font-size: 1.35rem; }
   gap: 12px;
   align-items: center;
   padding-top: 6px;
+}
+.pipeline-pagination-left {
+  justify-content: flex-start;
 }
 .pipeline-pagination-actions {
   display: flex;
@@ -998,27 +1013,6 @@ textarea { resize: vertical; }
 .modal-head,
 .modal-actions { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .modal-actions { margin-top: 18px; justify-content: end; }
-.page-end-actions { display: flex; justify-content: flex-end; padding: 1rem 0 0.35rem; }
-.admin-sync-end {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.38rem 0.72rem;
-  border-radius: 999px;
-  border: 1px solid #d7e0e7;
-  background: #f5f8fa;
-  color: #6a7785;
-  text-decoration: none;
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-.admin-sync-end:hover {
-  color: #1f4b6e;
-  border-color: #bfd0db;
-  background: #eef4f7;
-}
-
 @media (max-width: 1280px) {
   .auth-grid,
   .metrics-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1028,6 +1022,12 @@ textarea { resize: vertical; }
   .panel-large,
   .panel-wide { grid-column: span 2; }
   .pipeline-drilldown-split { grid-template-columns: 1fr; }
+  .pipeline-drilldown-sidebar {
+    min-height: auto;
+  }
+  .pipeline-drilldown-list {
+    max-height: none;
+  }
   .case-map-location-panel-shell { max-height: 320px; }
 }
 
@@ -1091,7 +1091,15 @@ textarea { resize: vertical; }
   .metric-card {
     scroll-snap-align: start;
   }
-  .page-end-actions { padding: 0.85rem 0 0.2rem; }
+  .pipeline-drilldown-list {
+    grid-template-columns: 1fr;
+  }
+  .pipeline-pagination,
+  .pipeline-pagination-left,
+  .pipeline-pagination-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
   .case-map-location-panel {
     left: 10px;
     right: 10px;
