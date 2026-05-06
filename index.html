@@ -393,78 +393,58 @@
             <div id="datasetSubline" class="dataset-stat-grid"></div>
           </article>
         </section>
-        <div class="admin-grid admin-grid-top">
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Admin Control</p>
-                <h3>Approval and Sync</h3>
-              </div>
-              <span id="adminStatusChip" class="chip muted">Locked</span>
-            </div>
-            <p id="adminStatusText" class="helper-text">Admin approvals and GRE sync controls become available when an admin signs in.</p>
-            <p id="loginStatus" class="helper-text"></p>
-          </section>
-
-          <section class="panel panel-large">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Session</p>
-                <h3>Admin Snapshot</h3>
-              </div>
-            </div>
-            <div id="sessionPanel" class="stack-list hidden">
-              <article class="stack-card">
-                <div class="status-row">
-                  <span class="status-pill good">Signed in</span>
-                </div>
-                <p id="sessionStatus" class="helper-text">Admin session is active.</p>
-              </article>
-            </div>
-          </section>
-        </div>
-
         <div id="metricsGridAdmin" class="metrics-grid hidden"></div>
         <div class="admin-grid admin-grid-main">
-          <section class="panel panel-large">
+          <section class="panel admin-sync-panel">
             <div class="panel-head">
               <div>
                 <p class="eyebrow">Inbound Sync</p>
-                <h3>Inbound Intake</h3>
+                <h3>Inbound Intake and Need Intelligence</h3>
               </div>
             </div>
-            <div class="taxonomy-grid">
-              <label>
-                <span>Inbound Workbook</span>
-                <input id="inboundWorkbookFile" type="file" accept=".xlsx,.xls" />
-              </label>
-              <label>
-                <span>AI Engine</span>
-                <select id="aiProviderSelect">
-                  <option value="openrouter">OpenRouter</option>
-                  <option value="gemini">Gemini</option>
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="openai">OpenAI</option>
-                </select>
-              </label>
-              <button id="uploadInboundBtn" class="btn btn-primary">Upload and Sync</button>
-              <button id="syncGreInboundsBtn" class="btn btn-secondary">Sync Latest from GRE</button>
-              <button id="refreshAiBtn" class="btn btn-secondary">Refresh AI Signals</button>
+            <div class="admin-sync-stack">
+              <div class="admin-sync-block">
+                <label>
+                  <span>Inbound Workbook</span>
+                  <input id="inboundWorkbookFile" type="file" accept=".xlsx,.xls" />
+                </label>
+              </div>
+              <div class="admin-sync-block">
+                <label>
+                  <span>AI Engine</span>
+                  <select id="aiProviderSelect">
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="openai">OpenAI</option>
+                  </select>
+                </label>
+              </div>
+              <div class="admin-sync-actions">
+                <button id="uploadInboundBtn" class="btn btn-primary">Upload Workbook and Sync</button>
+                <button id="syncGreInboundsBtn" class="btn btn-secondary">Pull Latest Inbounds from GRE</button>
+                <button id="refreshAiBtn" class="btn btn-secondary">Refresh Need AI Signals</button>
+              </div>
             </div>
             <p id="syncStatus" class="helper-text"></p>
           </section>
 
-          <section class="panel">
+          <section class="panel admin-sync-panel">
             <div class="panel-head">
               <div>
                 <p class="eyebrow">GRE Chatbot Data</p>
                 <h3>Supplier and Solution Exports</h3>
               </div>
             </div>
-            <div class="taxonomy-grid">
-              <button id="syncGreChatbotBtn" class="btn btn-primary">Refresh Chatbot Dataset</button>
-              <button id="downloadGreTraderBtn" class="btn btn-secondary">Download Trader Data</button>
-              <button id="downloadGreSolutionBtn" class="btn btn-secondary">Download Solution Data</button>
+            <div class="admin-sync-stack">
+              <div class="admin-sync-block">
+                <p class="helper-text">Use these actions to refresh the supplier, solution, and offering exports that support GRE knowledge search and chatbot responses.</p>
+              </div>
+              <div class="admin-sync-actions">
+                <button id="syncGreChatbotBtn" class="btn btn-primary">Refresh Chatbot Dataset</button>
+                <button id="downloadGreTraderBtn" class="btn btn-secondary">Download Trader Data</button>
+                <button id="downloadGreSolutionBtn" class="btn btn-secondary">Download Solution Data</button>
+              </div>
             </div>
             <p id="chatbotSyncStatus" class="helper-text"></p>
           </section>

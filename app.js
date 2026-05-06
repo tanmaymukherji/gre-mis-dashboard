@@ -2977,10 +2977,11 @@ function renderUserManagement() {
               <span class="status-pill info">${esc(user.is_active ? "Active" : "Inactive")}</span>
             </div>
             <h4>${esc(user.full_name || user.first_name || user.username)}</h4>
-            <div class="detail-list">
+            <div class="detail-list user-detail-grid">
               <div><strong>Username:</strong> ${esc(user.username)}</div>
               <div><strong>Email:</strong> ${esc(user.email || "Not set")}</div>
               <div><strong>Phone:</strong> ${esc(user.phone || "Not set")}</div>
+              <div><strong>Role:</strong> ${esc(user.role || "Not set")}</div>
             </div>
             <div class="card-actions">
               ${user.role === "user" ? `<button class="btn btn-primary" data-action="promote-user" data-user-id="${esc(user.id)}">Promote to Curator</button>` : `<span class="helper-text">Already ${esc(user.role)}</span>`}

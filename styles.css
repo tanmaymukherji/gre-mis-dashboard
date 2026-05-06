@@ -936,33 +936,9 @@ textarea { resize: vertical; }
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.admin-grid-top {
-  grid-template-columns: 0.9fr 1.3fr;
-  align-items: start;
-}
-
 .admin-grid-main {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-}
-
-.admin-page .panel-large {
-  grid-column: span 2;
-}
-
-.admin-page .panel {
-  background: linear-gradient(180deg, #ffffff, #f7faf4);
-}
-
-.admin-page .stack-list {
-  max-height: 540px;
-  overflow: auto;
-  padding-right: 4px;
-}
-
-.admin-page .approval-card,
-.admin-page .stack-card {
-  background: linear-gradient(180deg, #ffffff, #f3f8ef);
 }
 
 .qa-suggestion-card {
@@ -1008,6 +984,28 @@ textarea { resize: vertical; }
   color: #7f2618;
   border: 1px solid #efc6be;
 }
+.admin-sync-panel {
+  min-height: 100%;
+}
+.admin-sync-stack {
+  display: grid;
+  gap: 14px;
+}
+.admin-sync-block {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff, #f7faf4);
+}
+.admin-sync-actions {
+  display: grid;
+  gap: 10px;
+}
+.user-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 14px;
+}
 .hidden { display: none !important; }
 
 .modal {
@@ -1031,6 +1029,9 @@ textarea { resize: vertical; }
   .admin-grid { grid-template-columns: 1fr 1fr; }
   .panel-large,
   .panel-wide { grid-column: span 2; }
+  .user-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .pipeline-drilldown-split { grid-template-columns: 1fr; }
   .pipeline-drilldown-sidebar {
     min-height: auto;
@@ -1110,6 +1111,9 @@ textarea { resize: vertical; }
     scroll-snap-type: x proximity;
   }
   .dataset-stat-grid {
+    grid-template-columns: 1fr;
+  }
+  .user-detail-grid {
     grid-template-columns: 1fr;
   }
   .metric-card {
