@@ -51,10 +51,16 @@
     <section id="appShell" class="app-shell hidden">
     <header class="masthead">
       <div class="masthead-topline">
-        <div class="hero-account-inline masthead-account-inline">
-          <span id="accountRoleChip" class="chip muted">User</span>
-          <strong id="accountName">GRE MIS User</strong>
-          <button type="button" id="userLogoutBtn" class="btn btn-secondary btn-compact">Sign Out</button>
+        <div class="masthead-account-panel">
+          <div class="hero-account-inline masthead-account-inline">
+            <span id="accountRoleChip" class="chip muted">User</span>
+            <strong id="accountName">GRE MIS User</strong>
+            <button type="button" id="userLogoutBtn" class="btn btn-secondary btn-compact">Sign Out</button>
+          </div>
+          <div class="masthead-control-row">
+            <button id="closedToggleBtn" class="btn btn-secondary btn-compact">Show Closed: Off</button>
+            <button id="refreshBtn" class="btn btn-secondary btn-compact">Refresh & Reset</button>
+          </div>
         </div>
       </div>
       <div class="brand-block">
@@ -67,16 +73,12 @@
       </div>
     </header>
 
-    <section class="hero-strip">
+    <section id="heroStrip" class="hero-strip">
       <article class="hero-summary">
         <p class="eyebrow">Live Dataset</p>
         <h2 id="datasetHeadline">Loading GRE inbound records…</h2>
         <div id="datasetSubline" class="dataset-stat-grid"></div>
       </article>
-      <div class="hero-actions">
-        <button id="closedToggleBtn" class="btn btn-secondary">Show Closed: Off</button>
-        <button id="refreshBtn" class="btn btn-secondary">Refresh & Reset</button>
-      </div>
     </section>
 
     <nav class="view-tabs">

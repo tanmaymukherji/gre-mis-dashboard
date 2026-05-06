@@ -179,6 +179,15 @@ body {
   justify-content: flex-end;
   padding: 18px 28px 0;
 }
+.masthead-account-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #ffffff, #f7faf4);
+  min-width: 360px;
+}
 .masthead-admin {
   grid-template-columns: 1.2fr 1fr;
 }
@@ -255,10 +264,6 @@ h2 { font-size: 1.35rem; }
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 14px;
-  border-radius: 18px;
-  border: 1px solid var(--line);
-  background: linear-gradient(180deg, #ffffff, #f7faf4);
 }
 .hero-account-copy {
   display: grid;
@@ -274,7 +279,13 @@ h2 { font-size: 1.35rem; }
 }
 .masthead-account-inline {
   gap: 10px;
-  padding: 8px 12px;
+  padding: 0;
+}
+.masthead-control-row {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 .btn-compact {
   padding: 8px 12px;
@@ -1065,8 +1076,19 @@ textarea { resize: vertical; }
   .access-actions { width: 100%; }
   .hero-account-inline,
   .account-settings-form { width: 100%; }
+  .masthead-account-panel {
+    min-width: 0;
+    width: 100%;
+  }
   .hero-account-inline {
     justify-content: space-between;
+  }
+  .masthead-control-row {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .masthead-control-row .btn {
+    flex: 1 1 0;
   }
   .masthead-topline {
     padding: 16px 16px 0;

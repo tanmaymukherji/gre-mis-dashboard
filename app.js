@@ -2995,7 +2995,7 @@ function renderAuthState() {
   const authGate = byId("authGate");
   const appShell = byId("appShell");
   const masthead = document.querySelector(".masthead");
-  const heroStrip = document.querySelector(".hero-strip");
+  const heroStrip = byId("heroStrip");
   const overviewTab = document.querySelector('.tab[data-view="overview"]');
   const operationsTab = document.querySelector('.tab[data-view="operations"]');
   const solutionTab = document.querySelector('.tab[data-view="solution"]');
@@ -3012,7 +3012,7 @@ function renderAuthState() {
   if (authGate) authGate.classList.toggle("hidden", showShell);
   if (appShell) appShell.classList.toggle("hidden", !showShell);
   masthead?.classList.toggle("hidden", sharedMode);
-  heroStrip?.classList.toggle("hidden", sharedMode);
+  heroStrip?.classList.toggle("hidden", sharedMode || !isAdminUser() || state.view !== "admin");
   overviewTab?.classList.toggle("hidden", sharedMode);
   operationsTab?.classList.toggle("hidden", sharedMode || !canAccessOperationsDesk());
   solutionTab?.classList.toggle("hidden", sharedMode && state.sharedFormMode !== "solution");
@@ -3085,8 +3085,7 @@ function switchView(nextView) {
     nextView = canAccessOperationsDesk() ? "operations" : "overview";
   }
   state.view = nextView;
-  document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.view === nextView));
-  document.querySelectorAll(".view").forEach((section) => section.classList.toggle("active", section.id === `${nextView}View`));
+  renderAuthState();
   if (nextView === "operations") {
     renderMatches();
   }
