@@ -1120,6 +1120,16 @@ textarea { resize: vertical; }
 .inline-select select {
   min-width: 190px;
 }
+.inline-input input {
+  min-width: 190px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+.activation-actions {
+  align-items: end;
+}
 .hidden { display: none !important; }
 
 .modal {

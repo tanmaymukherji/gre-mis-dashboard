@@ -31,10 +31,12 @@ const aiSchemaVersion = "gre-mis-need-intelligence.v1";
 const mapplsAccessToken = Deno.env.get("MAPPLS_ACCESS_TOKEN") ?? Deno.env.get("GRE_MIS_MAPPLS_ACCESS_TOKEN") ?? "";
 const greLoginBaseUrl = Deno.env.get("GRE_LOGIN_BASE_URL") ?? "https://login.platformcommons.org/gateway";
 const greCtldBaseUrl = Deno.env.get("GRE_CTLD_BASE_URL") ?? "https://login.platformcommons.org/ctld";
+const grePtldBaseUrl = Deno.env.get("GRE_PTLD_BASE_URL") ?? "https://login.platformcommons.org/ptld";
 const greSiteOrigin = Deno.env.get("GRE_SITE_ORIGIN") ?? "https://greenruraleconomy.in";
 const greMasterLogin = Deno.env.get("GRE_MASTER_LOGIN") ?? "";
 const greMasterTenant = Deno.env.get("GRE_MASTER_TENANT") ?? "green_rural_economy";
 const greMasterPassword = Deno.env.get("GRE_MASTER_PASSWORD") ?? "";
+const greTemporaryUserPassword = Deno.env.get("GRE_TEMP_USER_PASSWORD") ?? "gre@1234";
 const greMarketId = Deno.env.get("GRE_MARKET_ID") ?? "5";
 const greInboundReportName = Deno.env.get("GRE_INBOUND_REPORT_NAME") ?? "MARKIFY_GRE.REQUEST_DETAILS_REPORT";
 const greTraderReportName = Deno.env.get("GRE_TRADER_REPORT_NAME") ?? "MARKIFY_REPORT.MARKET_TRADER_BASIC_DETAILS";
@@ -397,6 +399,39 @@ async function callGreCtld(path: string, method = "POST", body: unknown = {}) {
   return data;
 }
 
+async function callGrePtld(path: string, method = "POST", body: unknown = {}) {
+  const sessionId = await loginToGre();
+  const payload = method === "POST" || method === "PUT" ? JSON.stringify(body) : undefined;
+  const response = await fetch(`${grePtldBaseUrl}${path}`, {
+    method,
+    headers: {
+      "x-sessionid": sessionId,
+      ...(payload ? { "Content-Type": "application/json" } : {}),
+      Accept: "application/json, text/plain, */*",
+      Origin: greSiteOrigin,
+      Referer: `${greSiteOrigin}/`,
+    },
+    body: payload,
+  });
+  const text = await response.text().catch(() => "");
+  let data: Record<string, unknown> | null = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+  }
+  if (!response.ok) {
+    throw new Error(data?.errorMessage || data?.message || data?.error?.message || `GRE PTLD ${method} failed for ${path}.`);
+  }
+  return {
+    data,
+    text,
+    headers: response.headers,
+  };
+}
+
 async function checkGreIdentity(loginName: string) {
   const normalized = requireString(loginName);
   if (!normalized) return "NOT_FOUND";
@@ -412,10 +447,22 @@ function getRoleCodeForMisRole(role: string) {
   return `role.${greMasterTenant}.user`;
 }
 
+function normalizePhoneLogin(value: unknown) {
+  return requireString(value).replace(/\D+/g, "");
+}
+
+function getUserNameParts(user: Record<string, unknown>) {
+  const fullName = requireString(user.full_name) || requireString(user.first_name) || requireString(user.username);
+  const pieces = fullName.split(/\s+/).filter(Boolean);
+  const firstName = requireString(user.first_name) || pieces[0] || "GRE";
+  const lastName = pieces.length > 1 ? pieces.slice(1).join(" ") : "User";
+  return { fullName: fullName || `${firstName} ${lastName}`.trim(), firstName, lastName };
+}
+
 function getGreLoginCandidates(user: Record<string, unknown>) {
   const candidates = [
     requireString(user.gre_login_name),
-    requireString(user.phone).replace(/\D+/g, ""),
+    normalizePhoneLogin(user.phone),
     requireString(user.email).toLowerCase(),
   ].filter(Boolean);
   return uniqueStrings(candidates);
@@ -473,6 +520,9 @@ function buildGreMappedPatch(user: Record<string, unknown>, profile: Record<stri
       ? `GRE account mapped and ${misRole} role verified.`
       : `GRE account mapped, but GRE roles are currently ${requireString(profile.RoleName) || "different from MIS"}.`,
     gre_synced_at: new Date().toISOString(),
+    gre_pending_role: null,
+    gre_activation_mod_key: null,
+    gre_activation_requested_at: null,
   };
   const email = requireString(profile.Email).toLowerCase();
   const phone = requireString(profile.Contact) || requireString(profile.Login);
@@ -493,6 +543,9 @@ async function updateUserGreSyncFields(
     gre_sync_status: string;
     gre_sync_message: string;
     gre_synced_at?: string | null;
+    gre_pending_role?: string | null;
+    gre_activation_mod_key?: string | null;
+    gre_activation_requested_at?: string | null;
   },
 ) {
   const { error } = await adminClient.from("gre_mis_users").update({
@@ -503,6 +556,19 @@ async function updateUserGreSyncFields(
 }
 
 async function resolveExistingGreUser(user: Record<string, unknown>): Promise<GreUserResolution> {
+  if (
+    requireString(user.gre_sync_status) === "awaiting_gre_activation" &&
+    requireString(user.gre_pending_role) &&
+    requireString(user.gre_activation_mod_key)
+  ) {
+    return {
+      status: "awaiting_gre_activation",
+      greUserId: parseNumber(user.gre_user_id, 0) || null,
+      greLoginName: requireString(user.gre_login_name) || normalizePhoneLogin(user.phone) || requireString(user.email).toLowerCase(),
+      message: requireString(user.gre_sync_message) || "GRE activation is pending OTP completion.",
+    };
+  }
+
   const storedGreUserId = Number(user.gre_user_id || 0);
   if (storedGreUserId > 0) {
     return {
@@ -550,6 +616,141 @@ async function resolveExistingGreUser(user: Record<string, unknown>): Promise<Gr
   };
 }
 
+function buildGreUserCreatePayload(user: Record<string, unknown>, targetRole: string) {
+  const loginName = normalizePhoneLogin(user.phone);
+  const email = requireString(user.email).toLowerCase();
+  const { firstName, lastName } = getUserNameParts(user);
+
+  if (loginName.length < 10) {
+    throw new Error("A valid phone number is required before this user can be created on GRE.");
+  }
+  if (!email) {
+    throw new Error("A valid email is required before this user can be created on GRE.");
+  }
+
+  return {
+    userDTO: {
+      firstName,
+      lastName,
+      login: loginName,
+    },
+    password: greTemporaryUserPassword,
+    userRoleCode: getRoleCodeForMisRole(targetRole),
+    functionName: "CREATE",
+    userAddressDTOList: [
+      {
+        primaryAddress: true,
+        address: {
+          line1: "Green Rural Economy",
+          village: "NA",
+          country: { id: 1 },
+          state: { id: 1 },
+          district: { id: 1 },
+        },
+      },
+    ],
+    userContactDTOList: [
+      {
+        primaryContact: true,
+        contact: {
+          contactType: { dataCode: "CONTACT_TYPE.MOBILE" },
+          contactValue: loginName,
+        },
+      },
+      {
+        primaryContact: false,
+        contact: {
+          contactType: { dataCode: "CONTACT_TYPE.MAIL" },
+          contactValue: email,
+        },
+      },
+    ],
+  };
+}
+
+function extractGreActivationModKey(payload: Record<string, unknown> | null, text: string, headers: Headers) {
+  const headerValue = requireString(headers.get("modKey") || headers.get("modkey"));
+  if (headerValue) return headerValue;
+  const payloadValue = requireString(payload?.modKey || payload?.modkey || payload?.data?.modKey || payload?.data?.modkey);
+  if (payloadValue) return payloadValue;
+  const textMatch = text.match(/"modKey"\s*:\s*"([^"]+)"/i) || text.match(/modKey[:=]\s*([A-Za-z0-9_-]+)/i);
+  return textMatch?.[1] || "";
+}
+
+function extractGreUserId(payload: Record<string, unknown> | null, text: string) {
+  const direct = parseNumber(payload?.userId || payload?.id || payload?.userDTO?.id || payload?.data?.userId || payload?.data?.id || payload?.data?.userDTO?.id, 0);
+  if (direct > 0) return direct;
+  const textMatch = text.match(/"userId"\s*:\s*(\d+)/i) || text.match(/"id"\s*:\s*(\d+)/i);
+  return textMatch ? Number(textMatch[1]) : 0;
+}
+
+async function createGreUserForRolePromotion(user: Record<string, unknown>, targetRole: string) {
+  const loginName = normalizePhoneLogin(user.phone);
+  const payload = buildGreUserCreatePayload(user, targetRole);
+  try {
+    const result = await callGrePtld("/api/workforce/userWrapper/v1", "POST", payload);
+    const modKey = extractGreActivationModKey(result.data, result.text, result.headers);
+    const greUserId = extractGreUserId(result.data, result.text);
+    return {
+      loginName,
+      greUserId: greUserId > 0 ? greUserId : null,
+      modKey: modKey || null,
+      message: requireString(result.data?.message || result.data?.successMessage || result.text || `GRE account created for ${loginName}.`),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/already exists/i.test(message)) {
+      return {
+        loginName,
+        greUserId: null,
+        modKey: null,
+        message,
+      };
+    }
+    throw error;
+  }
+}
+
+async function activateGreUserWithOtp(greUserId: number, otp: string, modKey: string) {
+  const sessionId = await loginToGre();
+  const response = await fetch(
+    `${greLoginBaseUrl}/commons-iam-service/api/v1/obo/activate-user?userId=${encodeURIComponent(String(greUserId))}`,
+    {
+      method: "POST",
+      headers: {
+        "x-sessionid": sessionId,
+        modKey,
+        otp,
+        tenantName: greMasterTenant,
+        Accept: "application/json, text/plain, */*",
+        Origin: greSiteOrigin,
+        Referer: `${greSiteOrigin}/`,
+      },
+      body: "{}",
+    },
+  );
+  const text = await response.text().catch(() => "");
+  if (!response.ok) {
+    let parsed: Record<string, unknown> | null = null;
+    if (text) {
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = { message: text };
+      }
+    }
+    throw new Error(parsed?.error?.message || parsed?.errorMessage || parsed?.message || "GRE OTP activation failed.");
+  }
+  return text;
+}
+
+async function activateInactiveGreUser(loginName: string) {
+  const { data } = await fetchGreJson(
+    `/commons-iam-service/api/v1/obo/activate-inactive-user?tenantName=${encodeURIComponent(greMasterTenant)}&userName=${encodeURIComponent(loginName)}`,
+  );
+  return data;
+}
+
 async function reconcileGreUserMappings(users: Record<string, unknown>[]) {
   const nextUsers: Record<string, unknown>[] = [];
   for (const user of users) {
@@ -560,9 +761,12 @@ async function reconcileGreUserMappings(users: Record<string, unknown>[]) {
         : {
           gre_user_id: resolution.greUserId,
           gre_login_name: resolution.greLoginName || null,
-          gre_sync_status: "mapped",
-          gre_sync_message: resolution.message,
+          gre_sync_status: "synced",
+          gre_sync_message: requireString(user.gre_sync_message) || "GRE mapping is stored and ready for role sync.",
           gre_synced_at: new Date().toISOString(),
+          gre_pending_role: null,
+          gre_activation_mod_key: null,
+          gre_activation_requested_at: null,
         };
       const needsUpdate =
         Number(user.gre_user_id || 0) !== Number(patch.gre_user_id || 0) ||
@@ -1724,7 +1928,7 @@ async function getAdminSnapshot() {
         .limit(60),
       adminClient
         .from("gre_mis_users")
-        .select("id, username, first_name, full_name, email, phone, role, is_active, must_change_password, last_login_at, created_at, gre_user_id, gre_login_name, gre_sync_status, gre_sync_message, gre_synced_at")
+        .select("id, username, first_name, full_name, email, phone, role, is_active, must_change_password, last_login_at, created_at, gre_user_id, gre_login_name, gre_sync_status, gre_sync_message, gre_synced_at, gre_pending_role, gre_activation_mod_key, gre_activation_requested_at")
         .order("role", { ascending: true })
         .order("first_name", { ascending: true }),
       adminClient
@@ -1874,13 +2078,75 @@ async function changePassword(userCtx: { user: Record<string, unknown> }, curren
   return { ok: true };
 }
 
+async function persistMisRoleState(user: Record<string, unknown>, targetRole: string, greUserId: number | null, greLoginName: string, syncMessage: string) {
+  const syncedAt = new Date().toISOString();
+  const { error: userUpdateError } = await adminClient
+    .from("gre_mis_users")
+    .update({
+      role: targetRole,
+      gre_user_id: greUserId,
+      gre_login_name: greLoginName || null,
+      gre_sync_status: "synced",
+      gre_sync_message: syncMessage,
+      gre_synced_at: syncedAt,
+      gre_pending_role: null,
+      gre_activation_mod_key: null,
+      gre_activation_requested_at: null,
+      updated_at: syncedAt,
+    })
+    .eq("id", requireString(user.id));
+  if (userUpdateError) throw new Error(userUpdateError.message);
+
+  if (targetRole === "curator") {
+    const { error: curatorError } = await adminClient.from("gre_mis_curators").upsert({
+      user_id: user.id,
+      display_name: user.full_name,
+      first_name: user.first_name,
+      email: requireString(user.email).toLowerCase(),
+      phone: user.phone,
+      is_active: true,
+      gre_sync_status: "synced",
+      gre_sync_message: "GRE curator role synced successfully.",
+      gre_synced_at: syncedAt,
+    }, { onConflict: "email" });
+    if (curatorError) throw new Error(curatorError.message);
+  } else {
+    const { error: curatorError } = await adminClient
+      .from("gre_mis_curators")
+      .update({
+        is_active: false,
+        gre_sync_status: "synced",
+        gre_sync_message: targetRole === "user"
+          ? "Curator access removed from GRE and MIS."
+          : `GRE curator role removed. Current GRE role is ${targetRole}.`,
+        gre_synced_at: syncedAt,
+      })
+      .eq("user_id", user.id);
+    if (curatorError) throw new Error(curatorError.message);
+  }
+
+  if (targetRole === "admin") {
+    const { error: adminError } = await adminClient.from("gre_mis_admins").upsert({
+      email: requireString(user.email).toLowerCase(),
+      display_name: user.full_name,
+    });
+    if (adminError) throw new Error(adminError.message);
+  } else {
+    const { error: adminError } = await adminClient
+      .from("gre_mis_admins")
+      .delete()
+      .eq("email", requireString(user.email).toLowerCase());
+    if (adminError) throw new Error(adminError.message);
+  }
+}
+
 async function updateUserRole(userId: string, targetRoleInput: string) {
   const targetRole = requireString(targetRoleInput).toLowerCase();
   if (!["user", "curator", "admin"].includes(targetRole)) throw new Error("Invalid role selected.");
 
   const { data: user, error } = await adminClient
     .from("gre_mis_users")
-    .select("id, username, first_name, full_name, email, phone, role, gre_user_id, gre_login_name")
+    .select("id, username, first_name, full_name, email, phone, role, gre_user_id, gre_login_name, gre_sync_status, gre_pending_role, gre_activation_mod_key")
     .eq("id", userId)
     .single();
   if (error || !user) throw new Error(error?.message || "User not found.");
@@ -1900,79 +2166,154 @@ async function updateUserRole(userId: string, targetRoleInput: string) {
     if (!count) throw new Error("At least one admin must remain active in MIS.");
   }
 
+  if (targetRole === "user" && user.role === "user") {
+    return { ok: true, status: "unchanged", role: targetRole, message: `${user.full_name || user.username} is already user.` };
+  }
+
   const greResolution = await resolveExistingGreUser(user);
-  if (greResolution.status !== "mapped" || !greResolution.greUserId) {
+  if (targetRole === "user" && (!greResolution.greUserId || greResolution.status !== "mapped")) {
+    const { error: localOnlyError } = await adminClient
+      .from("gre_mis_users")
+      .update({
+        role: "user",
+        gre_pending_role: null,
+        gre_activation_mod_key: null,
+        gre_activation_requested_at: null,
+        gre_sync_status: "local_only",
+        gre_sync_message: "MIS user role updated locally. No GRE sync was required.",
+        gre_synced_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", userId);
+    if (localOnlyError) throw new Error(localOnlyError.message);
+    await adminClient
+      .from("gre_mis_curators")
+      .update({
+        is_active: false,
+        gre_sync_status: "local_only",
+        gre_sync_message: "Curator access removed in MIS. No GRE account mapping was available.",
+        gre_synced_at: null,
+      })
+      .eq("user_id", userId);
+    await adminClient
+      .from("gre_mis_admins")
+      .delete()
+      .eq("email", requireString(user.email).toLowerCase());
+    return {
+      ok: true,
+      status: "local_only",
+      role: "user",
+      message: `${user.full_name || user.username} is now a MIS user only.`,
+    };
+  }
+
+  if ((targetRole === "curator" || targetRole === "admin") && (greResolution.status !== "mapped" || !greResolution.greUserId)) {
+    if (greResolution.status === "needs_gre_account_creation") {
+      const created = await createGreUserForRolePromotion(user, targetRole);
+      await fetchGreTenantUsers(true);
+      const refreshedResolution = await resolveExistingGreUser({
+        ...user,
+        gre_login_name: created.loginName || greResolution.greLoginName,
+      });
+      if (refreshedResolution.status === "mapped" && refreshedResolution.greUserId) {
+        await syncGreRoleAssignment(refreshedResolution.greUserId, targetRole);
+        await persistMisRoleState(
+          user,
+          targetRole,
+          refreshedResolution.greUserId,
+          refreshedResolution.greLoginName,
+          `GRE account created and synced as ${targetRole}.`,
+        );
+        return {
+          ok: true,
+          status: "synced",
+          role: targetRole,
+          greUserId: refreshedResolution.greUserId,
+          greLoginName: refreshedResolution.greLoginName,
+          message: `${user.full_name || user.username} was created on GRE and synced as ${targetRole}.`,
+        };
+      }
+
+      const identityState = await checkGreIdentity(created.loginName || greResolution.greLoginName || normalizePhoneLogin(user.phone));
+      if (identityState === "INACTIVE_USER" && !created.modKey) {
+        await activateInactiveGreUser(created.loginName || greResolution.greLoginName || normalizePhoneLogin(user.phone));
+        await fetchGreTenantUsers(true);
+        const activatedResolution = await resolveExistingGreUser({
+          ...user,
+          gre_login_name: created.loginName || greResolution.greLoginName,
+        });
+        if (activatedResolution.status === "mapped" && activatedResolution.greUserId) {
+          await syncGreRoleAssignment(activatedResolution.greUserId, targetRole);
+          await persistMisRoleState(
+            user,
+            targetRole,
+            activatedResolution.greUserId,
+            activatedResolution.greLoginName,
+            `GRE account activated and synced as ${targetRole}.`,
+          );
+          return {
+            ok: true,
+            status: "synced",
+            role: targetRole,
+            greUserId: activatedResolution.greUserId,
+            greLoginName: activatedResolution.greLoginName,
+            message: `${user.full_name || user.username} was activated on GRE and synced as ${targetRole}.`,
+          };
+        }
+      }
+
+      if (identityState === "INACTIVE_USER" || created.modKey) {
+        const activationUserId = created.greUserId || parseNumber(user.gre_user_id, 0) || null;
+        await updateUserGreSyncFields(userId, {
+          gre_user_id: activationUserId,
+          gre_login_name: created.loginName || greResolution.greLoginName || normalizePhoneLogin(user.phone) || null,
+          gre_sync_status: "awaiting_gre_activation",
+          gre_sync_message: "GRE account created. Enter the OTP received on the user's phone to complete activation.",
+          gre_synced_at: null,
+          gre_pending_role: targetRole,
+          gre_activation_mod_key: created.modKey,
+          gre_activation_requested_at: new Date().toISOString(),
+        });
+        return {
+          ok: true,
+          status: "awaiting_gre_activation",
+          role: user.role,
+          pendingRole: targetRole,
+          greUserId: activationUserId,
+          greLoginName: created.loginName || greResolution.greLoginName,
+          message: "GRE account created. OTP activation is pending.",
+        };
+      }
+    }
+
     await updateUserGreSyncFields(userId, {
       gre_user_id: null,
       gre_login_name: greResolution.greLoginName || null,
       gre_sync_status: greResolution.status,
       gre_sync_message: greResolution.message,
       gre_synced_at: null,
+      gre_pending_role: targetRole,
+      gre_activation_mod_key: null,
+      gre_activation_requested_at: null,
     });
     return {
       ok: true,
       status: greResolution.status,
       role: user.role,
+      pendingRole: targetRole,
       greLoginName: greResolution.greLoginName,
       message: greResolution.message,
     };
   }
 
   await syncGreRoleAssignment(greResolution.greUserId, targetRole);
-
-  const { error: userUpdateError } = await adminClient
-    .from("gre_mis_users")
-    .update({
-      role: targetRole,
-      gre_user_id: greResolution.greUserId,
-      gre_login_name: greResolution.greLoginName || null,
-      gre_sync_status: "synced",
-      gre_sync_message: `GRE role synced as ${targetRole}.`,
-      gre_synced_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", userId);
-  if (userUpdateError) throw new Error(userUpdateError.message);
-
-  if (targetRole === "curator") {
-    const { error: curatorError } = await adminClient.from("gre_mis_curators").upsert({
-      user_id: user.id,
-      display_name: user.full_name,
-      first_name: user.first_name,
-      email: requireString(user.email).toLowerCase(),
-      phone: user.phone,
-      is_active: true,
-      gre_sync_status: "synced",
-      gre_sync_message: "GRE curator role synced successfully.",
-      gre_synced_at: new Date().toISOString(),
-    }, { onConflict: "email" });
-    if (curatorError) throw new Error(curatorError.message);
-  } else {
-    const { error: curatorError } = await adminClient
-      .from("gre_mis_curators")
-      .update({
-        is_active: false,
-        gre_sync_status: "synced",
-        gre_sync_message: `GRE curator role removed. Current GRE role is ${targetRole}.`,
-        gre_synced_at: new Date().toISOString(),
-      })
-      .eq("user_id", user.id);
-    if (curatorError) throw new Error(curatorError.message);
-  }
-
-  if (targetRole === "admin") {
-    const { error: adminError } = await adminClient.from("gre_mis_admins").upsert({
-      email: requireString(user.email).toLowerCase(),
-      display_name: user.full_name,
-    });
-    if (adminError) throw new Error(adminError.message);
-  } else {
-    const { error: adminError } = await adminClient
-      .from("gre_mis_admins")
-      .delete()
-      .eq("email", requireString(user.email).toLowerCase());
-    if (adminError) throw new Error(adminError.message);
-  }
+  await persistMisRoleState(
+    user,
+    targetRole,
+    greResolution.greUserId,
+    greResolution.greLoginName,
+    `GRE role synced as ${targetRole}.`,
+  );
 
   return {
     ok: true,
@@ -1981,6 +2322,53 @@ async function updateUserRole(userId: string, targetRoleInput: string) {
     greUserId: greResolution.greUserId,
     greLoginName: greResolution.greLoginName,
     message: `${user.full_name || user.username} is now synced as ${targetRole} on MIS and GRE.`,
+  };
+}
+
+async function completeUserRoleActivation(userId: string, otpInput: string) {
+  const otp = requireString(otpInput);
+  if (!otp) throw new Error("OTP is required.");
+
+  const { data: user, error } = await adminClient
+    .from("gre_mis_users")
+    .select("id, username, first_name, full_name, email, phone, role, gre_user_id, gre_login_name, gre_pending_role, gre_activation_mod_key")
+    .eq("id", userId)
+    .single();
+  if (error || !user) throw new Error(error?.message || "User not found.");
+
+  const pendingRole = requireString(user.gre_pending_role).toLowerCase();
+  if (!["curator", "admin"].includes(pendingRole)) {
+    throw new Error("No pending GRE activation is currently stored for this user.");
+  }
+
+  const greUserId = parseNumber(user.gre_user_id, 0);
+  const modKey = requireString(user.gre_activation_mod_key);
+  if (!greUserId || !modKey) {
+    throw new Error("GRE activation details are incomplete. Please retry the role update.");
+  }
+
+  await activateGreUserWithOtp(greUserId, otp, modKey);
+  await fetchGreTenantUsers(true);
+  const resolution = await resolveExistingGreUser(user);
+  const resolvedGreUserId = resolution.greUserId || greUserId;
+  const resolvedGreLogin = resolution.greLoginName || requireString(user.gre_login_name) || normalizePhoneLogin(user.phone);
+
+  await syncGreRoleAssignment(resolvedGreUserId, pendingRole);
+  await persistMisRoleState(
+    user,
+    pendingRole,
+    resolvedGreUserId,
+    resolvedGreLogin,
+    `GRE account activated and synced as ${pendingRole}.`,
+  );
+
+  return {
+    ok: true,
+    status: "synced",
+    role: pendingRole,
+    greUserId: resolvedGreUserId,
+    greLoginName: resolvedGreLogin,
+    message: `${user.full_name || user.username} is now activated and synced as ${pendingRole} on GRE.`,
   };
 }
 
@@ -3299,6 +3687,11 @@ Deno.serve(async (req) => {
     if (action === "updateUserRole") {
       assertRoles(userCtx, ["admin"], "Admin login required.");
       return jsonResponse(await updateUserRole(requireString(payload.userId), requireString(payload.role)));
+    }
+
+    if (action === "completeUserRoleActivation") {
+      assertRoles(userCtx, ["admin"], "Admin login required.");
+      return jsonResponse(await completeUserRoleActivation(requireString(payload.userId), requireString(payload.otp)));
     }
 
     const adminCtx = await requireAdminSession(req, requireString(payload.adminSessionToken));

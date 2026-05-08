@@ -1734,6 +1734,10 @@ class GreMisStore {
     return this.callAdmin("updateUserRole", { userId, role }, true);
   }
 
+  async completeUserRoleActivation(userId, otp) {
+    return this.callAdmin("completeUserRoleActivation", { userId, otp }, true);
+  }
+
   async submitSharedForm(submissionType, payload) {
     return this.callAdmin("submitSharedForm", { submissionType, payload, sourceMode: "shared_link" });
   }
@@ -3076,6 +3080,7 @@ function renderUserManagement() {
               <span class="status-pill ${badgeTone(user.role)}">${esc(user.role)}</span>
               <span class="status-pill info">${esc(user.is_active ? "Active" : "Inactive")}</span>
               ${user.gre_sync_status ? `<span class="status-pill ${badgeTone(user.gre_sync_status)}">${esc(user.gre_sync_status.replaceAll("_", " "))}</span>` : ""}
+              ${user.gre_pending_role ? `<span class="status-pill warning">Pending ${esc(user.gre_pending_role)}</span>` : ""}
             </div>
             <h4>${esc(user.full_name || user.first_name || user.username)}</h4>
             <div class="detail-list user-detail-grid">
@@ -3090,6 +3095,14 @@ function renderUserManagement() {
               <div><strong>GRE Sync:</strong> ${esc(user.gre_sync_status ? user.gre_sync_status.replaceAll("_", " ") : "Not attempted")}</div>
               <div><strong>Synced At:</strong> ${esc(user.gre_synced_at ? formatDate(user.gre_synced_at) : "Not synced")}</div>
             </div>
+            ${user.gre_pending_role ? `
+              <div class="detail-list user-detail-grid user-sync-grid">
+                <div><strong>Pending GRE Role:</strong> ${esc(user.gre_pending_role)}</div>
+                <div><strong>Activation Requested:</strong> ${esc(user.gre_activation_requested_at ? formatDate(user.gre_activation_requested_at) : "Not started")}</div>
+                <div><strong>OTP Status:</strong> ${esc(user.gre_sync_status === "awaiting_gre_activation" ? "Awaiting OTP" : "Not required")}</div>
+                <div><strong>GRE Temp Password:</strong> ${esc(user.gre_pending_role ? "gre@1234" : "-")}</div>
+              </div>
+            ` : ""}
             ${user.gre_sync_message ? `<p class="helper-text">${esc(user.gre_sync_message)}</p>` : ""}
             <div class="card-actions">
               <label class="inline-select">
@@ -3100,6 +3113,15 @@ function renderUserManagement() {
               </label>
               <button class="btn btn-primary" data-action="update-user-role" data-user-id="${esc(user.id)}">Update Role</button>
             </div>
+            ${user.gre_sync_status === "awaiting_gre_activation" ? `
+              <div class="card-actions activation-actions">
+                <label class="inline-select inline-input">
+                  <span class="helper-text">Enter GRE OTP</span>
+                  <input type="text" maxlength="8" placeholder="Enter OTP" data-user-otp data-user-id="${esc(user.id)}" />
+                </label>
+                <button class="btn btn-secondary" data-action="complete-user-role-activation" data-user-id="${esc(user.id)}">Complete GRE Activation</button>
+              </div>
+            ` : ""}
           </article>
         `).join("")
       : `<div class="empty-state">No user records found.</div>`
@@ -3863,6 +3885,15 @@ function bindStaticEvents() {
       const result = await store.updateUserRole(userId, nextRole);
       await refreshAll();
       toast(result.message || "User role updated.");
+    }
+    if (button.dataset.action === "complete-user-role-activation") {
+      const userId = button.dataset.userId;
+      const card = button.closest(".approval-card");
+      const otpField = card?.querySelector("[data-user-otp]");
+      const otp = otpField?.value?.trim() || "";
+      const result = await store.completeUserRoleActivation(userId, otp);
+      await refreshAll();
+      toast(result.message || "GRE activation completed.");
     }
   }));
 
