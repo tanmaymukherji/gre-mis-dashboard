@@ -2362,7 +2362,7 @@ function renderQueue() {
             <span class="status-pill ${badgeTone(need.internal_status)}">${esc(need.internal_status)}</span>
           </div>
           <h4>${esc(need.organization_name)}</h4>
-          <p class="helper-text">${esc(need.problem_statement.slice(0, 155))}${need.problem_statement.length > 155 ? "..." : ""}</p>
+          <p class="helper-text">${esc(need.problem_statement.slice(0, 120))}${need.problem_statement.length > 120 ? "..." : ""}</p>
           <p class="meta-text">${esc(need.state)}${need.district ? ` / ${esc(need.district)}` : ""} • Curator: ${esc(curator?.display_name || "Unassigned")} • Age: ${esc(need.curation_age_days || 0)} days</p>
         </article>
       `;
@@ -2372,7 +2372,7 @@ function renderQueue() {
   if (state.queueNeedsScrollIntoView) {
     const activeCard = queue.querySelector(`[data-need-id="${CSS.escape(String(state.selectedNeedId || ""))}"]`);
     if (activeCard) {
-      activeCard.scrollIntoView({ block: "center", behavior: "smooth" });
+      activeCard.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
     }
     state.queueNeedsScrollIntoView = false;
   }
@@ -2398,7 +2398,7 @@ function renderNeedDetail() {
     { label: need.approval_status, tone: badgeTone(need.approval_status) },
   ];
   detailEl.innerHTML = `
-    <div class="need-detail-stack">
+    <div class="need-detail-stack selected-need-layout">
       <section class="need-overview-card">
       <div class="need-overview-head">
         <div>
@@ -2416,48 +2416,58 @@ function renderNeedDetail() {
       </div>
       </section>
 
-      <article class="detail-card detail-stack-card">
-        <div class="detail-card-subhead">
-          <h4>Seeker Details</h4>
-          <span class="status-pill info">${esc(formatDate(need.requested_on))}</span>
-        </div>
-        <div class="kv-grid">
-          <div><span>Contact Person</span><strong>${esc(need.contact_person || "Not set")}</strong></div>
-          <div><span>Email</span><strong>${esc(need.seeker_email || "Not set")}</strong></div>
-          <div><span>Phone</span><strong>${esc(need.seeker_phone || "Not set")}</strong></div>
-          <div><span>Website</span><strong>${esc(need.website || "Not set")}</strong></div>
-          <div><span>Designation</span><strong>${esc(need.designation || "Not set")}</strong></div>
-          <div><span>Requested On</span><strong>${esc(formatDate(need.requested_on))}</strong></div>
-        </div>
-      </article>
+      <div class="selected-need-grid">
+        <article class="detail-card detail-stack-card">
+          <div class="detail-card-subhead">
+            <h4>Seeker Details</h4>
+            <span class="status-pill info">${esc(formatDate(need.requested_on))}</span>
+          </div>
+          <div class="kv-grid">
+            <div><span>Contact Person</span><strong>${esc(need.contact_person || "Not set")}</strong></div>
+            <div><span>Email</span><strong>${esc(need.seeker_email || "Not set")}</strong></div>
+            <div><span>Phone</span><strong>${esc(need.seeker_phone || "Not set")}</strong></div>
+            <div><span>Website</span><strong>${esc(need.website || "Not set")}</strong></div>
+            <div><span>Designation</span><strong>${esc(need.designation || "Not set")}</strong></div>
+            <div><span>Requested On</span><strong>${esc(formatDate(need.requested_on))}</strong></div>
+          </div>
+        </article>
 
-      ${canInspectCuration
-        ? `<article class="detail-card detail-stack-card">
-            <h4>Curation Snapshot</h4>
-            <div class="kv-grid">
-              <div><span>Assigned Curator</span><strong>${esc(curator?.display_name || "Unassigned")}</strong></div>
-              <div><span>Next Action</span><strong>${esc(need.next_action || "Not set")}</strong></div>
-              <div><span>Curation Call</span><strong>${esc(need.curation_call_date || "Not set")}</strong></div>
-              <div><span>Broadcast Needed</span><strong>${need.demand_broadcast_needed ? "Yes" : "No"}</strong></div>
-              <div><span>Solutions Shared</span><strong>${esc(need.solutions_shared_count || 0)}</strong></div>
-              <div><span>Invited Providers</span><strong>${esc(need.invited_providers_count || 0)}</strong></div>
-            </div>
-          </article>`
-        : `<article class="detail-card detail-stack-card">
-            <h4>Curator Handling</h4>
-            <div class="kv-grid">
-              <div><span>Assigned Curator</span><strong>${esc(curator?.display_name || "Unassigned")}</strong></div>
-              <div><span>Curator Email</span><strong>${esc(curator?.email || "Not set")}</strong></div>
-              <div><span>Status</span><strong>${esc(need.status || "Not set")}</strong></div>
-              <div><span>Current Stage</span><strong>${esc(need.internal_status || "Not set")}</strong></div>
-            </div>
-            <p class="helper-text">Detailed curation notes and internal actioning are visible only to curators and admins.</p>
-          </article>`}
+        ${canInspectCuration
+          ? `<article class="detail-card detail-stack-card">
+              <h4>Curation Snapshot</h4>
+              <div class="kv-grid">
+                <div><span>Assigned Curator</span><strong>${esc(curator?.display_name || "Unassigned")}</strong></div>
+                <div><span>Curator Email</span><strong>${esc(curator?.email || "Not set")}</strong></div>
+                <div><span>Next Action</span><strong>${esc(need.next_action || "Not set")}</strong></div>
+                <div><span>Curation Call</span><strong>${esc(need.curation_call_date || "Not set")}</strong></div>
+                <div><span>Broadcast Needed</span><strong>${need.demand_broadcast_needed ? "Yes" : "No"}</strong></div>
+                <div><span>Solutions Shared</span><strong>${esc(need.solutions_shared_count || 0)}</strong></div>
+                <div><span>Invited Providers</span><strong>${esc(need.invited_providers_count || 0)}</strong></div>
+                <div><span>Current Stage</span><strong>${esc(need.internal_status || "Not set")}</strong></div>
+              </div>
+            </article>`
+          : `<article class="detail-card detail-stack-card">
+              <h4>Curator Handling</h4>
+              <div class="kv-grid">
+                <div><span>Assigned Curator</span><strong>${esc(curator?.display_name || "Unassigned")}</strong></div>
+                <div><span>Curator Email</span><strong>${esc(curator?.email || "Not set")}</strong></div>
+                <div><span>Status</span><strong>${esc(need.status || "Not set")}</strong></div>
+                <div><span>Current Stage</span><strong>${esc(need.internal_status || "Not set")}</strong></div>
+              </div>
+              <p class="helper-text">Detailed curation notes and internal actioning are visible only to curators and admins.</p>
+            </article>`}
 
-      <article class="detail-card detail-stack-card">
-        <h4>Categories</h4>
-        <div class="tag-row">${parseArray(need.curated_need).map((item) => `<span>${esc(item)}</span>`).join("") || `<span>Unclassified</span>`}</div>
-      </article>
+        <article class="detail-card detail-stack-card">
+          <h4>Categories and Signals</h4>
+          <div class="tag-row">${parseArray(need.curated_need).map((item) => `<span>${esc(item)}</span>`).join("") || `<span>Unclassified</span>`}</div>
+          <div class="kv-grid">
+            <div><span>State</span><strong>${esc(need.state || "Not set")}</strong></div>
+            <div><span>District</span><strong>${esc(need.district || "Not set")}</strong></div>
+            <div><span>Approval Status</span><strong>${esc(need.approval_status || "Not set")}</strong></div>
+            <div><span>Curation Age</span><strong>${esc(need.curation_age_days || 0)} days</strong></div>
+          </div>
+        </article>
+      </div>
 
       ${canInspectCuration
         ? `<article class="detail-card detail-stack-card">
@@ -2481,8 +2491,91 @@ function renderNeedDetail() {
           </article>`
         : ""}
 
+      <div class="selected-need-actions">
+        ${isLoggedIn() ? `<button type="button" id="openWorkbenchBtn" class="btn btn-secondary">Open Action Workbench</button>` : ""}
+      </div>
     </div>
   `;
+}
+
+function buildMatchDetailHtml(match) {
+  if (!match) return `<div class="empty-state">Match details are not available.</div>`;
+  const fullText = normalizeText(match.about_offering_text || match.solution?.about_solution_text || "No detailed offering summary is available yet.");
+  return `
+    <section class="need-overview-card">
+      <div class="need-overview-head">
+        <div>
+          <p class="eyebrow">${esc(match.offering_category || "GRE Offering")}</p>
+          <h3>${esc(match.offering_name || match.solution?.solution_name || "Unnamed match")}</h3>
+          <p class="helper-text">${esc(match.trader?.organisation_name || match.trader?.trader_name || "Provider not mapped")}</p>
+        </div>
+        <div class="status-row">
+          <span class="status-pill match-score-pill">${esc(`Relevance Score ${match.matchScore}`)}</span>
+          <span class="status-pill info">${esc((match.offeringKind || match.ai_offering_kind || match.offering_group || "Offering").toString())}</span>
+        </div>
+      </div>
+      <div class="tag-row">
+        ${parseArray(match.tags).map((tag) => `<span>${esc(tag)}</span>`).join("")}
+      </div>
+    </section>
+    <div class="selected-need-grid">
+      <article class="detail-card detail-stack-card">
+        <h4>Provider</h4>
+        <div class="kv-grid">
+          <div><span>Organisation</span><strong>${esc(match.trader?.organisation_name || match.trader?.trader_name || "Not set")}</strong></div>
+          <div><span>Email</span><strong>${esc(match.trader?.email || "Not set")}</strong></div>
+          <div><span>Website</span><strong>${esc(match.trader?.website || "Not set")}</strong></div>
+          <div><span>GRE Link</span><strong>${match.gre_link ? `<a href="${esc(match.gre_link)}" target="_blank" rel="noreferrer">Open on GRE</a>` : "Not available"}</strong></div>
+        </div>
+      </article>
+      <article class="detail-card detail-stack-card">
+        <h4>Offering Structure</h4>
+        <div class="kv-grid">
+          <div><span>Offering Group</span><strong>${esc(match.offering_group || "Not set")}</strong></div>
+          <div><span>Offering Type</span><strong>${esc(match.offering_type || "Not set")}</strong></div>
+          <div><span>Primary Application</span><strong>${esc(match.primary_application || "Not set")}</strong></div>
+          <div><span>Primary Value Chain</span><strong>${esc(match.primary_valuechain || "Not set")}</strong></div>
+        </div>
+      </article>
+      <article class="detail-card detail-stack-card">
+        <h4>Why It Matched</h4>
+        <div class="kv-grid">
+          <div><span>Reasons</span><strong>${esc((match.matchReasons || []).join(", ") || "Closest live GRE keyword overlap")}</strong></div>
+          <div><span>Geographies</span><strong>${esc(parseArray(match.geographies).join(", ") || "Not listed")}</strong></div>
+          <div><span>Solution</span><strong>${esc(match.solution?.solution_name || "Not mapped")}</strong></div>
+          <div><span>Application Area</span><strong>${esc(match.ai_application_area || "Not set")}</strong></div>
+        </div>
+      </article>
+    </div>
+    <article class="detail-card detail-stack-card">
+      <h4>Full Description</h4>
+      <p class="detail-note">${esc(fullText)}</p>
+    </article>
+  `;
+}
+
+function openMatchDetailDialog(match) {
+  const dialog = byId("matchDetailDialog");
+  const title = byId("matchDetailTitle");
+  const body = byId("matchDetailBody");
+  if (!dialog || !title || !body) return;
+  title.textContent = match?.offering_name || match?.solution?.solution_name || "Match Details";
+  body.innerHTML = buildMatchDetailHtml(match);
+  dialog.showModal();
+}
+
+function openMatchDetailPage(match) {
+  if (!match?.offering_id) return;
+  try {
+    sessionStorage.setItem(`gre-match-${match.offering_id}`, JSON.stringify(match));
+  } catch {}
+  window.open(`./offering-detail.html?offering_id=${encodeURIComponent(match.offering_id)}`, "_blank", "noopener");
+}
+
+function getCachedMatchByOfferingId(offeringId) {
+  const need = getNeedById(state.selectedNeedId);
+  const matches = state.matchCache.get(getNeedMatchCacheKey(need)) || [];
+  return matches.find((item) => String(item.offering_id) === String(offeringId)) || null;
 }
 
 async function renderMatches() {
@@ -2511,8 +2604,11 @@ async function renderMatches() {
     ? visibleMatches
         .map((match) => {
           const email = match.trader?.email || "";
+          const matchSummary = normalizeText(match.about_offering_text || match.solution?.about_solution_text || "");
+          const truncatedSummary = matchSummary.slice(0, 280);
+          const hasMore = matchSummary.length > 280;
           return `
-            <article class="match-card">
+            <article class="match-card ${match.matchScore >= 100 ? "match-score-high" : "match-score-medium"}">
               <div class="match-head">
                 <div>
                   <p class="eyebrow">${esc(match.offering_category || "GRE Offering")}</p>
@@ -2533,9 +2629,13 @@ async function renderMatches() {
                   <strong>${esc(match.matchReasons?.length ? match.matchReasons.join(", ") : "Closest live GRE keyword overlap")}</strong>
                 </div>
               </div>
-              <p>${esc((match.about_offering_text || match.solution?.about_solution_text || "").slice(0, 320))}${(match.about_offering_text || match.solution?.about_solution_text || "").length > 320 ? "..." : ""}</p>
+              <div class="match-copy">
+                <p>${esc(truncatedSummary)}${hasMore ? "..." : ""}</p>
+                ${hasMore ? `<button class="match-readmore" type="button" data-action="read-more-match" data-offering-id="${esc(match.offering_id)}">Read more</button>` : ""}
+              </div>
               <p class="meta-text">${esc(parseArray(match.geographies).slice(0, 3).join(", ") || "Geography not listed")}</p>
-              <div class="card-actions">
+              <div class="card-actions match-actions">
+                <button class="btn btn-secondary" type="button" data-action="view-match-details" data-offering-id="${esc(match.offering_id)}">View Details</button>
                 ${match.gre_link ? `<a class="btn btn-secondary" href="${esc(match.gre_link)}" target="_blank" rel="noreferrer">Open GRE Link</a>` : `<span></span>`}
                 ${window.APP_CONFIG?.ENABLE_EMAIL_ACTIONS && (isAdminUser() || isCuratorUser()) && email
                   ? `<button class="btn btn-primary" data-action="email-provider" data-provider-email="${esc(email)}">Email This Provider</button>`
@@ -3357,6 +3457,8 @@ function bindStaticEvents() {
   const missingOrgDialog = byId("missingOrgDialog");
   const registerDialog = byId("registerDialog");
   const passwordHelpDialog = byId("passwordHelpDialog");
+  const workbenchDialog = byId("workbenchDialog");
+  const matchDetailDialog = byId("matchDetailDialog");
   byId("newNeedBtn")?.addEventListener("click", () => dialog?.showModal());
   byId("closeNeedDialog")?.addEventListener("click", () => dialog?.close());
   byId("closeMissingOrgDialog")?.addEventListener("click", () => missingOrgDialog?.close());
@@ -3370,6 +3472,14 @@ function bindStaticEvents() {
     passwordHelpDialog?.showModal();
   });
   byId("closePasswordHelpDialog")?.addEventListener("click", () => passwordHelpDialog?.close());
+  byId("closeWorkbenchDialog")?.addEventListener("click", () => workbenchDialog?.close());
+  byId("closeMatchDetailDialog")?.addEventListener("click", () => matchDetailDialog?.close());
+  byId("queueScrollPrevBtn")?.addEventListener("click", () => {
+    byId("needsQueue")?.scrollBy({ left: -320, behavior: "smooth" });
+  });
+  byId("queueScrollNextBtn")?.addEventListener("click", () => {
+    byId("needsQueue")?.scrollBy({ left: 320, behavior: "smooth" });
+  });
 
   ["solution", "need"].forEach((kind) => {
     const selectId = kind === "solution" ? "solutionTraderSelect" : "needTraderSelect";
@@ -3654,6 +3764,12 @@ function bindStaticEvents() {
     }
   }));
 
+  byId("needDetail")?.addEventListener("click", (event) => {
+    const button = event.target.closest("#openWorkbenchBtn");
+    if (!button) return;
+    workbenchDialog?.showModal();
+  });
+
   byId("actionWorkbench")?.addEventListener("submit", safeAsync(async (event) => {
     if (event.target.id === "directUpdateForm") {
       event.preventDefault();
@@ -3758,14 +3874,26 @@ function bindStaticEvents() {
   }));
 
   byId("matchResults")?.addEventListener("click", safeAsync(async (event) => {
-    const button = event.target.closest("[data-action='email-provider']");
+    const button = event.target.closest("[data-action]");
     if (!button) return;
-    if (!(isAdminUser() || isCuratorUser())) {
-      toast("Login as curator or admin to send provider outreach from the GRE mailbox.");
+    const match = getCachedMatchByOfferingId(button.dataset.offeringId);
+
+    if (button.dataset.action === "read-more-match") {
+      openMatchDetailDialog(match);
       return;
     }
-    const result = await store.sendProviderIntro(state.selectedNeedId, button.dataset.providerEmail);
-    toast(result.message || "Provider outreach email triggered.");
+    if (button.dataset.action === "view-match-details") {
+      openMatchDetailPage(match || { offering_id: button.dataset.offeringId });
+      return;
+    }
+    if (button.dataset.action === "email-provider") {
+      if (!(isAdminUser() || isCuratorUser())) {
+        toast("Login as curator or admin to send provider outreach from the GRE mailbox.");
+        return;
+      }
+      const result = await store.sendProviderIntro(state.selectedNeedId, button.dataset.providerEmail);
+      toast(result.message || "Provider outreach email triggered.");
+    }
   }));
 }
 

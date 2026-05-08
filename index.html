@@ -6,8 +6,8 @@
   <title>GRE MIS Dashboard</title>
   <link rel="icon" href="data:," />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./config.js?v=20260506d"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260506d" />
+  <script src="./config.js?v=20260508a"></script>
+  <link rel="stylesheet" href="./styles.css?v=20260508a" />
 </head>
 <body>
   <div class="shell">
@@ -138,36 +138,49 @@
       </section>
 
       <section id="operationsView" class="view">
-        <div class="operations-grid">
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Filters</p>
-                <h3>Need Queue</h3>
+        <div class="operations-stack">
+          <section class="panel operations-filter-panel">
+            <div class="operations-filter-layout">
+              <div class="operations-filter-sidebar">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">Filters</p>
+                    <h3>Need Queue</h3>
+                  </div>
+                </div>
+                <div class="filters-grid operations-filters-grid">
+                  <label>
+                    <span>Status</span>
+                    <select id="statusFilter"></select>
+                  </label>
+                  <label>
+                    <span>Curator</span>
+                    <select id="curatorFilter"></select>
+                  </label>
+                  <label>
+                    <span>State</span>
+                    <select id="stateFilter"></select>
+                  </label>
+                  <label>
+                    <span>Search</span>
+                    <input id="searchFilter" type="search" placeholder="Search organisation, challenge, category" />
+                  </label>
+                </div>
+              </div>
+              <div class="operations-queue-stage">
+                <div class="operations-queue-head">
+                  <p class="helper-text">Visible needs update live with these filters and can be scrolled left or right.</p>
+                  <div class="operations-queue-actions">
+                    <button id="queueScrollPrevBtn" class="btn btn-secondary btn-compact" type="button">←</button>
+                    <button id="queueScrollNextBtn" class="btn btn-secondary btn-compact" type="button">→</button>
+                  </div>
+                </div>
+                <div id="needsQueue" class="queue-rail"></div>
               </div>
             </div>
-            <div class="filters-grid">
-              <label>
-                <span>Status</span>
-                <select id="statusFilter"></select>
-              </label>
-              <label>
-                <span>Curator</span>
-                <select id="curatorFilter"></select>
-              </label>
-              <label>
-                <span>State</span>
-                <select id="stateFilter"></select>
-              </label>
-              <label>
-                <span>Search</span>
-                <input id="searchFilter" type="search" placeholder="Search organisation, challenge, category" />
-              </label>
-            </div>
-            <div id="needsQueue" class="queue-list"></div>
           </section>
 
-          <section class="panel panel-detail">
+          <section class="panel panel-detail operations-detail-panel">
             <div class="panel-head">
               <div>
                 <p class="eyebrow">Selected Need</p>
@@ -175,16 +188,6 @@
               </div>
             </div>
             <div id="needDetail" class="empty-state">Choose a need from the queue to inspect the current status, notes, problem statement, and next actions.</div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Action Workbench</p>
-                <h3>Curator and Admin Actions</h3>
-              </div>
-            </div>
-            <div id="actionWorkbench" class="stack-list"></div>
           </section>
 
           <section class="panel panel-wide">
@@ -619,6 +622,32 @@
     </div>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260506d"></script>
+  <dialog id="workbenchDialog" class="modal">
+    <article class="panel modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Action Workbench</p>
+          <h3>Curator and Admin Actions</h3>
+        </div>
+        <button type="button" id="closeWorkbenchDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div id="actionWorkbench" class="stack-list"></div>
+    </article>
+  </dialog>
+
+  <dialog id="matchDetailDialog" class="modal">
+    <article class="panel modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">GRE Knowledge Match</p>
+          <h3 id="matchDetailTitle">Match Details</h3>
+        </div>
+        <button type="button" id="closeMatchDetailDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div id="matchDetailBody" class="need-detail-stack"></div>
+    </article>
+  </dialog>
+
+  <script type="module" src="./app.js?v=20260508a"></script>
 </body>
 </html>
