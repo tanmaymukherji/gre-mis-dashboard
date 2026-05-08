@@ -2389,7 +2389,7 @@ function renderNeedDetail() {
 
   const curator = getCuratorById(need.curator_id);
   const solutionLinks = extractUrls(need.curation_notes);
-  const noteText = stripUrls(need.curation_notes);
+  const noteText = normalizeText(stripUrls(need.curation_notes)).replace(/\bnull\b/gi, "").replace(/\s+/g, " ").trim();
   const canInspectCuration = canSeeCurationDetails();
   const summaryBadges = [
     { label: need.status, tone: badgeTone(need.status) },
