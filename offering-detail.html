@@ -6,33 +6,174 @@
   <title>GRE Offering Detail</title>
   <link rel="icon" href="data:," />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./config.js?v=20260508a"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260508a" />
+  <script src="./config.js?v=20260508c"></script>
+  <style>
+    :root {
+      --bg: #f4f7f1;
+      --panel: #ffffff;
+      --ink: #1f2b1f;
+      --muted: #5e6d5e;
+      --line: rgba(45, 85, 54, 0.14);
+      --green: #2e6a3c;
+      --green-soft: rgba(46, 106, 60, 0.12);
+      --shadow: 0 18px 40px rgba(28, 62, 36, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f7fbf4, #eef4ea);
+      color: var(--ink);
+    }
+    .page-shell {
+      width: min(1280px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 48px;
+    }
+    .hero,
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .hero {
+      padding: 24px 28px;
+    }
+    .detail-hero-top,
+    .page-bottom-actions,
+    .actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .detail-hero-top {
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .hero h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 3vw, 2.75rem);
+      line-height: 1.08;
+    }
+    .hero-copy,
+    .section-copy,
+    .notice {
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 1rem;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+      gap: 22px;
+      margin-top: 24px;
+      align-items: start;
+    }
+    .stack {
+      display: grid;
+      gap: 22px;
+    }
+    .panel-pad {
+      padding: 24px 26px;
+    }
+    .section-title {
+      margin: 0 0 8px;
+      font-size: 1.24rem;
+    }
+    .detail-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+    }
+    .detail-table th,
+    .detail-table td {
+      text-align: left;
+      vertical-align: top;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .detail-table th {
+      width: 34%;
+      color: var(--muted);
+      font-size: 0.84rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding-right: 18px;
+    }
+    .detail-table td {
+      font-size: 0.98rem;
+      line-height: 1.55;
+    }
+    .detail-table tr:last-child th,
+    .detail-table tr:last-child td {
+      border-bottom: none;
+    }
+    .btn,
+    .result-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 44px;
+      padding: 0 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(46, 106, 60, 0.18);
+      background: #fff;
+      color: var(--green);
+      text-decoration: none;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn.hero-link {
+      color: var(--ink);
+    }
+    .result-link {
+      min-height: auto;
+      padding: 8px 12px;
+    }
+    .page-bottom-actions {
+      margin-top: 22px;
+      justify-content: flex-start;
+    }
+    .empty {
+      min-height: 280px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      color: var(--muted);
+    }
+    @media (max-width: 920px) {
+      .page-shell {
+        width: min(100vw - 20px, 1280px);
+        padding: 16px 0 30px;
+      }
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+      .detail-hero-top {
+        justify-content: flex-start;
+      }
+      .detail-table th,
+      .detail-table td {
+        display: block;
+        width: 100%;
+      }
+      .detail-table th {
+        padding-bottom: 4px;
+        border-bottom: none;
+      }
+      .detail-table td {
+        padding-top: 0;
+      }
+    }
+  </style>
 </head>
 <body>
-  <div class="shell">
-    <header class="masthead">
-      <div class="brand-block">
-        <img src="./assets/gre-logo.png" alt="GRE logo" class="brand-logo" />
-        <div class="brand-copy">
-          <p class="eyebrow">GRE Knowledge Match</p>
-          <h1>Offering Detail</h1>
-          <p class="lede">Detailed provider, solution, and offering view for the selected GRE match.</p>
-        </div>
-      </div>
-      <div class="masthead-account-panel">
-        <div class="hero-account-inline masthead-account-inline">
-          <button type="button" class="btn btn-secondary btn-compact" onclick="window.close()">Close Tab</button>
-        </div>
-      </div>
-    </header>
-
-    <main>
-      <section class="panel panel-detail">
-        <div id="offeringDetailMount" class="empty-state">Loading offering details…</div>
-      </section>
-    </main>
-  </div>
+  <main class="page-shell">
+    <div id="offeringDetailMount" class="hero empty">Loading offering details…</div>
+  </main>
 
   <script type="module">
     const APP_CONFIG = window.APP_CONFIG || {};
@@ -51,73 +192,76 @@
     const normalizeText = (value) => value === null || value === undefined ? "" : String(value).trim();
     const parseArray = (value) => Array.isArray(value) ? value.filter(Boolean) : typeof value === "string" ? value.split(/[;,|]/).map((item) => item.trim()).filter(Boolean) : [];
 
+    function buildRow(label, value, isLink = false) {
+      const clean = Array.isArray(value) ? value.join(", ") : normalizeText(value);
+      if (!clean) return "";
+      return `<tr><th>${esc(label)}</th><td>${isLink ? `<a class="result-link" href="${esc(clean)}" target="_blank" rel="noreferrer">Open link</a>` : esc(clean)}</td></tr>`;
+    }
+
     function renderDetail(match) {
-      const description = normalizeText(match.about_offering_text || match.solution?.about_solution_text || "No detailed description is available yet.");
+      const offeringName = normalizeText(match.offering_name || match.solution?.solution_name || "Unnamed offering");
+      const providerName = normalizeText(match.trader?.organisation_name || match.trader?.trader_name || "Provider not mapped");
+      const heroCopy = normalizeText(match.about_offering_text || match.solution?.about_solution_text || "No description is available for this offering yet.");
+      const solutionText = normalizeText(match.solution?.about_solution_text || match.about_offering_text || "No additional solution description is available.");
+      const greHref = normalizeText(match.gre_link || "");
+      const offeringRows = [
+        buildRow("Offering Category", match.offering_category),
+        buildRow("Offering Group", match.offering_group || match.ai_offering_kind),
+        buildRow("Offering Type", match.offering_type),
+        buildRow("6M Domain", match.domain_6m),
+        buildRow("Primary Value Chain", match.primary_valuechain),
+        buildRow("Primary Application", match.primary_application),
+        buildRow("All Value Chains", parseArray(match.valuechains)),
+        buildRow("All Applications", parseArray(match.applications)),
+        buildRow("Tags", parseArray(match.tags)),
+        buildRow("Audience", match.audience),
+        buildRow("Grade or Capacity", match.grade_or_capacity || match.capacity),
+        buildRow("Product Cost", match.product_cost || match.cost),
+        buildRow("Lead Time", match.lead_time),
+        buildRow("Support Details", match.support_details || match.contact_details),
+        buildRow("Product Brochure", match.product_brochure || match.brochure_link || match.document_link, true),
+      ].filter(Boolean).join("");
+
+      const providerRows = [
+        buildRow("Solution Name", match.solution?.solution_name || offeringName),
+        buildRow("Provider", providerName),
+        buildRow("Association Status", match.trader?.association_status),
+        buildRow("Email", match.trader?.email),
+        buildRow("Website", match.trader?.website, true),
+        buildRow("Phone", match.trader?.phone || match.contact_details),
+        buildRow("Point of Contact", match.point_of_contact || match.contact_person),
+        buildRow("Tagline", match.tagline),
+      ].filter(Boolean).join("");
+
+      mount.className = "";
       mount.innerHTML = `
-        <div class="need-detail-stack selected-need-layout">
-          <section class="need-overview-card">
-            <div class="need-overview-head">
-              <div>
-                <p class="eyebrow">${esc(match.offering_category || "GRE Offering")}</p>
-                <h3>${esc(match.offering_name || match.solution?.solution_name || "Unnamed offering")}</h3>
-                <p class="helper-text">${esc(match.trader?.organisation_name || match.trader?.trader_name || "Provider not mapped")}</p>
-              </div>
-              <div class="status-row">
-                <span class="status-pill info">${esc(match.offering_group || "Offering")}</span>
-                <span class="status-pill match-score-pill">${esc(match.ai_offering_kind || "Structured GRE Detail")}</span>
-              </div>
-            </div>
-            <div class="tag-row">
-              ${parseArray(match.tags).map((tag) => `<span>${esc(tag)}</span>`).join("")}
-            </div>
-          </section>
-
-          <div class="selected-need-grid">
-            <article class="detail-card detail-stack-card">
-              <h4>Provider</h4>
-              <div class="kv-grid">
-                <div><span>Organisation</span><strong>${esc(match.trader?.organisation_name || match.trader?.trader_name || "Not set")}</strong></div>
-                <div><span>Email</span><strong>${esc(match.trader?.email || "Not set")}</strong></div>
-                <div><span>Website</span><strong>${esc(match.trader?.website || "Not set")}</strong></div>
-                <div><span>GRE Link</span><strong>${match.gre_link ? `<a href="${esc(match.gre_link)}" target="_blank" rel="noreferrer">Open on GRE</a>` : "Not available"}</strong></div>
-              </div>
-            </article>
-
-            <article class="detail-card detail-stack-card">
-              <h4>Offering Structure</h4>
-              <div class="kv-grid">
-                <div><span>Offering Group</span><strong>${esc(match.offering_group || "Not set")}</strong></div>
-                <div><span>Offering Type</span><strong>${esc(match.offering_type || "Not set")}</strong></div>
-                <div><span>Primary Application</span><strong>${esc(match.primary_application || "Not set")}</strong></div>
-                <div><span>Primary Value Chain</span><strong>${esc(match.primary_valuechain || "Not set")}</strong></div>
-                <div><span>Application Area</span><strong>${esc(match.ai_application_area || "Not set")}</strong></div>
-                <div><span>Offering Kind</span><strong>${esc(match.ai_offering_kind || "Not set")}</strong></div>
-              </div>
-            </article>
-
-            <article class="detail-card detail-stack-card">
-              <h4>Coverage</h4>
-              <div class="kv-grid">
-                <div><span>Geographies</span><strong>${esc(parseArray(match.geographies).join(", ") || "Not listed")}</strong></div>
-                <div><span>Applications</span><strong>${esc(parseArray(match.applications).join(", ") || "Not listed")}</strong></div>
-                <div><span>Value Chains</span><strong>${esc(parseArray(match.valuechains).join(", ") || "Not listed")}</strong></div>
-                <div><span>6M</span><strong>${esc(match.domain_6m || "Not listed")}</strong></div>
-              </div>
-            </article>
+        <section class="hero">
+          <div class="detail-hero-top">
+            <a class="btn hero-link" href="./">Back to Search</a>
+            ${greHref ? `<a class="btn hero-link" href="${esc(greHref)}" target="_blank" rel="noreferrer">View on GRE</a>` : ""}
           </div>
-
-          <article class="detail-card detail-stack-card">
-            <h4>Solution Context</h4>
-            <div class="kv-grid">
-              <div><span>Solution Name</span><strong>${esc(match.solution?.solution_name || "Not mapped")}</strong></div>
-              <div><span>Contact Details</span><strong>${esc(match.contact_details || "Not listed")}</strong></div>
-            </div>
-          </article>
-
-          <article class="detail-card detail-stack-card">
-            <h4>Full Description</h4>
-            <p class="detail-note">${esc(description)}</p>
-          </article>
+          <h1>${esc(offeringName)}</h1>
+          <p class="hero-copy">${esc(heroCopy)}</p>
+        </section>
+        <section class="detail-grid">
+          <section class="panel panel-pad">
+            <h2 class="section-title">Offering Details</h2>
+            <p class="section-copy">Only the parameters relevant to this offering are shown below.</p>
+            <table class="detail-table"><tbody>${offeringRows || `<tr><th>Offering Details</th><td>Not available</td></tr>`}</tbody></table>
+          </section>
+          <section class="stack">
+            <section class="panel panel-pad">
+              <h2 class="section-title">Provider and Solution</h2>
+              <table class="detail-table"><tbody>${providerRows || `<tr><th>Provider and Solution</th><td>Not available</td></tr>`}</tbody></table>
+              <div style="margin-top:18px">
+                <h3 class="section-title">About the Solution</h3>
+                <p class="section-copy" style="margin-bottom:0">${esc(solutionText)}</p>
+              </div>
+            </section>
+          </section>
+        </section>
+        <div class="page-bottom-actions">
+          <a class="btn hero-link" href="./">Back to Search</a>
         </div>
       `;
     }
@@ -127,14 +271,13 @@
         throw new Error("Supabase is not configured.");
       }
       const client = window.supabase.createClient(APP_CONFIG.SUPABASE_URL, APP_CONFIG.SUPABASE_ANON_KEY);
-      const offeringSelect = "offering_id,solution_id,trader_id,offering_name,offering_category,offering_group,offering_type,primary_application,primary_valuechain,applications,valuechains,domain_6m,tags,geographies,about_offering_text,contact_details,gre_link,ai_thematic_area,ai_application_area,ai_offering_kind,ai_service_kind,ai_keywords";
-      const { data: offering, error } = await client.from("offerings").select(offeringSelect).eq("offering_id", offeringId).maybeSingle();
+      const { data: offering, error } = await client.from("offerings").select("*").eq("offering_id", offeringId).maybeSingle();
       if (error) throw new Error(error.message);
       if (!offering) throw new Error("Offering not found.");
 
       const [traderRes, solutionRes] = await Promise.all([
-        offering.trader_id ? client.from("traders").select("trader_id,trader_name,organisation_name,email,website").eq("trader_id", offering.trader_id).maybeSingle() : Promise.resolve({ data: null }),
-        offering.solution_id ? client.from("solutions").select("solution_id,solution_name,about_solution_text").eq("solution_id", offering.solution_id).maybeSingle() : Promise.resolve({ data: null }),
+        offering.trader_id ? client.from("traders").select("*").eq("trader_id", offering.trader_id).maybeSingle() : Promise.resolve({ data: null }),
+        offering.solution_id ? client.from("solutions").select("*").eq("solution_id", offering.solution_id).maybeSingle() : Promise.resolve({ data: null }),
       ]);
 
       return {
@@ -146,9 +289,11 @@
 
     async function init() {
       if (!offeringId) {
-        mount.innerHTML = `<div class="empty-state">No offering id was provided.</div>`;
+        mount.className = "hero empty";
+        mount.textContent = "No offering id was provided.";
         return;
       }
+
       try {
         const cached = sessionStorage.getItem(`gre-match-${offeringId}`);
         if (cached) {
@@ -161,7 +306,8 @@
         const match = await loadFromSupabase();
         renderDetail(match);
       } catch (error) {
-        mount.innerHTML = `<div class="empty-state">${esc(error.message || "Could not load offering details.")}</div>`;
+        mount.className = "hero empty";
+        mount.textContent = error.message || "Could not load offering details.";
       }
     }
 

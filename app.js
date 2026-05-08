@@ -2492,7 +2492,7 @@ function renderNeedDetail() {
         : ""}
 
       <div class="selected-need-actions">
-        ${isLoggedIn() ? `<button type="button" id="openWorkbenchBtn" class="btn btn-secondary">Open Action Workbench</button>` : ""}
+        ${isLoggedIn() ? `<button type="button" id="openWorkbenchBtn" class="btn btn-primary">Open Action Workbench</button>` : ""}
       </div>
     </div>
   `;

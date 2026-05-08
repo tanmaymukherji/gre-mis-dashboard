@@ -743,13 +743,13 @@ h2 { font-size: 1.35rem; }
   gap: 12px;
   overflow-x: auto;
   overflow-y: hidden;
-  min-height: 212px;
-  max-height: 212px;
-  padding: 2px 4px 8px 2px;
+  min-height: 228px;
+  max-height: 228px;
+  padding: 6px 6px 14px 2px;
   scroll-behavior: smooth;
 }
 .queue-rail .queue-item {
-  height: 194px;
+  height: 202px;
   align-content: start;
 }
 .panel-detail { min-height: 0; }
@@ -816,6 +816,9 @@ textarea { resize: vertical; }
   display: flex;
   justify-content: center;
   margin-top: 4px;
+}
+.selected-need-actions .btn {
+  min-width: 220px;
 }
 .need-overview-card {
   display: grid;
