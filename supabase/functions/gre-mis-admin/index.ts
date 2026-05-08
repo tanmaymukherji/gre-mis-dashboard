@@ -324,6 +324,15 @@ function normalizeComparable(value: unknown) {
 }
 
 const greRefDataCache = new Map<string, Record<string, unknown>[]>();
+let greTenantUsersCache: Record<string, unknown>[] | null = null;
+
+type GreUserResolution = {
+  status: string;
+  greUserId: number | null;
+  greLoginName: string;
+  message: string;
+  profile?: Record<string, unknown> | null;
+};
 
 async function fetchGreJson(path: string) {
   const sessionId = await loginToGre();
@@ -340,6 +349,23 @@ async function fetchGreJson(path: string) {
     throw new Error(data?.error?.message || data?.message || `GRE request failed for ${path}.`);
   }
   return { sessionId, data };
+}
+
+async function fetchGreTenantUsers(forceRefresh = false) {
+  if (!forceRefresh && greTenantUsersCache) return greTenantUsersCache;
+  const { data: countData } = await fetchGreJson(
+    `/commons-report-service/api/v1/datasets/name/GET_USER_LIST_MARKIFY_COUNT/execute?params=${encodeURIComponent("ROLECODE=-1")}`,
+  );
+  const totalCount = Math.max(
+    parseNumber((Array.isArray(countData) ? countData[0]?.totalCount : countData?.totalCount) ?? 0, 0),
+    25,
+  );
+  const params = `ROLECODE=-1--SORT_BY=u.id--SORT_ORDER=desc--LIMIT_OFFSET=0--LIMIT_ROW_COUNT=${Math.min(totalCount + 10, 500)}`;
+  const { data } = await fetchGreJson(
+    `/commons-report-service/api/v1/datasets/name/GET_USER_LIST_MARKIFY/execute?params=${encodeURIComponent(params)}`,
+  );
+  greTenantUsersCache = Array.isArray(data) ? data as Record<string, unknown>[] : [];
+  return greTenantUsersCache;
 }
 
 async function callGreCtld(path: string, method = "POST", body: unknown = {}) {
@@ -395,6 +421,70 @@ function getGreLoginCandidates(user: Record<string, unknown>) {
   return uniqueStrings(candidates);
 }
 
+function getGreDirectoryMatchScore(user: Record<string, unknown>, profile: Record<string, unknown>, candidates: string[]) {
+  let score = 0;
+  const expectedRoleCode = getRoleCodeForMisRole(requireString(user.role).toLowerCase() || "user");
+  const profileLogin = requireString(profile.Login).replace(/\D+/g, "");
+  const profileContact = requireString(profile.Contact).replace(/\D+/g, "");
+  const profileEmail = requireString(profile.Email).toLowerCase();
+  const profileName = normalizeComparable(profile.UserName || profile.firstName || "");
+  const profileRoles = requireString(profile.Code);
+
+  for (const candidate of candidates) {
+    const normalizedCandidate = candidate.toLowerCase();
+    if (normalizedCandidate && normalizedCandidate === profileEmail) score += 6;
+    if (candidate.replace(/\D+/g, "") && candidate.replace(/\D+/g, "") === profileLogin) score += 7;
+    if (candidate.replace(/\D+/g, "") && candidate.replace(/\D+/g, "") === profileContact) score += 5;
+  }
+
+  const fullName = normalizeComparable(user.full_name || user.first_name || user.username || "");
+  if (fullName && fullName === profileName) score += 3;
+  if (profileRoles.includes(expectedRoleCode)) score += 4;
+  return score;
+}
+
+function findGreDirectoryProfile(user: Record<string, unknown>, profiles: Record<string, unknown>[]) {
+  const candidates = getGreLoginCandidates(user);
+  let best: Record<string, unknown> | null = null;
+  let bestScore = 0;
+  for (const profile of profiles) {
+    const score = getGreDirectoryMatchScore(user, profile, candidates);
+    if (score > bestScore) {
+      best = profile;
+      bestScore = score;
+    }
+  }
+  return bestScore >= 6 ? best : null;
+}
+
+function buildGreMappedPatch(user: Record<string, unknown>, profile: Record<string, unknown>) {
+  const misRole = requireString(user.role).toLowerCase() || "user";
+  const expectedRoleCode = getRoleCodeForMisRole(misRole);
+  const roleCodes = requireString(profile.Code)
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const roleMatches = roleCodes.includes(expectedRoleCode);
+  const patch: Record<string, unknown> = {
+    gre_user_id: parseNumber(profile.id, 0) || null,
+    gre_login_name: requireString(profile.Login) || requireString(profile.Contact) || requireString(user.gre_login_name) || null,
+    gre_sync_status: roleMatches ? "synced" : "mapped_role_mismatch",
+    gre_sync_message: roleMatches
+      ? `GRE account mapped and ${misRole} role verified.`
+      : `GRE account mapped, but GRE roles are currently ${requireString(profile.RoleName) || "different from MIS"}.`,
+    gre_synced_at: new Date().toISOString(),
+  };
+  const email = requireString(profile.Email).toLowerCase();
+  const phone = requireString(profile.Contact) || requireString(profile.Login);
+  const firstName = requireString(profile.firstName);
+  const fullName = requireString(profile.UserName) || firstName;
+  if (email) patch.email = email;
+  if (phone) patch.phone = phone;
+  if (firstName) patch.first_name = firstName;
+  if (fullName) patch.full_name = fullName;
+  return patch;
+}
+
 async function updateUserGreSyncFields(
   userId: string,
   patch: {
@@ -412,7 +502,7 @@ async function updateUserGreSyncFields(
   if (error) throw new Error(error.message);
 }
 
-async function resolveExistingGreUser(user: Record<string, unknown>) {
+async function resolveExistingGreUser(user: Record<string, unknown>): Promise<GreUserResolution> {
   const storedGreUserId = Number(user.gre_user_id || 0);
   if (storedGreUserId > 0) {
     return {
@@ -421,6 +511,22 @@ async function resolveExistingGreUser(user: Record<string, unknown>) {
       greLoginName: requireString(user.gre_login_name) || requireString(user.phone).replace(/\D+/g, "") || requireString(user.email).toLowerCase(),
       message: "Using stored GRE user mapping.",
     };
+  }
+
+  const directoryProfiles = await fetchGreTenantUsers();
+  const directoryProfile = findGreDirectoryProfile(user, directoryProfiles);
+  if (directoryProfile) {
+    const greUserId = parseNumber(directoryProfile.id, 0);
+    const greLoginName = requireString(directoryProfile.Login) || requireString(directoryProfile.Contact) || getGreLoginCandidates(user)[0] || "";
+    if (greUserId > 0) {
+      return {
+        status: "mapped",
+        greUserId,
+        greLoginName,
+        profile: directoryProfile,
+        message: `Resolved GRE user mapping for ${greLoginName}.`,
+      };
+    }
   }
 
   const candidates = getGreLoginCandidates(user);
@@ -442,6 +548,63 @@ async function resolveExistingGreUser(user: Record<string, unknown>) {
     greLoginName: candidates[0] || "",
     message: "No existing GRE user could be resolved for this MIS user. GRE account creation is still pending.",
   };
+}
+
+async function reconcileGreUserMappings(users: Record<string, unknown>[]) {
+  const nextUsers: Record<string, unknown>[] = [];
+  for (const user of users) {
+    const resolution = await resolveExistingGreUser(user);
+    if (resolution.status === "mapped" && resolution.greUserId) {
+      const patch = resolution.profile
+        ? buildGreMappedPatch(user, resolution.profile as Record<string, unknown>)
+        : {
+          gre_user_id: resolution.greUserId,
+          gre_login_name: resolution.greLoginName || null,
+          gre_sync_status: "mapped",
+          gre_sync_message: resolution.message,
+          gre_synced_at: new Date().toISOString(),
+        };
+      const needsUpdate =
+        Number(user.gre_user_id || 0) !== Number(patch.gre_user_id || 0) ||
+        requireString(user.gre_login_name) !== requireString(patch.gre_login_name) ||
+        requireString(user.gre_sync_status) !== requireString(patch.gre_sync_status) ||
+        (patch.email && requireString(user.email).toLowerCase() !== requireString(patch.email).toLowerCase()) ||
+        (patch.phone && requireString(user.phone) !== requireString(patch.phone)) ||
+        (patch.full_name && requireString(user.full_name) !== requireString(patch.full_name)) ||
+        (patch.first_name && requireString(user.first_name) !== requireString(patch.first_name));
+      if (needsUpdate) {
+        const { error } = await adminClient.from("gre_mis_users").update({
+          ...patch,
+          updated_at: new Date().toISOString(),
+        }).eq("id", requireString(user.id));
+        if (error) throw new Error(error.message);
+      }
+      nextUsers.push({
+        ...user,
+        ...patch,
+      });
+      continue;
+    }
+
+    if (resolution.status !== requireString(user.gre_sync_status)) {
+      await updateUserGreSyncFields(requireString(user.id), {
+        gre_user_id: null,
+        gre_login_name: resolution.greLoginName || null,
+        gre_sync_status: resolution.status,
+        gre_sync_message: resolution.message,
+        gre_synced_at: null,
+      });
+    }
+    nextUsers.push({
+      ...user,
+      gre_user_id: null,
+      gre_login_name: resolution.greLoginName || null,
+      gre_sync_status: resolution.status,
+      gre_sync_message: resolution.message,
+      gre_synced_at: null,
+    });
+  }
+  return nextUsers;
 }
 
 async function addGreRole(greUserId: number, roleCode: string) {
@@ -1576,13 +1739,14 @@ async function getAdminSnapshot() {
   if (aiReviewNeeds.error) throw new Error(aiReviewNeeds.error.message);
   if (users.error) throw new Error(users.error.message);
   if (pendingFormSubmissions.error) throw new Error(pendingFormSubmissions.error.message);
+  const reconciledUsers = await reconcileGreUserMappings((users.data || []) as Record<string, unknown>[]);
 
   return {
     ok: true,
     pendingNeeds: pendingNeeds.data || [],
     pendingUpdates: pendingUpdates.data || [],
     aiReviewNeeds: aiReviewNeeds.data || [],
-    users: users.data || [],
+    users: reconciledUsers,
     pendingFormSubmissions: pendingFormSubmissions.data || [],
   };
 }
