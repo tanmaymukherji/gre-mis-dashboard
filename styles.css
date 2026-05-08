@@ -724,33 +724,27 @@ h2 { font-size: 1.35rem; }
   gap: 12px;
   min-width: 0;
 }
-.operations-queue-head {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  align-items: center;
-}
-.operations-queue-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-shrink: 0;
-}
 .queue-rail {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(260px, 300px);
-  gap: 12px;
+  gap: 14px;
   overflow-x: auto;
   overflow-y: hidden;
   min-height: 228px;
   max-height: 228px;
-  padding: 6px 6px 14px 2px;
+  padding: 8px 14px 16px 6px;
+  margin: 2px 2px 0;
+  border-radius: 18px;
+  background: rgba(245, 249, 242, 0.7);
   scroll-behavior: smooth;
 }
 .queue-rail .queue-item {
-  height: 202px;
+  height: 194px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   align-content: start;
+  overflow: hidden;
 }
 .panel-detail { min-height: 0; }
 .operations-detail-panel { min-height: 0; }
@@ -783,6 +777,14 @@ textarea { resize: vertical; }
 .queue-item h4,
 .stack-card h4,
 .match-card h4 { margin: 10px 0 6px; font-size: 1rem; }
+.queue-rail .queue-item .helper-text {
+  margin: 0;
+  overflow: hidden;
+}
+.queue-rail .queue-item .meta-text {
+  margin: 8px 0 0;
+  align-self: end;
+}
 .empty-state {
   min-height: 280px;
   display: flex;

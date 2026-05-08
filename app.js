@@ -3474,13 +3474,6 @@ function bindStaticEvents() {
   byId("closePasswordHelpDialog")?.addEventListener("click", () => passwordHelpDialog?.close());
   byId("closeWorkbenchDialog")?.addEventListener("click", () => workbenchDialog?.close());
   byId("closeMatchDetailDialog")?.addEventListener("click", () => matchDetailDialog?.close());
-  byId("queueScrollPrevBtn")?.addEventListener("click", () => {
-    byId("needsQueue")?.scrollBy({ left: -320, behavior: "smooth" });
-  });
-  byId("queueScrollNextBtn")?.addEventListener("click", () => {
-    byId("needsQueue")?.scrollBy({ left: 320, behavior: "smooth" });
-  });
-
   ["solution", "need"].forEach((kind) => {
     const selectId = kind === "solution" ? "solutionTraderSelect" : "needTraderSelect";
     const orgInputId = kind === "solution" ? "solutionOrgName" : "needOrgName";
