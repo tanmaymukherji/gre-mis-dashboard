@@ -2218,6 +2218,102 @@ async function changePassword(userCtx: { user: Record<string, unknown> }, curren
   return { ok: true };
 }
 
+async function syncCanonicalCuratorRowForUser(user: Record<string, unknown>, syncMessage: string) {
+  const syncedAt = new Date().toISOString();
+  const email = requireString(user.email).toLowerCase();
+  const userId = requireString(user.id);
+  const fullName = requireString(user.full_name) || requireString(user.first_name) || requireString(user.username);
+  const firstName = requireString(user.first_name) || fullName.split(" ")[0] || fullName;
+
+  const { data: curatorRows, error: curatorFetchError } = await adminClient
+    .from("gre_mis_curators")
+    .select("id, user_id, email, display_name, is_active, created_at, updated_at")
+    .or(`user_id.eq.${userId},email.eq.${email}`);
+  if (curatorFetchError) throw new Error(curatorFetchError.message);
+
+  const rows = Array.isArray(curatorRows) ? curatorRows : [];
+  const rowIds = rows.map((row) => requireString(row.id)).filter(Boolean);
+  const needCounts = new Map<string, number>();
+
+  if (rowIds.length) {
+    const { data: linkedNeeds, error: needLinkError } = await adminClient
+      .from("gre_mis_needs")
+      .select("curator_id")
+      .in("curator_id", rowIds);
+    if (needLinkError) throw new Error(needLinkError.message);
+    for (const linkedNeed of linkedNeeds || []) {
+      const curatorId = requireString(linkedNeed.curator_id);
+      if (!curatorId) continue;
+      needCounts.set(curatorId, (needCounts.get(curatorId) || 0) + 1);
+    }
+  }
+
+  const rankedRows = [...rows].sort((left, right) => {
+    const leftCount = needCounts.get(requireString(left.id)) || 0;
+    const rightCount = needCounts.get(requireString(right.id)) || 0;
+    if (leftCount !== rightCount) return rightCount - leftCount;
+    return new Date(requireString(left.created_at) || 0).getTime() - new Date(requireString(right.created_at) || 0).getTime();
+  });
+
+  const preferredRow = rankedRows[0] || null;
+  const duplicateIds = rankedRows
+    .slice(1)
+    .map((row) => requireString(row.id))
+    .filter(Boolean);
+
+  if (duplicateIds.length) {
+    const { error: duplicateError } = await adminClient
+      .from("gre_mis_curators")
+      .update({
+        is_active: false,
+        gre_sync_status: "synced",
+        gre_sync_message: "Duplicate curator row archived during GRE sync reconciliation.",
+        gre_synced_at: syncedAt,
+        updated_at: syncedAt,
+      })
+      .in("id", duplicateIds);
+    if (duplicateError) throw new Error(duplicateError.message);
+  }
+
+  if (preferredRow) {
+    const { error: updateError } = await adminClient
+      .from("gre_mis_curators")
+      .update({
+        user_id: userId,
+        display_name: fullName,
+        first_name: firstName,
+        email,
+        phone: user.phone,
+        is_active: true,
+        gre_sync_status: "synced",
+        gre_sync_message: syncMessage,
+        gre_synced_at: syncedAt,
+        updated_at: syncedAt,
+      })
+      .eq("id", requireString(preferredRow.id));
+    if (updateError) throw new Error(updateError.message);
+    return requireString(preferredRow.id);
+  }
+
+  const { data: insertedRow, error: insertError } = await adminClient
+    .from("gre_mis_curators")
+    .insert({
+      user_id: userId,
+      display_name: fullName,
+      first_name: firstName,
+      email,
+      phone: user.phone,
+      is_active: true,
+      gre_sync_status: "synced",
+      gre_sync_message: syncMessage,
+      gre_synced_at: syncedAt,
+    })
+    .select("id")
+    .single();
+  if (insertError) throw new Error(insertError.message);
+  return requireString(insertedRow?.id);
+}
+
 async function persistMisRoleState(user: Record<string, unknown>, targetRole: string, greUserId: number | null, greLoginName: string, syncMessage: string) {
   const syncedAt = new Date().toISOString();
   const { error: userUpdateError } = await adminClient
@@ -2238,18 +2334,7 @@ async function persistMisRoleState(user: Record<string, unknown>, targetRole: st
   if (userUpdateError) throw new Error(userUpdateError.message);
 
   if (targetRole === "curator") {
-    const { error: curatorError } = await adminClient.from("gre_mis_curators").upsert({
-      user_id: user.id,
-      display_name: user.full_name,
-      first_name: user.first_name,
-      email: requireString(user.email).toLowerCase(),
-      phone: user.phone,
-      is_active: true,
-      gre_sync_status: "synced",
-      gre_sync_message: "GRE curator role synced successfully.",
-      gre_synced_at: syncedAt,
-    }, { onConflict: "email" });
-    if (curatorError) throw new Error(curatorError.message);
+    await syncCanonicalCuratorRowForUser(user, "GRE curator role synced successfully.");
   } else {
     const { error: curatorError } = await adminClient
       .from("gre_mis_curators")
@@ -2284,18 +2369,7 @@ async function syncRoleArtifactsForUser(user: Record<string, unknown>, nextRole:
   const syncedAt = new Date().toISOString();
   const email = requireString(user.email).toLowerCase();
   if (nextRole === "curator") {
-    const { error: curatorError } = await adminClient.from("gre_mis_curators").upsert({
-      user_id: user.id,
-      display_name: user.full_name,
-      first_name: user.first_name,
-      email,
-      phone: user.phone,
-      is_active: true,
-      gre_sync_status: "synced",
-      gre_sync_message: syncMessage,
-      gre_synced_at: syncedAt,
-    }, { onConflict: "email" });
-    if (curatorError) throw new Error(curatorError.message);
+    await syncCanonicalCuratorRowForUser(user, syncMessage);
   } else {
     const { error: curatorError } = await adminClient
       .from("gre_mis_curators")
