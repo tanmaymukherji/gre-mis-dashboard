@@ -885,11 +885,12 @@ function buildGreWorkforceDeactivationPayload(profile: Record<string, unknown>) 
   const userDTO = (profile.userDTO || {}) as Record<string, unknown>;
   const person = (userDTO.person || {}) as Record<string, unknown>;
   const personProfile = (person.personProfile || {}) as Record<string, unknown>;
-  const mobileContact = ensureList(person.personContacts).find((entry) => {
+  const personContacts = Array.isArray(person.personContacts) ? person.personContacts : [];
+  const mobileContact = personContacts.find((entry) => {
     const contact = (entry?.contact || {}) as Record<string, unknown>;
     return requireString((contact.contactType || {})?.dataCode).toUpperCase() === "CONTACT_TYPE.MOBILE";
   }) as Record<string, unknown> | undefined;
-  const mailContact = ensureList(person.personContacts).find((entry) => {
+  const mailContact = personContacts.find((entry) => {
     const contact = (entry?.contact || {}) as Record<string, unknown>;
     return requireString((contact.contactType || {})?.dataCode).toUpperCase() === "CONTACT_TYPE.MAIL";
   }) as Record<string, unknown> | undefined;
