@@ -545,6 +545,16 @@ function getMisRoleFromGreProfile(profile: Record<string, unknown>) {
   return "user";
 }
 
+function getGreRoleSetFromProfile(profile: Record<string, unknown>) {
+  const codes = requireString(profile.Code).toLowerCase();
+  const roleName = requireString(profile.RoleName).toLowerCase();
+  const roles = new Set<string>();
+  if (codes.includes(`role.${greMasterTenant}.admin`) || /\badmin\b/.test(roleName)) roles.add("admin");
+  if (codes.includes(`role.${greMasterTenant}.curator`) || /\bcurator\b/.test(roleName)) roles.add("curator");
+  if (codes.includes(`role.${greMasterTenant}.user`) || /\buser\b/.test(roleName) || roles.size === 0) roles.add("user");
+  return roles;
+}
+
 async function updateUserGreSyncFields(
   userId: string,
   patch: {
@@ -806,12 +816,13 @@ async function reconcileGreUserMappings(users: Record<string, unknown>[]) {
         }).eq("id", requireString(user.id));
         if (error) throw new Error(error.message);
       }
-      nextUsers.push({
-        ...user,
-        ...patch,
-      });
-      continue;
-    }
+        nextUsers.push({
+          ...user,
+          ...patch,
+          __gre_roles: resolution.profile ? [...getGreRoleSetFromProfile(resolution.profile as Record<string, unknown>)].join(",") : "",
+        });
+        continue;
+      }
 
     if (resolution.status !== requireString(user.gre_sync_status)) {
       await updateUserGreSyncFields(requireString(user.id), {
@@ -2086,7 +2097,21 @@ async function refreshUserDirectory() {
   await fetchGreTenantUsers(true);
   const reconciledUsers = await reconcileGreUserMappings((users || []) as Record<string, unknown>[]);
   for (const refreshedUser of reconciledUsers) {
-    await syncRoleArtifactsForUser(refreshedUser, requireString(refreshedUser.role).toLowerCase() || "user", requireString(refreshedUser.gre_sync_message) || "Role refreshed from GRE.");
+    const primaryRole = requireString(refreshedUser.role).toLowerCase() || "user";
+    const greRoles = requireString((refreshedUser as Record<string, unknown>).__gre_roles)
+      .split(",")
+      .map((role) => role.trim().toLowerCase())
+      .filter(Boolean);
+    const syncMessage = requireString(refreshedUser.gre_sync_message) || "Role refreshed from GRE.";
+    await syncRoleArtifactsForUser(refreshedUser, primaryRole, syncMessage);
+    if (primaryRole !== "curator" && greRoles.includes("curator")) {
+      await syncCanonicalCuratorRowForUser(
+        refreshedUser,
+        greRoles.includes("admin")
+          ? "GRE refresh confirmed combined admin and curator access; curator allocations kept active."
+          : syncMessage,
+      );
+    }
   }
   return {
     ok: true,
