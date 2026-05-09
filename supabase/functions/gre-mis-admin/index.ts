@@ -506,6 +506,7 @@ function findGreDirectoryProfile(user: Record<string, unknown>, profiles: Record
 
 function buildGreMappedPatch(user: Record<string, unknown>, profile: Record<string, unknown>) {
   const misRole = requireString(user.role).toLowerCase() || "user";
+  const liveRole = getMisRoleFromGreProfile(profile);
   const expectedRoleCode = getRoleCodeForMisRole(misRole);
   const roleCodes = requireString(profile.Code)
     .split(",")
@@ -513,12 +514,13 @@ function buildGreMappedPatch(user: Record<string, unknown>, profile: Record<stri
     .filter(Boolean);
   const roleMatches = roleCodes.includes(expectedRoleCode);
   const patch: Record<string, unknown> = {
+    role: liveRole,
     gre_user_id: parseNumber(profile.id, 0) || null,
     gre_login_name: requireString(profile.Login) || requireString(profile.Contact) || requireString(user.gre_login_name) || null,
-    gre_sync_status: roleMatches ? "synced" : "mapped_role_mismatch",
-    gre_sync_message: roleMatches
+    gre_sync_status: roleMatches && liveRole === misRole ? "synced" : "mapped_role_mismatch",
+    gre_sync_message: roleMatches && liveRole === misRole
       ? `GRE account mapped and ${misRole} role verified.`
-      : `GRE account mapped, but GRE roles are currently ${requireString(profile.RoleName) || "different from MIS"}.`,
+      : `GRE account mapped, and MIS role has been refreshed to ${liveRole}. GRE roles are currently ${requireString(profile.RoleName) || liveRole || "different from MIS"}.`,
     gre_synced_at: new Date().toISOString(),
     gre_pending_role: null,
     gre_activation_mod_key: null,
@@ -533,6 +535,14 @@ function buildGreMappedPatch(user: Record<string, unknown>, profile: Record<stri
   if (firstName) patch.first_name = firstName;
   if (fullName) patch.full_name = fullName;
   return patch;
+}
+
+function getMisRoleFromGreProfile(profile: Record<string, unknown>) {
+  const codes = requireString(profile.Code).toLowerCase();
+  const roleName = requireString(profile.RoleName).toLowerCase();
+  if (codes.includes(`role.${greMasterTenant}.admin`) || /\badmin\b/.test(roleName)) return "admin";
+  if (codes.includes(`role.${greMasterTenant}.curator`) || /\bcurator\b/.test(roleName)) return "curator";
+  return "user";
 }
 
 async function updateUserGreSyncFields(
@@ -1990,6 +2000,9 @@ async function refreshUserDirectory() {
   if (error) throw new Error(error.message);
   await fetchGreTenantUsers(true);
   const reconciledUsers = await reconcileGreUserMappings((users || []) as Record<string, unknown>[]);
+  for (const refreshedUser of reconciledUsers) {
+    await syncRoleArtifactsForUser(refreshedUser, requireString(refreshedUser.role).toLowerCase() || "user", requireString(refreshedUser.gre_sync_message) || "Role refreshed from GRE.");
+  }
   return {
     ok: true,
     users: reconciledUsers,
@@ -2178,6 +2191,50 @@ async function persistMisRoleState(user: Record<string, unknown>, targetRole: st
       .from("gre_mis_admins")
       .delete()
       .eq("email", requireString(user.email).toLowerCase());
+    if (adminError) throw new Error(adminError.message);
+  }
+}
+
+async function syncRoleArtifactsForUser(user: Record<string, unknown>, nextRole: string, syncMessage: string) {
+  const syncedAt = new Date().toISOString();
+  const email = requireString(user.email).toLowerCase();
+  if (nextRole === "curator") {
+    const { error: curatorError } = await adminClient.from("gre_mis_curators").upsert({
+      user_id: user.id,
+      display_name: user.full_name,
+      first_name: user.first_name,
+      email,
+      phone: user.phone,
+      is_active: true,
+      gre_sync_status: "synced",
+      gre_sync_message: syncMessage,
+      gre_synced_at: syncedAt,
+    }, { onConflict: "email" });
+    if (curatorError) throw new Error(curatorError.message);
+  } else {
+    const { error: curatorError } = await adminClient
+      .from("gre_mis_curators")
+      .update({
+        is_active: false,
+        gre_sync_status: "synced",
+        gre_sync_message: syncMessage,
+        gre_synced_at: syncedAt,
+      })
+      .or(`user_id.eq.${requireString(user.id)},email.eq.${email}`);
+    if (curatorError) throw new Error(curatorError.message);
+  }
+
+  if (nextRole === "admin") {
+    const { error: adminError } = await adminClient.from("gre_mis_admins").upsert({
+      email,
+      display_name: user.full_name,
+    });
+    if (adminError) throw new Error(adminError.message);
+  } else {
+    const { error: adminError } = await adminClient
+      .from("gre_mis_admins")
+      .delete()
+      .eq("email", email);
     if (adminError) throw new Error(adminError.message);
   }
 }
