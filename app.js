@@ -1744,8 +1744,8 @@ class GreMisStore {
     return this.callAdmin("completeUserRoleActivation", { userId, otp }, true);
   }
 
-  async removeManagedUser(userId) {
-    return this.callAdmin("removeManagedUser", { userId }, true);
+  async removeManagedUser(userId, removalMode = "org_only") {
+    return this.callAdmin("removeManagedUser", { userId, removalMode }, true);
   }
 
   async submitSharedForm(submissionType, payload) {
@@ -3122,7 +3122,7 @@ function renderUserManagement() {
                 </select>
               </label>
               <button class="btn btn-primary" data-action="update-user-role" data-user-id="${esc(user.id)}">Update Role</button>
-              <button class="btn btn-secondary" data-action="remove-user" data-user-id="${esc(user.id)}">Remove User</button>
+              <button class="btn btn-secondary" data-action="remove-user" data-user-id="${esc(user.id)}">Remove User...</button>
             </div>
             ${user.gre_sync_status === "awaiting_gre_activation" ? `
               <div class="card-actions activation-actions">
@@ -3137,6 +3137,19 @@ function renderUserManagement() {
         `).join("")
       : `<div class="empty-state">No user records found.</div>`
     : `<div class="empty-state">Login as admin to manage users.</div>`;
+}
+
+function chooseUserRemovalMode(name) {
+  const choice = window.prompt(
+    `Choose removal mode for ${name}:\n1 = Remove from GRE organisation only and delete from MIS\n2 = Remove GRE account completely and delete from MIS\n\nType 1 or 2.`,
+    "1",
+  );
+  if (choice == null) return null;
+  const normalized = choice.trim();
+  if (normalized === "1") return "org_only";
+  if (normalized === "2") return "full_account";
+  toast("Enter 1 or 2 to continue.");
+  return null;
 }
 
 function renderAuthState() {
@@ -3920,8 +3933,13 @@ function bindStaticEvents() {
       const userId = button.dataset.userId;
       const card = button.closest(".approval-card");
       const name = card?.querySelector("h4")?.textContent?.trim() || "this user";
-      if (!window.confirm(`Remove ${name} from MIS and clear their GRE organisation roles?`)) return;
-      const result = await store.removeManagedUser(userId);
+      const removalMode = chooseUserRemovalMode(name);
+      if (!removalMode) return;
+      const confirmMessage = removalMode === "full_account"
+        ? `This will try to remove ${name} from MIS and completely remove the mapped GRE workforce account for Green Rural Economy. Continue?`
+        : `This will remove ${name} from MIS and clear their GRE organisation access for Green Rural Economy. Continue?`;
+      if (!window.confirm(confirmMessage)) return;
+      const result = await store.removeManagedUser(userId, removalMode);
       await refreshAll();
       toast(result.message || "User removed.");
     }

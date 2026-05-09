@@ -881,6 +881,90 @@ async function removeGreTenantRoles(greUserId: number) {
   }
 }
 
+function buildGreWorkforceDeactivationPayload(profile: Record<string, unknown>) {
+  const userDTO = (profile.userDTO || {}) as Record<string, unknown>;
+  const person = (userDTO.person || {}) as Record<string, unknown>;
+  const personProfile = (person.personProfile || {}) as Record<string, unknown>;
+  const mobileContact = ensureList(person.personContacts).find((entry) => {
+    const contact = (entry?.contact || {}) as Record<string, unknown>;
+    return requireString((contact.contactType || {})?.dataCode).toUpperCase() === "CONTACT_TYPE.MOBILE";
+  }) as Record<string, unknown> | undefined;
+  const mailContact = ensureList(person.personContacts).find((entry) => {
+    const contact = (entry?.contact || {}) as Record<string, unknown>;
+    return requireString((contact.contactType || {})?.dataCode).toUpperCase() === "CONTACT_TYPE.MAIL";
+  }) as Record<string, unknown> | undefined;
+
+  return [
+    {
+      ...profile,
+      functionName: "UPDATE",
+      userDTO: {
+        ...userDTO,
+        isActive: false,
+        person: {
+          ...person,
+          isActive: false,
+          personProfile: {
+            ...personProfile,
+            isActive: false,
+          },
+        },
+      },
+      userAddressDTOList: [
+        {
+          primaryAddress: true,
+          address: {
+            line1: "Green Rural Economy",
+            village: "NA",
+            country: { id: 1 },
+            state: { id: 1 },
+            district: { id: 1 },
+          },
+        },
+      ],
+      userContactDTOList: [
+        {
+          primaryContact: true,
+          contact: {
+            contactType: { dataCode: "CONTACT_TYPE.MOBILE" },
+            contactValue: requireString(((mobileContact?.contact || {}) as Record<string, unknown>).contactValue || userDTO.login),
+          },
+        },
+        {
+          primaryContact: false,
+          contact: {
+            contactType: { dataCode: "CONTACT_TYPE.MAIL" },
+            contactValue: requireString(((mailContact?.contact || {}) as Record<string, unknown>).contactValue),
+          },
+        },
+      ].filter((entry) => requireString((entry.contact as Record<string, unknown>).contactValue)),
+    },
+  ];
+}
+
+async function attemptDeactivateGreWorkforceUser(greUserId: number) {
+  const response = await callGrePtld(`/api/workforce/userWrapper/v1?userId=${encodeURIComponent(String(greUserId))}`, "GET");
+  const profile = (response.data || {}) as Record<string, unknown>;
+  if (!Object.keys(profile).length) {
+    throw new Error("GRE workforce profile could not be loaded for complete account removal.");
+  }
+
+  const payload = buildGreWorkforceDeactivationPayload(profile);
+  try {
+    await callGrePtld("/api/workforce/userWrapper/v1", "PUT", payload);
+    return {
+      ok: true,
+      mode: "full_account",
+      message: "GRE workforce account was marked inactive.",
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `GRE complete account removal is not yet fully verified for this tenant. The workforce deactivation attempt was rejected by GRE: ${message}`,
+    );
+  }
+}
+
 async function patchGreJson(path: string, payload: unknown, sessionId?: string) {
   const resolvedSessionId = sessionId || await loginToGre();
   const response = await fetch(`${greLoginBaseUrl}${path}`, {
@@ -2471,7 +2555,7 @@ async function completeUserRoleActivation(userId: string, otpInput: string) {
   };
 }
 
-async function removeManagedUser(userId: string) {
+async function removeManagedUser(userId: string, removalMode = "org_only") {
   const { data: user, error } = await adminClient
     .from("gre_mis_users")
     .select("id, username, first_name, full_name, email, phone, role, is_active, gre_user_id, gre_login_name")
@@ -2491,7 +2575,13 @@ async function removeManagedUser(userId: string) {
   }
 
   const greResolution = await resolveExistingGreUser(user);
-  if (greResolution.greUserId) {
+  if (removalMode === "full_account") {
+    if (!greResolution.greUserId) {
+      throw new Error("This user is not mapped to a GRE account yet, so complete GRE account removal cannot be attempted.");
+    }
+    await attemptDeactivateGreWorkforceUser(greResolution.greUserId);
+    await removeGreTenantRoles(greResolution.greUserId);
+  } else if (greResolution.greUserId) {
     await removeGreTenantRoles(greResolution.greUserId);
   }
 
@@ -2532,8 +2622,12 @@ async function removeManagedUser(userId: string) {
 
   return {
     ok: true,
+    removalMode,
     removedGreRoles: Boolean(greResolution.greUserId),
-    message: `${user.full_name || user.username} was removed from MIS and their GRE organisation roles were cleared.`,
+    message:
+      removalMode === "full_account"
+        ? `${user.full_name || user.username} was removed from MIS, their GRE organisation roles were cleared, and a GRE complete account removal attempt was submitted.`
+        : `${user.full_name || user.username} was removed from MIS and their GRE organisation roles were cleared.`,
   };
 }
 
@@ -3866,7 +3960,7 @@ Deno.serve(async (req) => {
 
     if (action === "removeManagedUser") {
       assertRoles(userCtx, ["admin"], "Admin login required.");
-      return jsonResponse(await removeManagedUser(requireString(payload.userId)));
+      return jsonResponse(await removeManagedUser(requireString(payload.userId), requireString(payload.removalMode) || "org_only"));
     }
 
     const adminCtx = await requireAdminSession(req, requireString(payload.adminSessionToken));
