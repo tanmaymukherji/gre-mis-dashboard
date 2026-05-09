@@ -570,16 +570,29 @@ async function resolveExistingGreUser(user: Record<string, unknown>): Promise<Gr
   }
 
   const storedGreUserId = Number(user.gre_user_id || 0);
+  const directoryProfiles = await fetchGreTenantUsers();
+  if (storedGreUserId > 0) {
+    const liveProfile = directoryProfiles.find((profile) => parseNumber(profile.id, 0) === storedGreUserId) || null;
+    if (liveProfile) {
+      return {
+        status: "mapped",
+        greUserId: storedGreUserId,
+        greLoginName: requireString(liveProfile.Login) || requireString(liveProfile.Contact) || requireString(user.gre_login_name) || normalizePhoneLogin(user.phone) || requireString(user.email).toLowerCase(),
+        profile: liveProfile,
+        message: "Using live GRE directory mapping.",
+      };
+    }
+  }
+
   if (storedGreUserId > 0) {
     return {
       status: "mapped",
       greUserId: storedGreUserId,
-      greLoginName: requireString(user.gre_login_name) || requireString(user.phone).replace(/\D+/g, "") || requireString(user.email).toLowerCase(),
+      greLoginName: requireString(user.gre_login_name) || normalizePhoneLogin(user.phone) || requireString(user.email).toLowerCase(),
       message: "Using stored GRE user mapping.",
     };
   }
 
-  const directoryProfiles = await fetchGreTenantUsers();
   const directoryProfile = findGreDirectoryProfile(user, directoryProfiles);
   if (directoryProfile) {
     const greUserId = parseNumber(directoryProfile.id, 0);
@@ -834,6 +847,19 @@ async function syncGreRoleAssignment(greUserId: number, targetRole: string) {
 
   await addGreRole(greUserId, targetRoleCode);
   for (const roleCode of rolesToRemove) {
+    try {
+      await removeGreRole(greUserId, roleCode);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/could not find user role|not found|user.*exists.*userrolemapid/i.test(message)) {
+        throw error;
+      }
+    }
+  }
+}
+
+async function removeGreTenantRoles(greUserId: number) {
+  for (const roleCode of ["admin", "curator", "user"].map((role) => getRoleCodeForMisRole(role))) {
     try {
       await removeGreRole(greUserId, roleCode);
     } catch (error) {
@@ -1955,6 +1981,22 @@ async function getAdminSnapshot() {
   };
 }
 
+async function refreshUserDirectory() {
+  const { data: users, error } = await adminClient
+    .from("gre_mis_users")
+    .select("id, username, first_name, full_name, email, phone, role, is_active, must_change_password, last_login_at, created_at, gre_user_id, gre_login_name, gre_sync_status, gre_sync_message, gre_synced_at, gre_pending_role, gre_activation_mod_key, gre_activation_requested_at")
+    .order("role", { ascending: true })
+    .order("first_name", { ascending: true });
+  if (error) throw new Error(error.message);
+  await fetchGreTenantUsers(true);
+  const reconciledUsers = await reconcileGreUserMappings((users || []) as Record<string, unknown>[]);
+  return {
+    ok: true,
+    users: reconciledUsers,
+    message: "User roles and contact details refreshed from GRE.",
+  };
+}
+
 async function registerUser(payload: Record<string, unknown>) {
   const firstName = requireString(payload.firstName);
   const fullName = requireString(payload.fullName) || firstName;
@@ -2369,6 +2411,72 @@ async function completeUserRoleActivation(userId: string, otpInput: string) {
     greUserId: resolvedGreUserId,
     greLoginName: resolvedGreLogin,
     message: `${user.full_name || user.username} is now activated and synced as ${pendingRole} on GRE.`,
+  };
+}
+
+async function removeManagedUser(userId: string) {
+  const { data: user, error } = await adminClient
+    .from("gre_mis_users")
+    .select("id, username, first_name, full_name, email, phone, role, is_active, gre_user_id, gre_login_name")
+    .eq("id", userId)
+    .single();
+  if (error || !user) throw new Error(error?.message || "User not found.");
+
+  if (requireString(user.role) === "admin") {
+    const { count, error: countError } = await adminClient
+      .from("gre_mis_users")
+      .select("id", { count: "exact", head: true })
+      .eq("role", "admin")
+      .eq("is_active", true)
+      .neq("id", userId);
+    if (countError) throw new Error(countError.message);
+    if (!count) throw new Error("At least one admin must remain active in MIS.");
+  }
+
+  const greResolution = await resolveExistingGreUser(user);
+  if (greResolution.greUserId) {
+    await removeGreTenantRoles(greResolution.greUserId);
+  }
+
+  const { data: curatorRows, error: curatorFetchError } = await adminClient
+    .from("gre_mis_curators")
+    .select("id")
+    .or(`user_id.eq.${userId},email.eq.${requireString(user.email).toLowerCase()}`);
+  if (curatorFetchError) throw new Error(curatorFetchError.message);
+
+  const curatorIds = (Array.isArray(curatorRows) ? curatorRows : []).map((row) => requireString(row.id)).filter(Boolean);
+  if (curatorIds.length) {
+    const { error: needError } = await adminClient
+      .from("gre_mis_needs")
+      .update({ curator_id: null, updated_at: new Date().toISOString() })
+      .in("curator_id", curatorIds);
+    if (needError) throw new Error(needError.message);
+  }
+
+  const { error: curatorDeleteError } = await adminClient
+    .from("gre_mis_curators")
+    .delete()
+    .or(`user_id.eq.${userId},email.eq.${requireString(user.email).toLowerCase()}`);
+  if (curatorDeleteError) throw new Error(curatorDeleteError.message);
+
+  const { error: adminDeleteError } = await adminClient
+    .from("gre_mis_admins")
+    .delete()
+    .eq("email", requireString(user.email).toLowerCase());
+  if (adminDeleteError) throw new Error(adminDeleteError.message);
+
+  const { error: userDeleteError } = await adminClient
+    .from("gre_mis_users")
+    .delete()
+    .eq("id", userId);
+  if (userDeleteError) throw new Error(userDeleteError.message);
+
+  await fetchGreTenantUsers(true);
+
+  return {
+    ok: true,
+    removedGreRoles: Boolean(greResolution.greUserId),
+    message: `${user.full_name || user.username} was removed from MIS and their GRE organisation roles were cleared.`,
   };
 }
 
@@ -3692,6 +3800,16 @@ Deno.serve(async (req) => {
     if (action === "completeUserRoleActivation") {
       assertRoles(userCtx, ["admin"], "Admin login required.");
       return jsonResponse(await completeUserRoleActivation(requireString(payload.userId), requireString(payload.otp)));
+    }
+
+    if (action === "refreshUserDirectory") {
+      assertRoles(userCtx, ["admin"], "Admin login required.");
+      return jsonResponse(await refreshUserDirectory());
+    }
+
+    if (action === "removeManagedUser") {
+      assertRoles(userCtx, ["admin"], "Admin login required.");
+      return jsonResponse(await removeManagedUser(requireString(payload.userId)));
     }
 
     const adminCtx = await requireAdminSession(req, requireString(payload.adminSessionToken));

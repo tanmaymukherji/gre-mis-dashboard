@@ -1666,6 +1666,12 @@ class GreMisStore {
     state.data.users = ensureList(data.users);
   }
 
+  async refreshUserDirectory() {
+    const data = await this.callAdmin("refreshUserDirectory", {}, true);
+    state.data.users = ensureList(data.users);
+    return data;
+  }
+
   async applyNeedOverride(needId, patch, conflictNote = "", resolveConflict = false) {
     return this.callAdmin("applyNeedOverride", { needId, patch, conflictNote, resolveConflict }, true);
   }
@@ -1736,6 +1742,10 @@ class GreMisStore {
 
   async completeUserRoleActivation(userId, otp) {
     return this.callAdmin("completeUserRoleActivation", { userId, otp }, true);
+  }
+
+  async removeManagedUser(userId) {
+    return this.callAdmin("removeManagedUser", { userId }, true);
   }
 
   async submitSharedForm(submissionType, payload) {
@@ -3112,6 +3122,7 @@ function renderUserManagement() {
                 </select>
               </label>
               <button class="btn btn-primary" data-action="update-user-role" data-user-id="${esc(user.id)}">Update Role</button>
+              <button class="btn btn-secondary" data-action="remove-user" data-user-id="${esc(user.id)}">Remove User</button>
             </div>
             ${user.gre_sync_status === "awaiting_gre_activation" ? `
               <div class="card-actions activation-actions">
@@ -3724,6 +3735,16 @@ function bindStaticEvents() {
     toast("AI signals refreshed.");
   }));
 
+  byId("refreshUserDirectoryBtn")?.addEventListener("click", safeAsync(async () => {
+    if (!isAdminUser()) {
+      toast("Login as admin first.");
+      return;
+    }
+    const result = await store.refreshUserDirectory();
+    await rerender(false);
+    toast(result.message || "User roles refreshed from GRE.");
+  }));
+
   byId("syncGreChatbotBtn")?.addEventListener("click", safeAsync(async () => {
     if (!isAdminUser()) {
       toast("Login as admin first.");
@@ -3894,6 +3915,15 @@ function bindStaticEvents() {
       const result = await store.completeUserRoleActivation(userId, otp);
       await refreshAll();
       toast(result.message || "GRE activation completed.");
+    }
+    if (button.dataset.action === "remove-user") {
+      const userId = button.dataset.userId;
+      const card = button.closest(".approval-card");
+      const name = card?.querySelector("h4")?.textContent?.trim() || "this user";
+      if (!window.confirm(`Remove ${name} from MIS and clear their GRE organisation roles?`)) return;
+      const result = await store.removeManagedUser(userId);
+      await refreshAll();
+      toast(result.message || "User removed.");
     }
   }));
 
