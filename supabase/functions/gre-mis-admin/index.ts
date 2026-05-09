@@ -838,7 +838,7 @@ async function syncGreRoleAssignment(greUserId: number, targetRole: string) {
       await removeGreRole(greUserId, roleCode);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!/could not find user role|not found/i.test(message)) {
+      if (!/could not find user role|not found|user.*exists.*userrolemapid/i.test(message)) {
         throw error;
       }
     }
