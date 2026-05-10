@@ -1237,6 +1237,9 @@ async function fetchGreTagsByCodes(tagCodes: string[], sessionId: string) {
   if (Array.isArray((data as Record<string, unknown>)?.data)) {
     return (data as Record<string, unknown>).data as Record<string, unknown>[];
   }
+  if (data && typeof data === "object") {
+    return [data as Record<string, unknown>];
+  }
   return [];
 }
 
