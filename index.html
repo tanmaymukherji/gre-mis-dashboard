@@ -371,7 +371,7 @@
                     </label>
                     <label class="wide">
                       <span>Geographies</span>
-                      <input name="geographies" id="solutionGeographies" list="solutionGeographyOptions" placeholder="Start typing and separate multiple places with semicolons" />
+                      <input name="geographies" id="solutionGeographies" list="solutionGeographyOptions" placeholder="Start typing a block, city, or state and separate multiple places with semicolons" />
                     </label>
                     <label>
                       <span>Duration</span>
@@ -393,7 +393,7 @@
                     </label>
                     <div class="wide">
                       <span class="field-label">Location Availability</span>
-                      <div class="checkbox-grid">
+                      <div class="checkbox-grid audience-grid">
                         <label><input type="checkbox" name="location_availability" value="At Service Provider" /> At Service Provider</label>
                         <label><input type="checkbox" name="location_availability" value="At Service Seeker" /> At Service Seeker</label>
                         <label><input type="checkbox" name="location_availability" value="Others" /> Others</label>
@@ -872,6 +872,46 @@
     </article>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260509a"></script>
+  <dialog id="submissionReviewDialog" class="modal">
+    <form id="submissionReviewForm" class="modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Shared Form Review</p>
+          <h3 id="submissionReviewTitle">View and Edit Submission</h3>
+        </div>
+        <button type="button" id="closeSubmissionReviewDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div id="submissionReviewMeta" class="detail-list review-meta-list"></div>
+      <div class="form-grid">
+        <input type="hidden" name="submission_id" />
+        <label>
+          <span>Organisation Name</span>
+          <input name="organization_name" required />
+        </label>
+        <label>
+          <span>Approved GRE Supplier</span>
+          <select id="submissionReviewTraderSelect" name="existing_trader_id" required></select>
+        </label>
+        <label class="wide">
+          <span>Admin Review Notes</span>
+          <textarea name="admin_review_notes" rows="3" placeholder="Optional notes for the submission record"></textarea>
+        </label>
+        <label class="wide">
+          <span>Submission Payload</span>
+          <textarea id="submissionPayloadEditor" name="payload_json" rows="18" spellcheck="false"></textarea>
+        </label>
+      </div>
+      <p id="submissionReviewStatus" class="helper-text"></p>
+      <div class="modal-actions modal-actions-spread">
+        <button type="button" id="saveSubmissionReviewBtn" class="btn btn-secondary">Save Changes</button>
+        <div class="card-actions">
+          <button type="button" id="rejectSubmissionReviewBtn" class="btn btn-danger">Reject</button>
+          <button type="button" id="approveSubmissionReviewBtn" class="btn btn-primary">Approve</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./app.js?v=20260510a"></script>
 </body>
 </html>

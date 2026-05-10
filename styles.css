@@ -513,6 +513,8 @@ h2 { font-size: 1.35rem; }
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 16px;
+  align-items: start;
+  justify-items: start;
   padding: 12px 14px;
   border: 1px solid rgba(68, 106, 48, 0.16);
   border-radius: 14px;
@@ -523,7 +525,9 @@ h2 { font-size: 1.35rem; }
 .toggle-choice label {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
+  width: 100%;
   margin: 0;
   font-weight: 600;
   color: var(--text);
@@ -1211,6 +1215,19 @@ textarea { resize: vertical; }
 .modal-head,
 .modal-actions { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .modal-actions { margin-top: 18px; justify-content: end; }
+.modal-actions-spread { justify-content: space-between; }
+.review-meta-list {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(241, 246, 236, 0.95);
+}
+#submissionPayloadEditor {
+  min-height: 360px;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
 #workloadChart.bar-list {
   max-height: 320px;
   overflow: auto;

@@ -2861,11 +2861,67 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       reviewed_by_email: actorEmail,
       reviewed_at: new Date().toISOString(),
       gre_sync_status: "pending_gre_solution_create_verification",
-      gre_sync_message: "Queued for GRE solution create after API flow verification.",
+      gre_sync_message: "Approved in MIS. GRE solution create sync is still pending explicit create API verification.",
     })
     .eq("id", submissionId);
   if (approveError) throw new Error(approveError.message);
-  return { ok: true };
+  return {
+    ok: true,
+    greSyncStatus: "pending_gre_solution_create_verification",
+    message: "Solution submission approved in MIS. GRE create sync is still pending backend verification.",
+  };
+}
+
+async function updateFormSubmission(submissionId: string, update: Record<string, unknown>, actorEmail: string) {
+  const { data: submission, error } = await adminClient
+    .from("gre_mis_form_submissions")
+    .select("*")
+    .eq("id", submissionId)
+    .single();
+  if (error || !submission) throw new Error(error?.message || "Form submission not found.");
+  if (requireString(submission.approval_status) !== "pending_admin") {
+    throw new Error("Only pending submissions can be edited from the admin review queue.");
+  }
+
+  const payload = (update.payload && typeof update.payload === "object") ? update.payload as Record<string, unknown> : null;
+  if (!payload) throw new Error("A valid submission payload is required.");
+
+  const existingTraderId = requireString(update.existingTraderId || payload.existing_trader_id || submission.existing_trader_id);
+  if (!existingTraderId) throw new Error("Please select a valid GRE supplier before saving the submission.");
+  const { data: trader, error: traderError } = await adminClient
+    .from("traders")
+    .select("trader_id, trader_name, organisation_name")
+    .eq("trader_id", existingTraderId)
+    .maybeSingle();
+  if (traderError) throw new Error(traderError.message);
+  if (!trader) throw new Error("Selected GRE supplier organization could not be found.");
+
+  const organizationName =
+    requireString(update.organizationName) ||
+    requireString(payload.organization_name) ||
+    requireString(trader.organisation_name || trader.trader_name);
+  payload.organization_name = organizationName;
+  payload.existing_trader_id = requireString(trader.trader_id);
+  payload.existing_trader_name = requireString(trader.organisation_name || trader.trader_name);
+
+  const patch = {
+    organization_name: organizationName,
+    existing_trader_id: requireString(trader.trader_id),
+    existing_trader_name: requireString(trader.organisation_name || trader.trader_name),
+    payload,
+    admin_review_notes: requireString(update.adminReviewNotes) || submission.admin_review_notes || null,
+  };
+
+  const { error: updateError } = await adminClient
+    .from("gre_mis_form_submissions")
+    .update(patch)
+    .eq("id", submissionId);
+  if (updateError) throw new Error(updateError.message);
+
+  return {
+    ok: true,
+    message: "Submission draft updated for admin review.",
+  };
 }
 
 async function applyNeedOverride(
@@ -4087,6 +4143,14 @@ Deno.serve(async (req) => {
         requireString(payload.submissionId),
         requireString(payload.decision),
         requireString(payload.reviewNotes),
+        adminActorEmail,
+      ));
+    }
+
+    if (action === "updateFormSubmission") {
+      return jsonResponse(await updateFormSubmission(
+        requireString(payload.submissionId),
+        (payload.update && typeof payload.update === "object") ? payload.update as Record<string, unknown> : {},
         adminActorEmail,
       ));
     }

@@ -24,6 +24,7 @@ const state = {
   caseMap: null,
   caseMapMarkers: [],
   activeMapGroupKey: "",
+  lgdSearchToken: 0,
   showClosedNeeds: false,
   overviewFilters: {
     metric: [],
@@ -36,6 +37,7 @@ const state = {
   adminToken: "",
   userSession: null,
   adminSession: null,
+  submissionReviewId: "",
     puterModelsLoaded: false,
     puterModels: [],
     puterRecommendations: {},
@@ -1584,7 +1586,7 @@ class GreMisStore {
     const [curators, traders, offerings, options, needs, updates] = await Promise.all([
         client.from("gre_mis_curators").select("id, display_name, email").eq("is_active", true).order("display_name"),
         client.from("traders").select("trader_id,trader_name,organisation_name,email,website,association_status").order("organisation_name"),
-        client.from("offerings").select("primary_valuechain,primary_application,valuechains,applications,tags,languages,geographies").limit(5000),
+        client.from("offerings").select("primary_valuechain,primary_application,valuechains,applications,tags,languages,geographies").range(0, 19999),
         client.from("gre_mis_options").select("id, option_type, label, sort_order").eq("is_active", true).order("sort_order"),
         client.from("gre_mis_needs").select("*").eq("approval_status", "approved").order("requested_on", { ascending: false }),
         client.from("gre_mis_need_updates").select("*").order("created_at", { ascending: false }),
@@ -1805,6 +1807,27 @@ class GreMisStore {
 
   async reviewFormSubmission(submissionId, decision, reviewNotes = "") {
     return this.callAdmin("reviewFormSubmission", { submissionId, decision, reviewNotes }, true);
+  }
+
+  async updateFormSubmission(submissionId, update) {
+    return this.callAdmin("updateFormSubmission", { submissionId, update }, true);
+  }
+
+  async searchLgdGeographies(query) {
+    const client = this.getClient();
+    const search = normalizeText(query);
+    if (!client || search.length < 2) return [];
+    const wildcard = `%${search.replace(/[%_]/g, " ").trim()}%`;
+    const { data, error } = await client
+      .from("lgd_geography_directory")
+      .select("display_label,block_name,district_name,state_name,gram_panchayat_name,village_name")
+      .or(`search_text.ilike.${wildcard},display_label.ilike.${wildcard},block_name.ilike.${wildcard},district_name.ilike.${wildcard},state_name.ilike.${wildcard}`)
+      .limit(20);
+    if (error) {
+      console.warn("LGD geography lookup failed", error);
+      return [];
+    }
+    return uniq(ensureList(data).map(formatLgdGeographyLabel).filter(Boolean));
   }
 
   async importInboundWorkbook(fileName, rows, aiProvider) {
@@ -2146,18 +2169,29 @@ function buildOfferingMasterData(rows) {
     languages: new Set(DEFAULT_LANGUAGE_OPTIONS),
     geographies: new Set(),
   };
+  const normalizedRows = [];
   ensureList(rows).forEach((row) => {
+    const primaryValuechain = normalizeText(row.primary_valuechain);
+    const primaryApplication = normalizeText(row.primary_application);
+    const valuechains = parseArray(row.valuechains).filter(Boolean);
+    const applications = parseArray(row.applications).filter(Boolean);
     [
-      normalizeText(row.primary_valuechain),
-      ...parseArray(row.valuechains),
+      primaryValuechain,
+      ...valuechains,
     ].filter(Boolean).forEach((item) => lists.valuechains.add(item));
     [
-      normalizeText(row.primary_application),
-      ...parseArray(row.applications),
+      primaryApplication,
+      ...applications,
     ].filter(Boolean).forEach((item) => lists.applications.add(item));
     parseArray(row.tags).filter(Boolean).forEach((item) => lists.tags.add(item));
     parseArray(row.languages).filter(Boolean).forEach((item) => lists.languages.add(item));
     parseArray(row.geographies).filter(Boolean).forEach((item) => lists.geographies.add(item));
+    normalizedRows.push({
+      primaryValuechain,
+      primaryApplication,
+      valuechains,
+      applications,
+    });
   });
   return {
     valuechains: [...lists.valuechains].sort((a, b) => a.localeCompare(b)),
@@ -2165,7 +2199,20 @@ function buildOfferingMasterData(rows) {
     tags: [...lists.tags].sort((a, b) => a.localeCompare(b)),
     languages: [...lists.languages].sort((a, b) => a.localeCompare(b)),
     geographies: [...lists.geographies].sort((a, b) => a.localeCompare(b)),
+    rows: normalizedRows,
   };
+}
+
+function formatLgdGeographyLabel(row) {
+  if (!row || typeof row !== "object") return "";
+  const ordered = [
+    normalizeText(row.block_name || row.gram_panchayat_name || row.village_name),
+    normalizeText(row.district_name),
+    normalizeText(row.state_name),
+    "India",
+  ].filter(Boolean);
+  if (ordered.length >= 3) return uniq(ordered).join(", ");
+  return normalizeText(row.display_label);
 }
 
 function setSelectOptions(selectId, values, allowBlank = true) {
@@ -2202,7 +2249,6 @@ function setDatalistOptions(listId, values) {
   const list = byId(listId);
   if (!list) return;
   list.innerHTML = ensureList(values)
-    .slice(0, 600)
     .map((value) => `<option value="${esc(value)}"></option>`)
     .join("");
 }
@@ -2259,12 +2305,53 @@ function renderSolutionReferenceInputs() {
   const master = state.data.offeringMaster || buildOfferingMasterData([]);
   setSelectOptions("solutionPrimaryValuechain", master.valuechains, true);
   setSelectOptions("solutionSecondaryValuechain", master.valuechains, true);
-  setSelectOptions("solutionPrimaryApplication", master.applications, true);
-  setSelectOptions("solutionSecondaryApplication", master.applications, true);
   setMultiSelectOptions("solutionLanguagesSelect", master.languages);
-  setDatalistOptions("solutionGeographyOptions", master.geographies);
   setDatalistOptions("solutionTagOptions", master.tags);
+  updateSolutionApplicationOptions();
   updateSolutionOfferingForm();
+}
+
+function getPrimaryApplicationOptions(primaryValuechain) {
+  const master = state.data.offeringMaster || buildOfferingMasterData([]);
+  if (!primaryValuechain) return [];
+  const matches = master.rows
+    .filter((row) => row.primaryValuechain === primaryValuechain)
+    .flatMap((row) => [row.primaryApplication, ...row.applications])
+    .filter(Boolean);
+  return uniq(matches).sort((a, b) => a.localeCompare(b));
+}
+
+function getSecondaryApplicationOptions(primaryValuechain, secondaryValuechain) {
+  const master = state.data.offeringMaster || buildOfferingMasterData([]);
+  if (!primaryValuechain || !secondaryValuechain) return [];
+  const primaryOptions = new Set(getPrimaryApplicationOptions(primaryValuechain));
+  const matches = master.rows
+    .filter((row) => {
+      if (row.primaryValuechain !== primaryValuechain) return false;
+      return row.valuechains.includes(secondaryValuechain) || row.primaryValuechain === secondaryValuechain;
+    })
+    .flatMap((row) => row.applications)
+    .filter((item) => item && !primaryOptions.has(item));
+  if (!matches.length) {
+    return master.rows
+      .filter((row) => row.primaryValuechain === secondaryValuechain || row.valuechains.includes(secondaryValuechain))
+      .flatMap((row) => [row.primaryApplication, ...row.applications])
+      .filter((item) => item && !primaryOptions.has(item))
+      .filter(Boolean)
+      .filter(Boolean)
+      .reduce((acc, item) => (acc.includes(item) ? acc : [...acc, item]), [])
+      .sort((a, b) => a.localeCompare(b));
+  }
+  return uniq(matches)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function updateSolutionApplicationOptions() {
+  const primaryValuechain = normalizeText(byId("solutionPrimaryValuechain")?.value || "");
+  const secondaryValuechain = normalizeText(byId("solutionSecondaryValuechain")?.value || "");
+  setSelectOptions("solutionPrimaryApplication", getPrimaryApplicationOptions(primaryValuechain), true);
+  setSelectOptions("solutionSecondaryApplication", getSecondaryApplicationOptions(primaryValuechain, secondaryValuechain), true);
 }
 
 function appendSubmissionEntry(target, key, value) {
@@ -2298,6 +2385,90 @@ async function collectSingleFileAttachment(form, fieldName) {
     size: file.size,
     dataUrl: await readFileAsDataUrl(file),
   };
+}
+
+async function updateSolutionGeographySuggestions(rawValue) {
+  const input = byId("solutionGeographies");
+  if (!input) return;
+  const query = normalizeText(String(rawValue || "").split(";").pop() || "");
+  const requestToken = Date.now();
+  state.lgdSearchToken = requestToken;
+  if (query.length < 2) {
+    setDatalistOptions("solutionGeographyOptions", []);
+    return;
+  }
+  const suggestions = await store.searchLgdGeographies(query);
+  if (state.lgdSearchToken !== requestToken) return;
+  setDatalistOptions("solutionGeographyOptions", suggestions);
+}
+
+function getFormSubmissionById(submissionId) {
+  return ensureList(state.data.pendingFormSubmissions).find((submission) => submission.id === submissionId) || null;
+}
+
+function fillSubmissionReviewTraderSelect(selectedId = "") {
+  const select = byId("submissionReviewTraderSelect");
+  if (!select) return;
+  select.innerHTML = buildSupplierOptionsHtml(selectedId);
+}
+
+function buildSubmissionReviewPatch() {
+  const form = byId("submissionReviewForm");
+  if (!form) throw new Error("Submission review form is unavailable.");
+  const submissionId = normalizeText(form.querySelector('[name="submission_id"]')?.value || "");
+  const organizationName = normalizeText(form.querySelector('[name="organization_name"]')?.value || "");
+  const existingTraderId = normalizeText(form.querySelector('[name="existing_trader_id"]')?.value || "");
+  const adminReviewNotes = normalizeText(form.querySelector('[name="admin_review_notes"]')?.value || "");
+  const payload = parseJsonObject(form.querySelector('[name="payload_json"]')?.value || "{}");
+  const trader = getTraderById(existingTraderId);
+  if (!trader) throw new Error("Please choose a valid GRE supplier before saving the submission.");
+  payload.organization_name = organizationName || payload.organization_name || trader.organisation_name || trader.trader_name || "";
+  payload.existing_trader_id = trader.trader_id;
+  payload.existing_trader_name = trader.organisation_name || trader.trader_name || "";
+  return {
+    submissionId,
+    update: {
+      organizationName: payload.organization_name,
+      existingTraderId: trader.trader_id,
+      existingTraderName: payload.existing_trader_name,
+      adminReviewNotes,
+      payload,
+    },
+  };
+}
+
+function openSubmissionReviewDialog(submissionId) {
+  const submission = getFormSubmissionById(submissionId);
+  if (!submission) {
+    toast("This submission is no longer available in the admin queue.");
+    return;
+  }
+  state.submissionReviewId = submissionId;
+  const dialog = byId("submissionReviewDialog");
+  const form = byId("submissionReviewForm");
+  const title = byId("submissionReviewTitle");
+  const meta = byId("submissionReviewMeta");
+  const status = byId("submissionReviewStatus");
+  if (!dialog || !form || !title || !meta) return;
+  const payload = submission.payload && typeof submission.payload === "object" ? submission.payload : {};
+  title.textContent = `${submission.submission_type === "solution" ? "Solution" : "Need"} Submission Review`;
+  if (status) status.textContent = "";
+  const submissionIdField = form.querySelector('[name="submission_id"]');
+  const orgField = form.querySelector('[name="organization_name"]');
+  const notesField = form.querySelector('[name="admin_review_notes"]');
+  const payloadField = form.querySelector('[name="payload_json"]');
+  if (submissionIdField) submissionIdField.value = submission.id;
+  if (orgField) orgField.value = submission.organization_name || payload.organization_name || "";
+  if (notesField) notesField.value = submission.admin_review_notes || "";
+  if (payloadField) payloadField.value = JSON.stringify(payload, null, 2);
+  fillSubmissionReviewTraderSelect(submission.existing_trader_id || payload.existing_trader_id || "");
+  meta.innerHTML = `
+    <div><strong>Submission Type:</strong> ${esc(submission.submission_type)}</div>
+    <div><strong>Source:</strong> ${esc(submission.source_mode || "shared_link")}</div>
+    <div><strong>Submitter:</strong> ${esc(submission.submitter_name || submission.submitter_email || "Anonymous")}</div>
+    <div><strong>Current GRE Sync:</strong> ${esc(submission.gre_sync_status ? submission.gre_sync_status.replaceAll("_", " ") : "not started")}</div>
+  `;
+  dialog.showModal();
 }
 
 function renderSharePanel(targetId, mode) {
@@ -3222,8 +3393,10 @@ function renderAdminQueue() {
                     ${!isNeed && payload.offering_name ? `<div><strong>Offering:</strong> ${esc(payload.offering_name)}</div>` : ""}
                     ${categoryLine ? `<div><strong>Classification:</strong> ${esc(categoryLine)}</div>` : ""}
                     ${summaryText ? `<div><strong>Summary:</strong> ${esc(clipText(summaryText, 220))}</div>` : ""}
+                    ${!isNeed ? `<div><strong>GRE Sync:</strong> ${esc(submission.gre_sync_status ? submission.gre_sync_status.replaceAll("_", " ") : "Pending admin review")}</div>` : ""}
                   </div>
                 <div class="card-actions">
+                  <button class="btn btn-secondary" data-action="edit-form-submission" data-submission-id="${esc(submission.id)}">View / Edit</button>
                   <button class="btn btn-primary" data-action="approve-form-submission" data-submission-id="${esc(submission.id)}">Approve</button>
                   <button class="btn btn-danger" data-action="reject-form-submission" data-submission-id="${esc(submission.id)}">Reject</button>
                 </div>
@@ -3785,6 +3958,7 @@ function bindStaticEvents() {
   const passwordHelpDialog = byId("passwordHelpDialog");
   const workbenchDialog = byId("workbenchDialog");
   const matchDetailDialog = byId("matchDetailDialog");
+  const submissionReviewDialog = byId("submissionReviewDialog");
   byId("newNeedBtn")?.addEventListener("click", () => dialog?.showModal());
   byId("closeNeedDialog")?.addEventListener("click", () => dialog?.close());
   byId("closeMissingOrgDialog")?.addEventListener("click", () => missingOrgDialog?.close());
@@ -3800,6 +3974,14 @@ function bindStaticEvents() {
   byId("closePasswordHelpDialog")?.addEventListener("click", () => passwordHelpDialog?.close());
   byId("closeWorkbenchDialog")?.addEventListener("click", () => workbenchDialog?.close());
   byId("closeMatchDetailDialog")?.addEventListener("click", () => matchDetailDialog?.close());
+  byId("closeSubmissionReviewDialog")?.addEventListener("click", () => submissionReviewDialog?.close());
+  byId("submissionReviewTraderSelect")?.addEventListener("change", (event) => {
+    const trader = getTraderById(event.target.value);
+    const orgInput = byId("submissionReviewForm")?.querySelector('[name="organization_name"]');
+    if (trader && orgInput) {
+      orgInput.value = trader.organisation_name || trader.trader_name || "";
+    }
+  });
   ["solution", "need"].forEach((kind) => {
     const selectId = kind === "solution" ? "solutionTraderSelect" : "needTraderSelect";
     const orgInputId = kind === "solution" ? "solutionOrgName" : "needOrgName";
@@ -3876,6 +4058,11 @@ function bindStaticEvents() {
     }));
 
     byId("solutionOfferingCategory")?.addEventListener("change", () => updateSolutionOfferingForm());
+    byId("solutionPrimaryValuechain")?.addEventListener("change", () => updateSolutionApplicationOptions());
+    byId("solutionSecondaryValuechain")?.addEventListener("change", () => updateSolutionApplicationOptions());
+    byId("solutionGeographies")?.addEventListener("input", safeAsync(async (event) => {
+      await updateSolutionGeographySuggestions(event.target.value);
+    }));
     document.querySelectorAll('input[name="solution_audience"]').forEach((input) => {
       input.addEventListener("change", () => {
         if ((byId("solutionOfferingCategory")?.value || "Service offerings") === "Product offerings") {
@@ -4148,6 +4335,39 @@ function bindStaticEvents() {
     }
   }));
 
+  byId("saveSubmissionReviewBtn")?.addEventListener("click", safeAsync(async () => {
+    const status = byId("submissionReviewStatus");
+    if (status) status.textContent = "Saving submission changes...";
+    const patch = buildSubmissionReviewPatch();
+    const result = await store.updateFormSubmission(patch.submissionId, patch.update);
+    await refreshAll();
+    openSubmissionReviewDialog(patch.submissionId);
+    if (status) status.textContent = result.message || "Submission changes saved.";
+    toast(result.message || "Submission changes saved.");
+  }));
+
+  byId("approveSubmissionReviewBtn")?.addEventListener("click", safeAsync(async () => {
+    const status = byId("submissionReviewStatus");
+    if (status) status.textContent = "Saving changes and approving...";
+    const patch = buildSubmissionReviewPatch();
+    await store.updateFormSubmission(patch.submissionId, patch.update);
+    const result = await store.reviewFormSubmission(patch.submissionId, "approve", patch.update.adminReviewNotes || "");
+    submissionReviewDialog?.close();
+    await refreshAll();
+    toast(result.message || (result.targetNeedId ? `Submission approved as Need ${result.targetNeedId}.` : "Form submission approved."));
+  }));
+
+  byId("rejectSubmissionReviewBtn")?.addEventListener("click", safeAsync(async () => {
+    const status = byId("submissionReviewStatus");
+    if (status) status.textContent = "Saving changes and rejecting...";
+    const patch = buildSubmissionReviewPatch();
+    await store.updateFormSubmission(patch.submissionId, patch.update);
+    await store.reviewFormSubmission(patch.submissionId, "reject", patch.update.adminReviewNotes || "");
+    submissionReviewDialog?.close();
+    await refreshAll();
+    toast("Form submission rejected.");
+  }));
+
   byId("adminView")?.addEventListener("click", safeAsync(async (event) => {
     const button = event.target.closest("[data-action]");
     if (!button) return;
@@ -4175,10 +4395,14 @@ function bindStaticEvents() {
       await refreshAll();
       toast("Curator update rejected.");
     }
+    if (button.dataset.action === "edit-form-submission") {
+      openSubmissionReviewDialog(button.dataset.submissionId);
+      return;
+    }
     if (button.dataset.action === "approve-form-submission") {
       const result = await store.reviewFormSubmission(button.dataset.submissionId, "approve");
       await refreshAll();
-      toast(result.targetNeedId ? `Submission approved as Need ${result.targetNeedId}.` : "Form submission approved.");
+      toast(result.message || (result.targetNeedId ? `Submission approved as Need ${result.targetNeedId}.` : "Form submission approved."));
     }
     if (button.dataset.action === "reject-form-submission") {
       await store.reviewFormSubmission(button.dataset.submissionId, "reject");
