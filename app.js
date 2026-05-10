@@ -38,6 +38,7 @@ const state = {
   userSession: null,
   adminSession: null,
   submissionReviewId: "",
+  solutionTags: [],
     puterModelsLoaded: false,
     puterModels: [],
     puterRecommendations: {},
@@ -2378,6 +2379,16 @@ function normalizeSemicolonSeparatedValue(value) {
   );
 }
 
+function parseLooseListInput(value) {
+  if (Array.isArray(value)) return uniq(value.map((item) => normalizeText(item)).filter(Boolean));
+  return uniq(
+    String(value || "")
+      .split(/[,\n;]+/)
+      .map((item) => normalizeText(item))
+      .filter(Boolean),
+  );
+}
+
 function syncProductAudienceFromSolution() {
   const solutionValues = getCheckedValues(byId("solutionSubmissionForm"), "solution_audience");
   document.querySelectorAll('input[name="product_audience"]').forEach((input) => {
@@ -2503,6 +2514,105 @@ async function updateSolutionGeographySuggestions(rawValue) {
   setDatalistOptions("solutionGeographyOptions", suggestions);
 }
 
+function renderSolutionTagChips() {
+  const target = byId("solutionTagChips");
+  const hidden = byId("solutionTagsInput");
+  if (!target || !hidden) return;
+  hidden.value = state.solutionTags.join(", ");
+  target.innerHTML = state.solutionTags.length
+    ? state.solutionTags
+        .map(
+          (tag) => `
+            <span class="tag-chip">
+              ${esc(tag)}
+              <button type="button" class="tag-chip-remove" data-remove-solution-tag="${escAttr(tag)}" aria-label="Remove ${escAttr(tag)}">&times;</button>
+            </span>
+          `,
+        )
+        .join("")
+    : `<span class="helper-text">No tags added yet.</span>`;
+}
+
+function addSolutionTag(rawValue) {
+  const tag = normalizeText(rawValue);
+  if (!tag) return false;
+  if (!state.solutionTags.includes(tag)) state.solutionTags.push(tag);
+  renderSolutionTagChips();
+  return true;
+}
+
+function removeSolutionTag(tag) {
+  state.solutionTags = state.solutionTags.filter((item) => item !== tag);
+  renderSolutionTagChips();
+}
+
+function getSubmissionReviewFieldConfig(submissionType) {
+  if (submissionType === "need") {
+    return [
+      { key: "contact_person", label: "Contact Person" },
+      { key: "seeker_email", label: "Email" },
+      { key: "seeker_phone", label: "Phone" },
+      { key: "state", label: "State" },
+      { key: "district", label: "District" },
+      { key: "need_kind", label: "Need Kind" },
+      { key: "service_kind", label: "Service Type" },
+      { key: "thematic_area", label: "Thematic Area" },
+      { key: "application_area", label: "Application Area" },
+      { key: "curated_need", label: "Curated Need / Categories", multiline: true, list: true },
+      { key: "six_m_signals", label: "6M Signals", multiline: true, list: true },
+      { key: "problem_statement", label: "Problem Statement", multiline: true, wide: true },
+    ];
+  }
+  return [
+    { key: "submitter_name", label: "Contact Person" },
+    { key: "submitter_email", label: "Contact Email" },
+    { key: "submitter_phone", label: "Contact Phone" },
+    { key: "solution_name", label: "Solution Name" },
+    { key: "about_solution_text", label: "Solution Description", multiline: true, wide: true },
+    { key: "primary_valuechain", label: "Primary Value Chain" },
+    { key: "primary_application", label: "Primary Application" },
+    { key: "secondary_valuechain", label: "Secondary Value Chain" },
+    { key: "secondary_application", label: "Secondary Application" },
+    { key: "solution_audience", label: "Who Can Avail It", multiline: true, list: true },
+    { key: "offering_category", label: "Offering Category" },
+    { key: "offering_type", label: "Offering Type" },
+    { key: "offering_name", label: "Offering Name" },
+    { key: "about_offering_text", label: "Offering Description", multiline: true, wide: true },
+    { key: "languages", label: "Languages", multiline: true, list: true },
+    { key: "geographies", label: "Geographies", multiline: true, list: true },
+    { key: "location_availability", label: "Location Availability", multiline: true, list: true },
+    { key: "tags", label: "Tags", multiline: true, list: true },
+  ];
+}
+
+function renderSubmissionReviewFields(submissionType, payload) {
+  const target = byId("submissionReviewFields");
+  const title = byId("submissionStructuredTitle");
+  if (!target) return;
+  if (title) title.textContent = submissionType === "need" ? "Need Submission Details" : "Solution Submission Details";
+  const config = getSubmissionReviewFieldConfig(submissionType);
+  target.innerHTML = config
+    .map((field) => {
+      const rawValue = payload?.[field.key];
+      const value = field.list ? parseLooseListInput(rawValue).join(", ") : normalizeText(rawValue);
+      if (field.multiline) {
+        return `
+          <label class="${field.wide ? "wide" : ""}">
+            <span>${esc(field.label)}</span>
+            <textarea data-review-field="${escAttr(field.key)}" rows="${field.wide ? 4 : 3}">${esc(value)}</textarea>
+          </label>
+        `;
+      }
+      return `
+        <label class="${field.wide ? "wide" : ""}">
+          <span>${esc(field.label)}</span>
+          <input data-review-field="${escAttr(field.key)}" value="${escAttr(value)}" />
+        </label>
+      `;
+    })
+    .join("");
+}
+
 function getFormSubmissionById(submissionId) {
   return ensureList(state.data.pendingFormSubmissions).find((submission) => submission.id === submissionId) || null;
 }
@@ -2520,12 +2630,25 @@ function buildSubmissionReviewPatch() {
   const organizationName = normalizeText(form.querySelector('[name="organization_name"]')?.value || "");
   const existingTraderId = normalizeText(form.querySelector('[name="existing_trader_id"]')?.value || "");
   const adminReviewNotes = normalizeText(form.querySelector('[name="admin_review_notes"]')?.value || "");
-  const payload = parseJsonObject(form.querySelector('[name="payload_json"]')?.value || "{}");
+  const submission = getFormSubmissionById(submissionId);
+  const payloadBase = submission?.payload && typeof submission.payload === "object" ? { ...submission.payload } : {};
+  const payload = payloadBase;
+  form.querySelectorAll("[data-review-field]").forEach((field) => {
+    const key = field.dataset.reviewField;
+    if (!key) return;
+    if (field.tagName === "TEXTAREA") {
+      payload[key] = field.value;
+    } else {
+      payload[key] = field.value;
+    }
+  });
+  const payloadField = form.querySelector('[name="payload_json"]');
   const trader = getTraderById(existingTraderId);
   if (!trader) throw new Error("Please choose a valid GRE supplier before saving the submission.");
   payload.organization_name = organizationName || payload.organization_name || trader.organisation_name || trader.trader_name || "";
   payload.existing_trader_id = trader.trader_id;
   payload.existing_trader_name = trader.organisation_name || trader.trader_name || "";
+  if (payloadField) payloadField.value = JSON.stringify(payload, null, 2);
   return {
     submissionId,
     update: {
@@ -2563,6 +2686,7 @@ function openSubmissionReviewDialog(submissionId) {
   if (notesField) notesField.value = submission.admin_review_notes || "";
   if (payloadField) payloadField.value = JSON.stringify(payload, null, 2);
   fillSubmissionReviewTraderSelect(submission.existing_trader_id || payload.existing_trader_id || "");
+  renderSubmissionReviewFields(submission.submission_type, payload);
   meta.innerHTML = `
     <div><strong>Submission Type:</strong> ${esc(submission.submission_type)}</div>
     <div><strong>Source:</strong> ${esc(submission.source_mode || "shared_link")}</div>
@@ -2609,6 +2733,8 @@ function renderSubmissionViews() {
   fillSupplierSelect("solutionTraderSelect", "solutionOrgName");
   fillSupplierSelect("needTraderSelect", "needOrgName");
   renderSolutionReferenceInputs();
+  state.solutionTags = [];
+  renderSolutionTagChips();
   renderSharePanel("solutionSharePanel", "solution");
   renderSharePanel("needSharePanel", "need");
   populateSubmissionDefaults(byId("solutionSubmissionForm"));
@@ -3877,7 +4003,7 @@ async function collectSubmissionPayload(form, submissionType = "need") {
   const productAudience = getCheckedValues(form, "product_audience");
   const serviceLanguages = normalizeMultiTextValue(entries.languages);
   const tags = uniq([
-    ...normalizeMultiTextValue(entries.tags),
+    ...parseLooseListInput(entries.tags),
     ...normalizeMultiTextValue(entries.keywords),
   ]);
   const geographies = normalizeSemicolonSeparatedValue(entries.geographies);
@@ -4158,12 +4284,23 @@ function bindStaticEvents() {
       toast("Need form link copied.");
     }));
 
-    byId("solutionOfferingCategory")?.addEventListener("change", () => updateSolutionOfferingForm());
-    byId("solutionPrimaryValuechain")?.addEventListener("change", () => updateSolutionApplicationOptions());
-    byId("solutionSecondaryValuechain")?.addEventListener("change", () => updateSolutionApplicationOptions());
-    byId("solutionGeographies")?.addEventListener("input", safeAsync(async (event) => {
-      await updateSolutionGeographySuggestions(event.target.value);
-    }));
+  byId("solutionOfferingCategory")?.addEventListener("change", () => updateSolutionOfferingForm());
+  byId("solutionPrimaryValuechain")?.addEventListener("change", () => updateSolutionApplicationOptions());
+  byId("solutionSecondaryValuechain")?.addEventListener("change", () => updateSolutionApplicationOptions());
+  byId("solutionGeographies")?.addEventListener("input", safeAsync(async (event) => {
+    await updateSolutionGeographySuggestions(event.target.value);
+  }));
+  byId("addSolutionTagBtn")?.addEventListener("click", () => {
+    const input = byId("solutionTagEntry");
+    if (!input) return;
+    if (addSolutionTag(input.value)) input.value = "";
+  });
+  byId("solutionTagEntry")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== ",") return;
+    event.preventDefault();
+    const input = event.target;
+    if (addSolutionTag(input.value)) input.value = "";
+  });
     document.querySelectorAll('input[name="solution_audience"]').forEach((input) => {
       input.addEventListener("change", () => {
         if ((byId("solutionOfferingCategory")?.value || "Service offerings") === "Product offerings") {
@@ -4172,7 +4309,12 @@ function bindStaticEvents() {
       });
     });
 
-    byId("appShell")?.addEventListener("click", safeAsync(async (event) => {
+  byId("appShell")?.addEventListener("click", safeAsync(async (event) => {
+    const removeTagButton = event.target.closest("[data-remove-solution-tag]");
+    if (removeTagButton) {
+      removeSolutionTag(removeTagButton.dataset.removeSolutionTag);
+      return;
+    }
     const button = event.target.closest("[data-copy-share-url]");
     if (!button) return;
     await navigator.clipboard?.writeText(button.dataset.copyShareUrl);

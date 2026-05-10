@@ -489,10 +489,15 @@
                       <span>Offering Image</span>
                       <input name="offering_image_upload" type="file" accept=".jpg,.jpeg,.png,.webp" />
                     </label>
-                    <label class="wide">
+                    <div class="wide choice-block">
                       <span>Tags</span>
-                      <input name="tags" id="solutionTagsInput" list="solutionTagOptions" placeholder="Start typing or add fresh tags, separated by commas" />
-                    </label>
+                      <div class="tag-entry-shell">
+                        <input id="solutionTagEntry" list="solutionTagOptions" placeholder="Select or type a tag, then press Enter" />
+                        <button type="button" id="addSolutionTagBtn" class="btn btn-secondary btn-compact">Add Tag</button>
+                      </div>
+                      <input type="hidden" name="tags" id="solutionTagsInput" />
+                      <div id="solutionTagChips" class="tag-cloud tag-chip-editor"></div>
+                    </div>
                   </div>
                 </div>
 
@@ -896,11 +901,23 @@
           <span>Admin Review Notes</span>
           <textarea name="admin_review_notes" rows="3" placeholder="Optional notes for the submission record"></textarea>
         </label>
+      </div>
+      <section class="panel panel-soft">
+        <div class="panel-head panel-head-tight">
+          <div>
+            <p class="eyebrow">Editable Fields</p>
+            <h4 id="submissionStructuredTitle">Submission Details</h4>
+          </div>
+        </div>
+        <div id="submissionReviewFields" class="form-grid"></div>
+      </section>
+      <details class="submission-json-panel">
+        <summary>Advanced JSON View</summary>
         <label class="wide">
           <span>Submission Payload</span>
           <textarea id="submissionPayloadEditor" name="payload_json" rows="18" spellcheck="false"></textarea>
         </label>
-      </div>
+      </details>
       <p id="submissionReviewStatus" class="helper-text"></p>
       <div class="modal-actions modal-actions-spread">
         <button type="button" id="saveSubmissionReviewBtn" class="btn btn-secondary">Save Changes</button>
