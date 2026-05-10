@@ -3784,14 +3784,8 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
 
   try {
     const greWrite = await syncApprovedSolutionToGre(payload);
-    let greSyncStatus = "synced";
-    let greSyncMessage = `Solution and offering were synced to GRE successfully. Solution ID ${greWrite.solutionId}${greWrite.offeringId ? `, Offering ID ${greWrite.offeringId}` : ""}.`;
-    try {
-      await syncGreChatbotData(defaultAiProvider);
-    } catch (syncError) {
-      greSyncStatus = "synced_gre_pending_local_refresh";
-      greSyncMessage += ` GRE accepted the write, but the local GRE Chatbot dataset refresh still needs a rerun: ${syncError instanceof Error ? syncError.message : String(syncError)}`;
-    }
+    const greSyncStatus = "synced_gre_pending_local_refresh";
+    const greSyncMessage = `Solution and offering were synced to GRE successfully. Solution ID ${greWrite.solutionId}${greWrite.offeringId ? `, Offering ID ${greWrite.offeringId}` : ""}. Run GRE Chatbot data refresh separately to pull the new record into local Supabase datasets.`;
 
     const nextPayload = {
       ...payload,
@@ -3807,6 +3801,7 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
         reviewed_by_email: actorEmail,
         reviewed_at: new Date().toISOString(),
         payload: nextPayload,
+        target_solution_id: String(greWrite.solutionId),
         gre_sync_status: greSyncStatus,
         gre_sync_message: greSyncMessage,
       })
