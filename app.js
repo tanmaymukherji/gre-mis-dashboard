@@ -96,7 +96,32 @@ const OFFERING_TYPE_OPTIONS = {
   ],
 };
 
-const DEFAULT_LANGUAGE_OPTIONS = ["ENG", "HIN", "BENGALI", "ODIA", "KANNADA", "MALAYALAM", "MARATHI", "TAMIL", "TELGU"];
+const DEFAULT_LANGUAGE_OPTIONS = [
+  "ENG",
+  "HIN",
+  "ASSAMESE",
+  "BENGALI",
+  "BODO",
+  "DOGRI",
+  "GUJARATI",
+  "HINDI",
+  "KANNADA",
+  "KASHMIRI",
+  "KONKANI",
+  "MAITHILI",
+  "MALAYALAM",
+  "MANIPURI",
+  "MARATHI",
+  "NEPALI",
+  "ODIA",
+  "PUNJABI",
+  "SANSKRIT",
+  "SANTALI",
+  "SINDHI",
+  "TAMIL",
+  "TELUGU",
+  "URDU",
+];
 const MAX_EMBEDDED_FILE_BYTES = 5 * 1024 * 1024;
 
 const MATCH_STOPWORDS = new Set([
