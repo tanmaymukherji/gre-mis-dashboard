@@ -2270,6 +2270,20 @@ function setMultiSelectOptions(selectId, values) {
   });
 }
 
+function setCheckboxGroupOptions(groupId, inputName, values) {
+  const group = byId(groupId);
+  if (!group) return;
+  const previous = [...group.querySelectorAll(`input[name="${inputName}"]:checked`)].map((input) => input.value);
+  group.innerHTML = ensureList(values)
+    .map((item) => `
+      <label>
+        <input type="checkbox" name="${escAttr(inputName)}" value="${escAttr(item)}" ${previous.includes(item) ? "checked" : ""} />
+        <span>${esc(item)}</span>
+      </label>
+    `)
+    .join("");
+}
+
 function setDatalistOptions(listId, values) {
   const list = byId(listId);
   if (!list) return;
@@ -2330,7 +2344,7 @@ function renderSolutionReferenceInputs() {
   const master = state.data.offeringMaster || buildOfferingMasterData([]);
   setSelectOptions("solutionPrimaryValuechain", master.valuechains, true);
   setSelectOptions("solutionSecondaryValuechain", master.valuechains, true);
-  setMultiSelectOptions("solutionLanguagesSelect", master.languages);
+  setCheckboxGroupOptions("solutionLanguagesGroup", "languages", master.languages);
   setDatalistOptions("solutionTagOptions", master.tags);
   updateSolutionApplicationOptions();
   updateSolutionOfferingForm();

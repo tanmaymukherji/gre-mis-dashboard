@@ -365,10 +365,10 @@
                       <span>Facilitator Details</span>
                       <textarea name="trainer_details_text" rows="3"></textarea>
                     </label>
-                    <label class="wide">
-                      <span>Languages</span>
-                      <select id="solutionLanguagesSelect" name="languages" multiple size="5"></select>
-                    </label>
+                    <div class="wide choice-block">
+                      <span class="field-label">Languages</span>
+                      <div id="solutionLanguagesGroup" class="checkbox-grid choice-grid choice-grid-2 language-choice-grid"></div>
+                    </div>
                     <label class="wide">
                       <span>Geographies</span>
                       <input name="geographies" id="solutionGeographies" list="solutionGeographyOptions" placeholder="Start typing a block, city, or state and separate multiple places with semicolons" />

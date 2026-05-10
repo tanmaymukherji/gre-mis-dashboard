@@ -588,12 +588,10 @@ h2 { font-size: 1.35rem; }
   background: rgba(255, 255, 255, 0.78);
 }
 
-#solutionLanguagesSelect {
-  min-height: 180px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: #fff;
-  line-height: 1.45;
+.language-choice-grid {
+  max-height: 220px;
+  overflow: auto;
+  align-content: start;
 }
 
 .conditional-offering-section.hidden {
