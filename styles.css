@@ -533,6 +533,12 @@ h2 { font-size: 1.35rem; }
   color: var(--text);
 }
 
+.checkbox-grid input[type="checkbox"],
+.checkbox-grid input[type="radio"] {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
 .toggle-choice {
   display: flex;
   flex-wrap: wrap;
