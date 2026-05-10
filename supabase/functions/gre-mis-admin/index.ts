@@ -1223,6 +1223,42 @@ function extractGreTagEntry(entity: Record<string, unknown> | null, sequence: nu
   };
 }
 
+async function fetchGreTagsByCodes(tagCodes: string[], sessionId: string) {
+  const uniqueCodes = uniqueStrings(tagCodes.map((item) => requireString(item)).filter(Boolean));
+  if (!uniqueCodes.length) return [];
+  const query = uniqueCodes.join(",");
+  const { data } = await requestGreGatewayJson(
+    `/commons-domain-service/api/v1/tag/codes?codes=${encodeURIComponent(query)}`,
+    "GET",
+    undefined,
+    sessionId,
+  );
+  if (Array.isArray(data)) return data as Record<string, unknown>[];
+  if (Array.isArray((data as Record<string, unknown>)?.data)) {
+    return (data as Record<string, unknown>).data as Record<string, unknown>[];
+  }
+  return [];
+}
+
+async function buildGreTagEntriesFromCodes(tagCodes: string[], sessionId: string) {
+  const tags = await fetchGreTagsByCodes(tagCodes, sessionId);
+  return uniqueStrings(tagCodes).map((tagCode, index) => {
+    const matched = tags.find((item) =>
+      requireString(item.code || item.tagCode || item.identifier) === tagCode
+    );
+    if (!matched) return null;
+    const tagId = parseNumber(matched.id || matched.tagId, 0);
+    if (!tagId) return null;
+    return {
+      id: 0,
+      tagCode,
+      tagId,
+      tagSequence: index,
+      isActive: true,
+    };
+  }).filter(Boolean) as Record<string, unknown>[];
+}
+
 function buildGreFallbackVariety(applicationId: string, applicationName: string) {
   return {
     id: parseNumber(applicationId, 0),
@@ -1326,10 +1362,10 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
     );
   const resolvedPrimaryVariety = genericProductVariety || buildGreFallbackVariety(primaryApplicationId, primaryApplication);
 
-  const solutionTagList = [
-    extractGreTagEntry(genericProduct, 0),
-    extractGreTagEntry(resolvedPrimaryVariety, 1),
-  ].filter(Boolean) as Record<string, unknown>[];
+  const tagCodes = [
+    requireString(genericProduct.tagIdentifier),
+    requireString(resolvedPrimaryVariety?.tagIdentifier),
+  ].filter(Boolean);
 
   if (secondaryValuechain && secondaryApplication) {
     try {
@@ -1344,14 +1380,16 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
         String(item.id ?? "") === requireString(secondaryMatch.primary_application_id) ||
         normalizeGreLabel(extractGreEntityName(item)) === normalizeComparable(secondaryApplication)
       ) || null;
-      [secondaryGenericProduct, secondaryVariety].forEach((entry, index) => {
-        const tag = extractGreTagEntry(entry, solutionTagList.length + index);
-        if (tag) solutionTagList.push(tag);
+      [secondaryGenericProduct, secondaryVariety].forEach((entry) => {
+        const code = requireString(entry?.tagIdentifier);
+        if (code) tagCodes.push(code);
       });
     } catch {
       // Secondary hierarchy is optional for write-back.
     }
   }
+
+  const solutionTagList = await buildGreTagEntriesFromCodes(tagCodes, sessionId);
 
   return {
     genericProductId,
