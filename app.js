@@ -1852,7 +1852,7 @@ class GreMisStore {
       console.warn("LGD geography lookup failed", error);
       return [];
     }
-    return uniq(ensureList(data).map(formatLgdGeographyLabel).filter(Boolean));
+    return buildRankedLgdSuggestions(ensureList(data), search);
   }
 
   async importInboundWorkbook(fileName, rows, aiProvider) {
@@ -2249,6 +2249,57 @@ function formatLgdGeographyLabel(row) {
     return country;
   }
   return normalizeText(row.display_label) || country;
+}
+
+function buildLgdGeographyVariants(row) {
+  if (!row || typeof row !== "object") return [];
+  const country = "India";
+  const block = normalizeText(row.block_name || row.gram_panchayat_name || row.village_name);
+  const city = normalizeText(row.district_name);
+  const state = normalizeText(row.state_name);
+  const variants = [];
+  if (block && city && state) variants.push(uniq([block, city, state, country]).join(", "));
+  if (city && state) variants.push(uniq([city, state, country]).join(", "));
+  if (state) variants.push(uniq([state, country]).join(", "));
+  if (normalizeText(row.location_kind).toLowerCase() === "country" || !variants.length) variants.push(country);
+  const display = normalizeText(row.display_label);
+  if (display) variants.push(display);
+  return uniq(variants.filter(Boolean));
+}
+
+function scoreLgdSuggestion(label, query) {
+  const normalizedLabel = normalizeText(label).toLowerCase();
+  const normalizedQuery = normalizeText(query).toLowerCase();
+  if (!normalizedLabel || !normalizedQuery) return -1;
+  if (normalizedLabel === normalizedQuery) return 400;
+  if (normalizedLabel.startsWith(`${normalizedQuery},`)) return 320;
+  if (normalizedLabel.startsWith(normalizedQuery)) return 280;
+  const parts = normalizedLabel.split(",").map((item) => item.trim());
+  if (parts[0] === normalizedQuery) return 260;
+  if (parts.some((part) => part === normalizedQuery)) return 220;
+  if (parts.some((part) => part.startsWith(normalizedQuery))) return 180;
+  if (normalizedLabel.includes(normalizedQuery)) return 120;
+  return 0;
+}
+
+function buildRankedLgdSuggestions(rows, query) {
+  const seen = new Set();
+  return ensureList(rows)
+    .flatMap((row) => buildLgdGeographyVariants(row))
+    .filter((label) => {
+      const key = normalizeText(label).toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((label) => ({ label, score: scoreLgdSuggestion(label, query) }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return left.label.localeCompare(right.label);
+    })
+    .slice(0, 20)
+    .map((item) => item.label);
 }
 
 function setSelectOptions(selectId, values, allowBlank = true) {
