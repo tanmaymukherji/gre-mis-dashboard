@@ -264,7 +264,7 @@
                       <span>Secondary Application</span>
                       <select id="solutionSecondaryApplication" name="secondary_application"></select>
                     </label>
-                    <div class="wide">
+                    <div class="wide choice-block">
                       <span class="field-label">Who Can avail it</span>
                       <div class="checkbox-grid audience-grid" id="solutionAudienceGroup">
                         <label><input type="checkbox" name="solution_audience" value="Individuals" /> Individuals</label>
@@ -311,7 +311,7 @@
                     <h4>Product Details</h4>
                   </div>
                   <div class="form-grid">
-                    <div class="wide">
+                    <div class="wide choice-block">
                       <span class="field-label">Who Can avail it</span>
                       <div class="checkbox-grid audience-grid" id="productAudienceGroup">
                         <label><input type="checkbox" name="product_audience" value="Individuals" /> Individuals</label>
@@ -365,10 +365,10 @@
                       <span>Facilitator Details</span>
                       <textarea name="trainer_details_text" rows="3"></textarea>
                     </label>
-                    <label class="wide">
-                      <span>Languages</span>
+                    <div class="wide choice-block">
+                      <span class="field-label">Languages</span>
                       <div id="solutionLanguagesGroup" class="checkbox-grid audience-grid"></div>
-                    </label>
+                    </div>
                     <label class="wide">
                       <span>Geographies</span>
                       <input name="geographies" id="solutionGeographies" list="solutionGeographyOptions" placeholder="Start typing a block, city, or state and separate multiple places with semicolons" />
@@ -391,7 +391,7 @@
                       <span>Prerequisites - Participants and Training</span>
                       <textarea name="prerequisites" rows="3"></textarea>
                     </label>
-                    <div class="wide">
+                    <div class="wide choice-block">
                       <span class="field-label">Location Availability</span>
                       <div class="checkbox-grid audience-grid">
                         <label><input type="checkbox" name="location_availability" value="At Service Provider" /> At Service Provider</label>
