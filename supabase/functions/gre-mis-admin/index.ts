@@ -350,6 +350,17 @@ const greServiceSpecTemplate = [
   { id: 87, sequence: 16, paramName: "Service offering Brochure", specificationCode: "SO_SERVICE_OFFERING_BROCHURE", groupCode: "SPECIFICATION_GROUP.SERVICE_OFFERINGS", dataType: "ATTACHMENT", isMandatory: false, isMultiValued: true },
 ];
 
+const greServiceOfferingSubtypeFallbacks: Record<string, string> = {
+  "training": "OFFERINGS_CATEGORY.TRAINING",
+  "consulting": "OFFERINGS_CATEGORY.CONSULTING",
+  "consulting mentoring": "OFFERINGS_CATEGORY.CONSULTING",
+  "consulting mentoring.": "OFFERINGS_CATEGORY.CONSULTING",
+  "mentoring": "OFFERINGS_CATEGORY.MENTORING",
+  "financial support": "OFFERINGS_CATEGORY.FINANCIAL_SUPPORT",
+  "market support": "OFFERINGS_CATEGORY.MARKET_SUPPORT",
+  "technology transfer": "OFFERINGS_CATEGORY.TECHNOLOGY_TRANSFER",
+};
+
 type GreUserResolution = {
   status: string;
   greUserId: number | null;
@@ -1359,12 +1370,22 @@ async function resolveGreOfferingTypeAndSubType(payload: Record<string, unknown>
   const offeringGroupCode = "OFFERINGS.SERVICE_OFFERINGS";
   const subTypes = await fetchGreProductRefHierarchy(offeringGroupCode, sessionId);
   const target = requireString(payload.offering_type);
+  const normalizedTarget = normalizeComparable(target);
   const matched = findGreRefDataOption(subTypes, target, [
     target.replace(/\//g, " "),
     target.replace(/\s*&\s*/g, " "),
     target.replace(/\s+/g, " "),
   ]);
-  if (!matched) throw new Error(`Could not map GRE offering type for "${target}".`);
+  if (!matched) {
+    const fallbackCode = greServiceOfferingSubtypeFallbacks[normalizedTarget];
+    if (fallbackCode) {
+      return {
+        offeringGroupCode,
+        offeringSubTypeCode: fallbackCode,
+      };
+    }
+    throw new Error(`Could not map GRE offering type for "${target}".`);
+  }
   return {
     offeringGroupCode,
     offeringSubTypeCode: requireString(matched.code),
