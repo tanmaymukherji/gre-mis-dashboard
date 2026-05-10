@@ -1234,6 +1234,9 @@ async function fetchGreTagsByCodes(tagCodes: string[], sessionId: string) {
     sessionId,
   );
   if (Array.isArray(data)) return data as Record<string, unknown>[];
+  if (Array.isArray((data as Record<string, unknown>)?.value)) {
+    return (data as Record<string, unknown>).value as Record<string, unknown>[];
+  }
   if (Array.isArray((data as Record<string, unknown>)?.data)) {
     return (data as Record<string, unknown>).data as Record<string, unknown>[];
   }
@@ -1270,6 +1273,20 @@ function buildGreFallbackVariety(applicationId: string, applicationName: string)
     description: buildGreTextList(""),
     tagIdentifier: "",
   };
+}
+
+function buildGreTagIdentifierFromCode(code: string) {
+  const normalized = requireString(code);
+  return normalized ? `TAG.${normalized}` : "";
+}
+
+function buildGreVarietyTagIdentifier(genericProductCode: string, applicationName: string) {
+  const base = requireString(genericProductCode);
+  const suffix = requireString(applicationName)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return base && suffix ? `TAG.${base}.${suffix}` : "";
 }
 
 async function resolveGreHierarchyMatch(
@@ -1357,6 +1374,15 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
   const genericProductId = requireString(primaryMatch.primary_valuechain_id);
   const primaryApplicationId = requireString(primaryMatch.primary_application_id);
   const genericProduct = await fetchGreGenericProductDetail(genericProductId, sessionId);
+  if (!requireString(genericProduct.tagIdentifier) && requireString(genericProduct.genericProductCode || genericProduct.code)) {
+    genericProduct.tagIdentifier = buildGreTagIdentifierFromCode(requireString(genericProduct.genericProductCode || genericProduct.code));
+  }
+  if (!requireString(genericProduct.code) && requireString(genericProduct.genericProductCode)) {
+    genericProduct.code = requireString(genericProduct.genericProductCode);
+  }
+  if (!Array.isArray(genericProduct.name) && Array.isArray(genericProduct.genericProductName)) {
+    genericProduct.name = genericProduct.genericProductName;
+  }
   const primaryApplications = await fetchGreGenericProductApplications(genericProductId, sessionId);
   const genericProductVariety = resolveGreVarietyFromProductDetail(genericProduct, primaryApplicationId, primaryApplication)
     || primaryApplications.find((item) =>
@@ -1364,6 +1390,12 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
       normalizeGreLabel(extractGreEntityName(item)) === normalizeComparable(primaryApplication)
     );
   const resolvedPrimaryVariety = genericProductVariety || buildGreFallbackVariety(primaryApplicationId, primaryApplication);
+  if (!requireString(resolvedPrimaryVariety.tagIdentifier)) {
+    resolvedPrimaryVariety.tagIdentifier = buildGreVarietyTagIdentifier(
+      requireString(genericProduct.code || genericProduct.genericProductCode),
+      primaryApplication,
+    );
+  }
 
   const tagCodes = [
     requireString(genericProduct.tagIdentifier),
@@ -1374,6 +1406,15 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
     try {
       const secondaryMatch = await resolveGreHierarchyMatch(secondaryValuechain, secondaryApplication);
       const secondaryGenericProduct = await fetchGreGenericProductDetail(requireString(secondaryMatch.primary_valuechain_id), sessionId);
+      if (!requireString(secondaryGenericProduct.tagIdentifier) && requireString(secondaryGenericProduct.genericProductCode || secondaryGenericProduct.code)) {
+        secondaryGenericProduct.tagIdentifier = buildGreTagIdentifierFromCode(requireString(secondaryGenericProduct.genericProductCode || secondaryGenericProduct.code));
+      }
+      if (!requireString(secondaryGenericProduct.code) && requireString(secondaryGenericProduct.genericProductCode)) {
+        secondaryGenericProduct.code = requireString(secondaryGenericProduct.genericProductCode);
+      }
+      if (!Array.isArray(secondaryGenericProduct.name) && Array.isArray(secondaryGenericProduct.genericProductName)) {
+        secondaryGenericProduct.name = secondaryGenericProduct.genericProductName;
+      }
       const secondaryApplications = await fetchGreGenericProductApplications(requireString(secondaryMatch.primary_valuechain_id), sessionId);
       const secondaryVariety = resolveGreVarietyFromProductDetail(
         secondaryGenericProduct,
@@ -1383,6 +1424,12 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
         String(item.id ?? "") === requireString(secondaryMatch.primary_application_id) ||
         normalizeGreLabel(extractGreEntityName(item)) === normalizeComparable(secondaryApplication)
       ) || null;
+      if (secondaryVariety && !requireString(secondaryVariety.tagIdentifier)) {
+        secondaryVariety.tagIdentifier = buildGreVarietyTagIdentifier(
+          requireString(secondaryGenericProduct.code || secondaryGenericProduct.genericProductCode),
+          secondaryApplication,
+        );
+      }
       [secondaryGenericProduct, secondaryVariety].forEach((entry) => {
         const code = requireString(entry?.tagIdentifier);
         if (code) tagCodes.push(code);
