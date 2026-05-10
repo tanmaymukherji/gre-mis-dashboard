@@ -266,7 +266,7 @@
                     </label>
                     <div class="wide choice-block">
                       <span class="field-label">Who Can avail it</span>
-                      <div class="checkbox-grid audience-grid" id="solutionAudienceGroup">
+                      <div class="checkbox-grid choice-grid choice-grid-2" id="solutionAudienceGroup">
                         <label><input type="checkbox" name="solution_audience" value="Individuals" /> Individuals</label>
                         <label><input type="checkbox" name="solution_audience" value="Groups" /> Groups</label>
                         <label><input type="checkbox" name="solution_audience" value="SHGs" /> SHGs</label>
@@ -313,7 +313,7 @@
                   <div class="form-grid">
                     <div class="wide choice-block">
                       <span class="field-label">Who Can avail it</span>
-                      <div class="checkbox-grid audience-grid" id="productAudienceGroup">
+                      <div class="checkbox-grid choice-grid choice-grid-2" id="productAudienceGroup">
                         <label><input type="checkbox" name="product_audience" value="Individuals" /> Individuals</label>
                         <label><input type="checkbox" name="product_audience" value="Groups" /> Groups</label>
                         <label><input type="checkbox" name="product_audience" value="SHGs" /> SHGs</label>
@@ -365,10 +365,10 @@
                       <span>Facilitator Details</span>
                       <textarea name="trainer_details_text" rows="3"></textarea>
                     </label>
-                    <div class="wide choice-block">
-                      <span class="field-label">Languages</span>
-                      <div id="solutionLanguagesGroup" class="checkbox-grid audience-grid"></div>
-                    </div>
+                    <label class="wide">
+                      <span>Languages</span>
+                      <select id="solutionLanguagesSelect" name="languages" multiple size="5"></select>
+                    </label>
                     <label class="wide">
                       <span>Geographies</span>
                       <input name="geographies" id="solutionGeographies" list="solutionGeographyOptions" placeholder="Start typing a block, city, or state and separate multiple places with semicolons" />
@@ -393,7 +393,7 @@
                     </label>
                     <div class="wide choice-block">
                       <span class="field-label">Location Availability</span>
-                      <div class="checkbox-grid audience-grid">
+                      <div class="checkbox-grid choice-grid choice-grid-2">
                         <label><input type="checkbox" name="location_availability" value="At Service Provider" /> At Service Provider</label>
                         <label><input type="checkbox" name="location_availability" value="At Service Seeker" /> At Service Seeker</label>
                         <label><input type="checkbox" name="location_availability" value="Others" /> Others</label>
@@ -444,13 +444,13 @@
                         <option value="Online & Offline">Online & Offline</option>
                       </select>
                     </label>
-                    <div>
-                      <span class="field-label">Certification Offered</span>
-                      <div class="toggle-choice">
-                        <label><input type="radio" name="certification_offered" value="Provided" /> Provided</label>
-                        <label><input type="radio" name="certification_offered" value="Not Provided" checked /> Not Provided</label>
-                      </div>
-                    </div>
+                    <label>
+                      <span>Certification Offered</span>
+                      <select name="certification_offered">
+                        <option value="Not Provided" selected>Not Provided</option>
+                        <option value="Provided">Provided</option>
+                      </select>
+                    </label>
                     <label class="wide">
                       <span>Service Offering Brochure</span>
                       <input name="service_brochure_upload" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png" />
