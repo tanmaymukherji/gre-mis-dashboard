@@ -1845,7 +1845,7 @@ class GreMisStore {
     const wildcard = `%${search.replace(/[%_]/g, " ").trim()}%`;
     const { data, error } = await client
       .from("lgd_geography_directory")
-      .select("display_label,block_name,district_name,state_name,gram_panchayat_name,village_name")
+      .select("display_label,location_kind,block_name,district_name,state_name,gram_panchayat_name,village_name")
       .or(`search_text.ilike.${wildcard},display_label.ilike.${wildcard},block_name.ilike.${wildcard},district_name.ilike.${wildcard},state_name.ilike.${wildcard}`)
       .limit(20);
     if (error) {
@@ -2230,14 +2230,25 @@ function buildOfferingMasterData(rows) {
 
 function formatLgdGeographyLabel(row) {
   if (!row || typeof row !== "object") return "";
-  const ordered = [
-    normalizeText(row.block_name || row.gram_panchayat_name || row.village_name),
-    normalizeText(row.district_name),
-    normalizeText(row.state_name),
-    "India",
-  ].filter(Boolean);
-  if (ordered.length >= 3) return uniq(ordered).join(", ");
-  return normalizeText(row.display_label);
+  const country = "India";
+  const block = normalizeText(row.block_name || row.gram_panchayat_name || row.village_name);
+  const city = normalizeText(row.district_name);
+  const state = normalizeText(row.state_name);
+  const kind = normalizeText(row.location_kind).toLowerCase();
+
+  if (block && city && state) {
+    return uniq([block, city, state, country]).join(", ");
+  }
+  if (city && state) {
+    return uniq([city, state, country]).join(", ");
+  }
+  if (state) {
+    return uniq([state, country]).join(", ");
+  }
+  if (kind === "country") {
+    return country;
+  }
+  return normalizeText(row.display_label) || country;
 }
 
 function setSelectOptions(selectId, values, allowBlank = true) {
