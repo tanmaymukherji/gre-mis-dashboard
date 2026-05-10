@@ -543,8 +543,8 @@ h2 { font-size: 1.35rem; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.checkbox-grid label,
-.toggle-choice label {
+.checkbox-grid > label,
+.toggle-choice > label {
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -562,8 +562,17 @@ h2 { font-size: 1.35rem; }
   white-space: nowrap;
 }
 
-.checkbox-grid input[type="checkbox"],
-.checkbox-grid input[type="radio"] {
+.checkbox-grid > label > span,
+.toggle-choice > label > span {
+  display: inline;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.checkbox-grid > label > input[type="checkbox"],
+.checkbox-grid > label > input[type="radio"] {
   flex: 0 0 auto;
   margin: 0;
 }
@@ -580,7 +589,10 @@ h2 { font-size: 1.35rem; }
 }
 
 #solutionLanguagesSelect {
-  min-height: 132px;
+  min-height: 136px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #fff;
 }
 
 .conditional-offering-section.hidden {
