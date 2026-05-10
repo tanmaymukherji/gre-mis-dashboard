@@ -1209,7 +1209,7 @@ function extractGreResponseRecord(data: unknown) {
 }
 
 function normalizeGreLocationLabel(item: Record<string, unknown>) {
-  const label = requireString(item.displayLabel || item.display_label || item.label);
+  const label = requireString(item.displayLabel || item.display_label || item.label || item.addressLabel || item.address_label);
   if (label) return label;
   const textValue = firstArrayObject(item.value);
   if (textValue?.text) return requireString(textValue.text);
@@ -1222,10 +1222,22 @@ function normalizeGreLocationLabel(item: Record<string, unknown>) {
 }
 
 function extractGreLocationCode(item: Record<string, unknown>) {
-  return requireString(item.code || item.locationCode || item.location_code);
+  const locationType = requireString(item.locationType || item.location_type || item.subType || item.sub_type).toUpperCase();
+  if (locationType === "CITY") {
+    return requireString(item.cityCode || item.city_code || item.code || item.locationCode || item.location_code);
+  }
+  if (locationType === "STATE") {
+    return requireString(item.stateCode || item.state_code || item.code || item.locationCode || item.location_code);
+  }
+  if (locationType === "COUNTRY") {
+    return requireString(item.countryCode || item.country_code || item.code || item.locationCode || item.location_code);
+  }
+  return requireString(item.code || item.locationCode || item.location_code || item.cityCode || item.stateCode || item.countryCode);
 }
 
 function extractGreLocationSubtype(item: Record<string, unknown>) {
+  const locationType = requireString(item.locationType || item.location_type);
+  if (locationType) return locationType.toUpperCase();
   return requireString(item.subType || item.sub_type || item.locationKind || item.location_kind || item.type).toUpperCase();
 }
 
