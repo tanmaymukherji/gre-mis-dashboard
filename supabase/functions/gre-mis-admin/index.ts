@@ -1272,6 +1272,21 @@ async function fetchGreGenericProductApplications(genericProductId: string, sess
   return [];
 }
 
+function resolveGreVarietyFromProductDetail(
+  genericProduct: Record<string, unknown>,
+  applicationId: string,
+  applicationName: string,
+) {
+  const varieties = Array.isArray(genericProduct.genericProductVarietyList)
+    ? genericProduct.genericProductVarietyList as Record<string, unknown>[]
+    : [];
+  const normalizedApplicationName = normalizeComparable(applicationName);
+  return varieties.find((item) =>
+    String(item.id ?? "") === applicationId ||
+    normalizeGreLabel(extractGreEntityName(item)) === normalizedApplicationName
+  ) || null;
+}
+
 async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, sessionId: string) {
   const primaryValuechain = requireString(payload.primary_valuechain);
   const primaryApplication = requireString(payload.primary_application);
@@ -1283,10 +1298,11 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
   const primaryApplicationId = requireString(primaryMatch.primary_application_id);
   const genericProduct = await fetchGreGenericProductDetail(genericProductId, sessionId);
   const primaryApplications = await fetchGreGenericProductApplications(genericProductId, sessionId);
-  const genericProductVariety = primaryApplications.find((item) =>
-    String(item.id ?? "") === primaryApplicationId ||
-    normalizeGreLabel(extractGreEntityName(item)) === normalizeComparable(primaryApplication)
-  );
+  const genericProductVariety = resolveGreVarietyFromProductDetail(genericProduct, primaryApplicationId, primaryApplication)
+    || primaryApplications.find((item) =>
+      String(item.id ?? "") === primaryApplicationId ||
+      normalizeGreLabel(extractGreEntityName(item)) === normalizeComparable(primaryApplication)
+    );
   if (!genericProductVariety) {
     throw new Error(`GRE application detail could not be loaded for "${primaryApplication}".`);
   }
@@ -1301,7 +1317,11 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
       const secondaryMatch = await resolveGreHierarchyMatch(secondaryValuechain, secondaryApplication);
       const secondaryGenericProduct = await fetchGreGenericProductDetail(requireString(secondaryMatch.primary_valuechain_id), sessionId);
       const secondaryApplications = await fetchGreGenericProductApplications(requireString(secondaryMatch.primary_valuechain_id), sessionId);
-      const secondaryVariety = secondaryApplications.find((item) =>
+      const secondaryVariety = resolveGreVarietyFromProductDetail(
+        secondaryGenericProduct,
+        requireString(secondaryMatch.primary_application_id),
+        secondaryApplication,
+      ) || secondaryApplications.find((item) =>
         String(item.id ?? "") === requireString(secondaryMatch.primary_application_id) ||
         normalizeGreLabel(extractGreEntityName(item)) === normalizeComparable(secondaryApplication)
       ) || null;
