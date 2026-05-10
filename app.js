@@ -45,9 +45,16 @@ const state = {
     state: "all",
     search: "",
   },
-    data: {
+  data: {
       curators: [],
       traders: [],
+      offeringMaster: {
+        valuechains: [],
+        applications: [],
+        tags: [],
+        languages: [],
+        geographies: [],
+      },
       options: [],
       needs: [],
       needUpdates: [],
@@ -56,8 +63,39 @@ const state = {
       pendingFormSubmissions: [],
       aiReviewNeeds: [],
       users: [],
-    },
-  };
+  },
+};
+
+const OFFERING_CATEGORY_OPTIONS = [
+  { value: "Service offerings", label: "Service" },
+  { value: "Product offerings", label: "Product" },
+  { value: "Knowledge offerings", label: "Knowledge" },
+];
+
+const OFFERING_TYPE_OPTIONS = {
+  "Product offerings": [
+    { value: "Machinery", label: "Machinery" },
+    { value: "Plant setup", label: "Plant Setup" },
+    { value: "Product bought", label: "Product/Raw Material Bought" },
+    { value: "Raw material", label: "Raw Material Supply" },
+  ],
+  "Service offerings": [
+    { value: "Training", label: "Training" },
+    { value: "Consulting", label: "Consulting / Mentoring" },
+    { value: "Financial support", label: "Financial Support" },
+    { value: "Market support", label: "Market Support" },
+    { value: "Tech transfer", label: "Technology Transfer" },
+  ],
+  "Knowledge offerings": [
+    { value: "Blogs", label: "Blogs" },
+    { value: "Market reports", label: "Market Reports" },
+    { value: "Sop manuals", label: "SOP / Manuals" },
+    { value: "Videos", label: "Videos" },
+  ],
+};
+
+const DEFAULT_LANGUAGE_OPTIONS = ["ENG", "HIN", "BENGALI", "ODIA", "KANNADA", "MALAYALAM", "MARATHI", "TAMIL", "TELGU"];
+const MAX_EMBEDDED_FILE_BYTES = 5 * 1024 * 1024;
 
 const MATCH_STOPWORDS = new Set([
   "about", "across", "after", "also", "been", "being", "between", "could", "does", "from", "have", "into",
@@ -1525,36 +1563,45 @@ class GreMisStore {
   }
 
   async loadBaseData() {
-    const client = this.getClient();
-    if (!client) {
-      state.data.curators = FALLBACK_CURATORS;
-      state.data.traders = [];
-      state.data.options = [];
-      state.data.needs = [];
-      state.data.needUpdates = [];
-      state.matchCache.clear();
-      return;
-    }
+      const client = this.getClient();
+      if (!client) {
+        state.data.curators = FALLBACK_CURATORS;
+        state.data.traders = [];
+        state.data.offeringMaster = {
+          valuechains: [],
+          applications: [],
+          tags: [],
+          languages: [...DEFAULT_LANGUAGE_OPTIONS],
+          geographies: [],
+        };
+        state.data.options = [];
+        state.data.needs = [];
+        state.data.needUpdates = [];
+        state.matchCache.clear();
+        return;
+      }
 
-    const [curators, traders, options, needs, updates] = await Promise.all([
-      client.from("gre_mis_curators").select("id, display_name, email").eq("is_active", true).order("display_name"),
-      client.from("traders").select("trader_id,trader_name,organisation_name,email,website,association_status").order("organisation_name"),
-      client.from("gre_mis_options").select("id, option_type, label, sort_order").eq("is_active", true).order("sort_order"),
-      client.from("gre_mis_needs").select("*").eq("approval_status", "approved").order("requested_on", { ascending: false }),
-      client.from("gre_mis_need_updates").select("*").order("created_at", { ascending: false }),
-    ]);
+    const [curators, traders, offerings, options, needs, updates] = await Promise.all([
+        client.from("gre_mis_curators").select("id, display_name, email").eq("is_active", true).order("display_name"),
+        client.from("traders").select("trader_id,trader_name,organisation_name,email,website,association_status").order("organisation_name"),
+        client.from("offerings").select("primary_valuechain,primary_application,valuechains,applications,tags,languages,geographies").limit(5000),
+        client.from("gre_mis_options").select("id, option_type, label, sort_order").eq("is_active", true).order("sort_order"),
+        client.from("gre_mis_needs").select("*").eq("approval_status", "approved").order("requested_on", { ascending: false }),
+        client.from("gre_mis_need_updates").select("*").order("created_at", { ascending: false }),
+      ]);
 
-    if (curators.error || traders.error || options.error || needs.error || updates.error) {
-      throw new Error(curators.error?.message || traders.error?.message || options.error?.message || needs.error?.message || updates.error?.message || "Could not load live dashboard data.");
-    }
+      if (curators.error || traders.error || offerings.error || options.error || needs.error || updates.error) {
+        throw new Error(curators.error?.message || traders.error?.message || offerings.error?.message || options.error?.message || needs.error?.message || updates.error?.message || "Could not load live dashboard data.");
+      }
 
-    state.data.curators = ensureList(curators.data);
-    state.data.traders = ensureList(traders.data);
-    state.data.options = ensureList(options.data);
-    state.data.needs = ensureList(needs.data).map((need) => ({
-      ...need,
-      curated_need: parseArray(need.curated_need),
-    }));
+      state.data.curators = ensureList(curators.data);
+      state.data.traders = ensureList(traders.data);
+      state.data.offeringMaster = buildOfferingMasterData(ensureList(offerings.data));
+      state.data.options = ensureList(options.data);
+      state.data.needs = ensureList(needs.data).map((need) => ({
+        ...need,
+        curated_need: parseArray(need.curated_need),
+      }));
     state.data.needUpdates = ensureList(updates.data);
     state.matchCache.clear();
   }
@@ -2091,6 +2138,168 @@ function getShareUrl(mode) {
   return url.toString();
 }
 
+function buildOfferingMasterData(rows) {
+  const lists = {
+    valuechains: new Set(),
+    applications: new Set(),
+    tags: new Set(),
+    languages: new Set(DEFAULT_LANGUAGE_OPTIONS),
+    geographies: new Set(),
+  };
+  ensureList(rows).forEach((row) => {
+    [
+      normalizeText(row.primary_valuechain),
+      ...parseArray(row.valuechains),
+    ].filter(Boolean).forEach((item) => lists.valuechains.add(item));
+    [
+      normalizeText(row.primary_application),
+      ...parseArray(row.applications),
+    ].filter(Boolean).forEach((item) => lists.applications.add(item));
+    parseArray(row.tags).filter(Boolean).forEach((item) => lists.tags.add(item));
+    parseArray(row.languages).filter(Boolean).forEach((item) => lists.languages.add(item));
+    parseArray(row.geographies).filter(Boolean).forEach((item) => lists.geographies.add(item));
+  });
+  return {
+    valuechains: [...lists.valuechains].sort((a, b) => a.localeCompare(b)),
+    applications: [...lists.applications].sort((a, b) => a.localeCompare(b)),
+    tags: [...lists.tags].sort((a, b) => a.localeCompare(b)),
+    languages: [...lists.languages].sort((a, b) => a.localeCompare(b)),
+    geographies: [...lists.geographies].sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+function setSelectOptions(selectId, values, allowBlank = true) {
+  const select = byId(selectId);
+  if (!select) return;
+  const previous = select.value;
+  const items = ensureList(values);
+  select.innerHTML = [
+    allowBlank ? `<option value="">Select</option>` : "",
+    ...items.map((item) => {
+      const value = typeof item === "string" ? item : item.value;
+      const label = typeof item === "string" ? item : item.label;
+      return `<option value="${esc(value)}">${esc(label)}</option>`;
+    }),
+  ].join("");
+  if (items.some((item) => (typeof item === "string" ? item : item.value) === previous)) {
+    select.value = previous;
+  }
+}
+
+function setMultiSelectOptions(selectId, values) {
+  const select = byId(selectId);
+  if (!select) return;
+  const previous = [...select.selectedOptions].map((option) => option.value);
+  select.innerHTML = ensureList(values)
+    .map((item) => `<option value="${esc(item)}">${esc(item)}</option>`)
+    .join("");
+  [...select.options].forEach((option) => {
+    option.selected = previous.includes(option.value);
+  });
+}
+
+function setDatalistOptions(listId, values) {
+  const list = byId(listId);
+  if (!list) return;
+  list.innerHTML = ensureList(values)
+    .slice(0, 600)
+    .map((value) => `<option value="${esc(value)}"></option>`)
+    .join("");
+}
+
+function getCheckedValues(form, name) {
+  return [...form.querySelectorAll(`input[name="${name}"]:checked`)].map((input) => normalizeText(input.value)).filter(Boolean);
+}
+
+function normalizeMultiTextValue(value) {
+  if (Array.isArray(value)) return uniq(value.map((item) => normalizeText(item)).filter(Boolean));
+  return uniq(
+    String(value || "")
+      .split(",")
+      .map((item) => normalizeText(item))
+      .filter(Boolean),
+  );
+}
+
+function normalizeSemicolonSeparatedValue(value) {
+  if (Array.isArray(value)) return uniq(value.map((item) => normalizeText(item)).filter(Boolean));
+  return uniq(
+    String(value || "")
+      .split(/[;\n]+/)
+      .map((item) => normalizeText(item))
+      .filter(Boolean),
+  );
+}
+
+function syncProductAudienceFromSolution() {
+  const solutionValues = getCheckedValues(byId("solutionSubmissionForm"), "solution_audience");
+  document.querySelectorAll('input[name="product_audience"]').forEach((input) => {
+    input.checked = solutionValues.includes(normalizeText(input.value));
+  });
+}
+
+function updateSolutionOfferingForm() {
+  const categorySelect = byId("solutionOfferingCategory");
+  if (!categorySelect) return;
+  const category = categorySelect.value || "Service offerings";
+  setSelectOptions("solutionOfferingType", OFFERING_TYPE_OPTIONS[category] || [], true);
+  document.querySelectorAll(".conditional-offering-section").forEach((section) => {
+    section.classList.toggle("hidden", section.dataset.offeringKind !== category);
+  });
+  const productFields = [...document.querySelectorAll('#productOfferingFields input, #productOfferingFields textarea, #productOfferingFields select')];
+  const serviceFields = [...document.querySelectorAll('#serviceOfferingFields input, #serviceOfferingFields textarea, #serviceOfferingFields select')];
+  const knowledgeFields = [...document.querySelectorAll('#knowledgeOfferingFields input, #knowledgeOfferingFields textarea, #knowledgeOfferingFields select')];
+  productFields.forEach((field) => { field.disabled = category !== "Product offerings"; });
+  serviceFields.forEach((field) => { field.disabled = category !== "Service offerings"; });
+  knowledgeFields.forEach((field) => { field.disabled = category !== "Knowledge offerings"; });
+  if (category === "Product offerings") syncProductAudienceFromSolution();
+}
+
+function renderSolutionReferenceInputs() {
+  const master = state.data.offeringMaster || buildOfferingMasterData([]);
+  setSelectOptions("solutionPrimaryValuechain", master.valuechains, true);
+  setSelectOptions("solutionSecondaryValuechain", master.valuechains, true);
+  setSelectOptions("solutionPrimaryApplication", master.applications, true);
+  setSelectOptions("solutionSecondaryApplication", master.applications, true);
+  setMultiSelectOptions("solutionLanguagesSelect", master.languages);
+  setDatalistOptions("solutionGeographyOptions", master.geographies);
+  setDatalistOptions("solutionTagOptions", master.tags);
+  updateSolutionOfferingForm();
+}
+
+function appendSubmissionEntry(target, key, value) {
+  if (value === undefined || value === null || value === "") return;
+  if (Object.prototype.hasOwnProperty.call(target, key)) {
+    target[key] = Array.isArray(target[key]) ? [...target[key], value] : [target[key], value];
+    return;
+  }
+  target[key] = value;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`Could not read file ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function collectSingleFileAttachment(form, fieldName) {
+  const input = form.querySelector(`input[name="${fieldName}"]`);
+  const file = input?.files?.[0];
+  if (!file || !file.name) return null;
+  if (file.size > MAX_EMBEDDED_FILE_BYTES) {
+    throw new Error(`${file.name} is larger than 5 MB. Please use a smaller file for admin review.`);
+  }
+  return {
+    name: file.name,
+    type: file.type || "application/octet-stream",
+    size: file.size,
+    dataUrl: await readFileAsDataUrl(file),
+  };
+}
+
 function renderSharePanel(targetId, mode) {
   const target = byId(targetId);
   if (!target) return;
@@ -2127,6 +2336,7 @@ function populateSubmissionDefaults(form) {
 function renderSubmissionViews() {
   fillSupplierSelect("solutionTraderSelect", "solutionOrgName");
   fillSupplierSelect("needTraderSelect", "needOrgName");
+  renderSolutionReferenceInputs();
   renderSharePanel("solutionSharePanel", "solution");
   renderSharePanel("needSharePanel", "need");
   populateSubmissionDefaults(byId("solutionSubmissionForm"));
@@ -2984,28 +3194,35 @@ function renderAdminQueue() {
   pendingFormSubmissionsList.innerHTML = isAdminUser()
     ? ensureList(state.data.pendingFormSubmissions).length
       ? ensureList(state.data.pendingFormSubmissions)
-          .map((submission) => {
-            const payload = submission.payload && typeof submission.payload === "object" ? submission.payload : {};
-            const isNeed = submission.submission_type === "need";
-            const summaryText = isNeed
-              ? normalizeText(payload.problem_statement || "")
-              : normalizeText(payload.about_offering_text || payload.solution_name || payload.offering_name || "");
-            const categoryLine = isNeed
-              ? [payload.need_kind, payload.service_kind, payload.thematic_area, payload.application_area].filter(Boolean).join(" / ")
-              : [payload.offering_kind, payload.service_kind, payload.thematic_area, payload.application_area].filter(Boolean).join(" / ");
-            return `
-              <article class="approval-card">
+            .map((submission) => {
+              const payload = submission.payload && typeof submission.payload === "object" ? submission.payload : {};
+              const isNeed = submission.submission_type === "need";
+              const summaryText = isNeed
+                ? normalizeText(payload.problem_statement || "")
+                : normalizeText(payload.about_offering_text || payload.about_solution_text || payload.solution_name || payload.offering_name || "");
+              const categoryLine = isNeed
+                ? [payload.need_kind, payload.service_kind, payload.thematic_area, payload.application_area].filter(Boolean).join(" / ")
+                : [
+                    payload.offering_category,
+                    payload.offering_type,
+                    payload.primary_valuechain,
+                    payload.primary_application,
+                  ].filter(Boolean).join(" / ");
+              return `
+                <article class="approval-card">
                 <div class="status-row">
                   <span class="status-pill warn">${esc(isNeed ? "Need submission" : "Solution submission")}</span>
                   <span class="status-pill info">${esc(submission.source_mode || "shared_link")}</span>
                 </div>
                 <h4>${esc(submission.organization_name || payload.organization_name || "Untitled submission")}</h4>
-                <div class="detail-list">
-                  <div><strong>Submitter:</strong> ${esc(submission.submitter_name || submission.submitter_email || "Anonymous shared link")}</div>
-                  <div><strong>GRE Supplier:</strong> ${esc(submission.existing_trader_name || "Not selected")}</div>
-                  ${categoryLine ? `<div><strong>Classification:</strong> ${esc(categoryLine)}</div>` : ""}
-                  ${summaryText ? `<div><strong>Summary:</strong> ${esc(clipText(summaryText, 220))}</div>` : ""}
-                </div>
+                  <div class="detail-list">
+                    <div><strong>Submitter:</strong> ${esc(submission.submitter_name || submission.submitter_email || "Anonymous shared link")}</div>
+                    <div><strong>GRE Supplier:</strong> ${esc(submission.existing_trader_name || "Not selected")}</div>
+                    ${!isNeed && payload.solution_name ? `<div><strong>Solution:</strong> ${esc(payload.solution_name)}</div>` : ""}
+                    ${!isNeed && payload.offering_name ? `<div><strong>Offering:</strong> ${esc(payload.offering_name)}</div>` : ""}
+                    ${categoryLine ? `<div><strong>Classification:</strong> ${esc(categoryLine)}</div>` : ""}
+                    ${summaryText ? `<div><strong>Summary:</strong> ${esc(clipText(summaryText, 220))}</div>` : ""}
+                  </div>
                 <div class="card-actions">
                   <button class="btn btn-primary" data-action="approve-form-submission" data-submission-id="${esc(submission.id)}">Approve</button>
                   <button class="btn btn-danger" data-action="reject-form-submission" data-submission-id="${esc(submission.id)}">Reject</button>
@@ -3356,22 +3573,85 @@ function resetDashboardSelections() {
   };
 }
 
-function collectSubmissionPayload(form) {
-  const entries = Object.fromEntries(new FormData(form).entries());
+async function collectSubmissionPayload(form, submissionType = "need") {
+  const formData = new FormData(form);
+  const entries = {};
+  for (const [key, value] of formData.entries()) {
+    if (value instanceof File) continue;
+    appendSubmissionEntry(entries, key, value);
+  }
   const traderId = normalizeText(entries.existing_trader_id);
   const trader = getTraderById(traderId);
   if (!trader) {
     openMissingOrgDialog(entries.organization_name || "");
     throw new Error("Please select an approved GRE supplier before submitting.");
   }
+  if (submissionType !== "solution") {
+    return {
+      ...entries,
+      existing_trader_id: trader.trader_id,
+      existing_trader_name: trader.organisation_name || trader.trader_name || entries.organization_name || "",
+      organization_name: entries.organization_name || trader.organisation_name || trader.trader_name || "",
+      keywords: parseArray(entries.keywords),
+      six_m_signals: parseArray(entries.six_m_signals),
+      curated_need: parseArray(entries.curated_need),
+    };
+  }
+
+  const offeringCategory = normalizeText(entries.offering_category) || "Service offerings";
+  const solutionAudience = getCheckedValues(form, "solution_audience");
+  const productAudience = getCheckedValues(form, "product_audience");
+  const serviceLanguages = normalizeMultiTextValue(entries.languages);
+  const tags = uniq([
+    ...normalizeMultiTextValue(entries.tags),
+    ...normalizeMultiTextValue(entries.keywords),
+  ]);
+  const geographies = normalizeSemicolonSeparatedValue(entries.geographies);
+  const valuechains = uniq([
+    normalizeText(entries.primary_valuechain),
+    normalizeText(entries.secondary_valuechain),
+  ].filter(Boolean));
+  const applications = uniq([
+    normalizeText(entries.primary_application),
+    normalizeText(entries.secondary_application),
+  ].filter(Boolean));
+
+  const productBrochure = await collectSingleFileAttachment(form, "product_brochure_upload");
+  const serviceBrochure = await collectSingleFileAttachment(form, "service_brochure_upload");
+  const knowledgeContent = await collectSingleFileAttachment(form, "knowledge_content_upload");
+  const offeringImage = await collectSingleFileAttachment(form, "offering_image_upload");
+
   return {
     ...entries,
     existing_trader_id: trader.trader_id,
     existing_trader_name: trader.organisation_name || trader.trader_name || entries.organization_name || "",
     organization_name: entries.organization_name || trader.organisation_name || trader.trader_name || "",
-    keywords: parseArray(entries.keywords),
-    six_m_signals: parseArray(entries.six_m_signals),
-    curated_need: parseArray(entries.curated_need),
+    offering_category: offeringCategory,
+    offering_group: offeringCategory,
+    offering_kind: offeringCategory.replace(/\s+offerings$/i, "").toLowerCase(),
+    service_kind: offeringCategory === "Service offerings" ? normalizeText(entries.offering_type) : "",
+    about_solution_html: normalizeText(entries.about_solution_text || ""),
+    about_offering_html: normalizeText(entries.about_offering_text || ""),
+    primary_valuechain: normalizeText(entries.primary_valuechain || ""),
+    primary_application: normalizeText(entries.primary_application || ""),
+    secondary_valuechain: normalizeText(entries.secondary_valuechain || ""),
+    secondary_application: normalizeText(entries.secondary_application || ""),
+    valuechains,
+    applications,
+    solution_audience: solutionAudience,
+    audience: offeringCategory === "Product offerings" ? (productAudience.length ? productAudience : solutionAudience) : solutionAudience,
+    product_audience: productAudience,
+    languages: serviceLanguages,
+    geographies,
+    location_availability: getCheckedValues(form, "location_availability"),
+    tags,
+    keywords: tags,
+    certification_offered: normalizeText(entries.certification_offered || "Not Provided"),
+    product_brochure_attachment: productBrochure,
+    service_brochure_attachment: serviceBrochure,
+    knowledge_content_attachment: knowledgeContent,
+    offering_image_attachment: offeringImage,
+    knowledge_content_url: normalizeText(entries.knowledge_content_link || ""),
   };
 }
 
@@ -3553,28 +3833,29 @@ function bindStaticEvents() {
   }));
 
   byId("solutionSubmissionForm")?.addEventListener("submit", safeAsync(async (event) => {
-    event.preventDefault();
-    const status = byId("solutionSubmissionStatus");
-    if (status) status.textContent = "Submitting solution for admin review...";
-    const payload = collectSubmissionPayload(event.target);
-    const result = isLoggedIn()
-      ? await store.submitSignedInForm("solution", payload)
-      : await store.submitSharedForm("solution", payload);
-    event.target.reset();
-    fillSupplierSelect("solutionTraderSelect", "solutionOrgName");
-    if (status) status.textContent = result.message || "Solution submission sent to admin review.";
-    if (isAdminUser()) await refreshAll();
-    toast("Solution submission queued for admin review.");
-  }));
+      event.preventDefault();
+      const status = byId("solutionSubmissionStatus");
+      if (status) status.textContent = "Submitting solution for admin review...";
+      const payload = await collectSubmissionPayload(event.target, "solution");
+      const result = isLoggedIn()
+        ? await store.submitSignedInForm("solution", payload)
+        : await store.submitSharedForm("solution", payload);
+      event.target.reset();
+      fillSupplierSelect("solutionTraderSelect", "solutionOrgName");
+      renderSolutionReferenceInputs();
+      if (status) status.textContent = result.message || "Solution submission sent to admin review.";
+      if (isAdminUser()) await refreshAll();
+      toast("Solution submission queued for admin review.");
+    }));
 
   byId("needSubmissionForm")?.addEventListener("submit", safeAsync(async (event) => {
-    event.preventDefault();
-    const status = byId("needSubmissionStatus");
-    if (status) status.textContent = "Submitting need for admin review...";
-    const payload = collectSubmissionPayload(event.target);
-    const result = isLoggedIn()
-      ? await store.submitSignedInForm("need", payload)
-      : await store.submitSharedForm("need", payload);
+      event.preventDefault();
+      const status = byId("needSubmissionStatus");
+      if (status) status.textContent = "Submitting need for admin review...";
+      const payload = await collectSubmissionPayload(event.target, "need");
+      const result = isLoggedIn()
+        ? await store.submitSignedInForm("need", payload)
+        : await store.submitSharedForm("need", payload);
     event.target.reset();
     fillSupplierSelect("needTraderSelect", "needOrgName");
     if (status) status.textContent = result.message || "Need submission sent to admin review.";
@@ -3589,12 +3870,21 @@ function bindStaticEvents() {
   }));
 
   byId("shareNeedFormBtn")?.addEventListener("click", safeAsync(async () => {
-    const shareUrl = getShareUrl("need");
-    await navigator.clipboard?.writeText(shareUrl);
-    toast("Need form link copied.");
-  }));
+      const shareUrl = getShareUrl("need");
+      await navigator.clipboard?.writeText(shareUrl);
+      toast("Need form link copied.");
+    }));
 
-  byId("appShell")?.addEventListener("click", safeAsync(async (event) => {
+    byId("solutionOfferingCategory")?.addEventListener("change", () => updateSolutionOfferingForm());
+    document.querySelectorAll('input[name="solution_audience"]').forEach((input) => {
+      input.addEventListener("change", () => {
+        if ((byId("solutionOfferingCategory")?.value || "Service offerings") === "Product offerings") {
+          syncProductAudienceFromSolution();
+        }
+      });
+    });
+
+    byId("appShell")?.addEventListener("click", safeAsync(async (event) => {
     const button = event.target.closest("[data-copy-share-url]");
     if (!button) return;
     await navigator.clipboard?.writeText(button.dataset.copyShareUrl);

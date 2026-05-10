@@ -195,88 +195,316 @@
         </div>
       </section>
 
-      <section id="solutionView" class="view">
-        <div class="operations-grid intake-grid">
-          <section class="panel panel-detail">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Solution Upload</p>
-                <h3>Add Solution to GRE Review Queue</h3>
+        <section id="solutionView" class="view">
+          <div class="operations-grid intake-grid">
+            <section class="panel panel-detail">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Solution Upload</p>
+                  <h3>Add Solution to GRE Review Queue</h3>
+                </div>
               </div>
-            </div>
-            <form id="solutionSubmissionForm" class="form-grid">
-              <label>
-                <span>Approved GRE Supplier</span>
-                <select id="solutionTraderSelect" name="existing_trader_id" required></select>
-              </label>
-              <label>
-                <span>Organisation Name</span>
-                <input name="organization_name" id="solutionOrgName" required />
-              </label>
-              <label>
-                <span>Contact Person</span>
-                <input name="submitter_name" />
-              </label>
-              <label>
-                <span>Contact Email</span>
-                <input name="submitter_email" type="email" />
-              </label>
-              <label>
-                <span>Contact Phone</span>
-                <input name="submitter_phone" />
-              </label>
-              <label>
-                <span>Solution Name</span>
-                <input name="solution_name" required />
-              </label>
-              <label>
-                <span>Offering Name</span>
-                <input name="offering_name" required />
-              </label>
-              <label>
-                <span>Offering Kind</span>
-                <select name="offering_kind">
-                  <option value="service">Service</option>
-                  <option value="product">Product</option>
-                  <option value="knowledge">Knowledge</option>
-                  <option value="finance">Finance</option>
-                </select>
-              </label>
-              <label>
-                <span>Service Type</span>
-                <input name="service_kind" placeholder="Training, Consulting, Mentoring" />
-              </label>
-              <label>
-                <span>Thematic Area</span>
-                <input name="thematic_area" placeholder="Dairy, Solar, Soap, Wild Mango" />
-              </label>
-              <label>
-                <span>Application Area</span>
-                <input name="application_area" placeholder="Milching cows, Soap production, Solar street lights" />
-              </label>
-              <label>
-                <span>Primary Geography</span>
-                <input name="geographies" placeholder="State, district, country" />
-              </label>
-              <label class="wide">
-                <span>6M Signals</span>
-                <input name="six_m_signals" placeholder="Manpower, Method, Machine, Material, Market, Money" />
-              </label>
-              <label class="wide">
-                <span>Short Description</span>
-                <textarea name="about_offering_text" rows="5" required></textarea>
-              </label>
-              <label class="wide">
-                <span>Tags / Keywords</span>
-                <input name="keywords" placeholder="Comma-separated keywords" />
-              </label>
-              <div class="wide intake-actions">
-                <button type="submit" class="btn btn-primary">Submit Solution to Admin Review</button>
-                <button type="button" id="shareSolutionFormBtn" class="btn btn-secondary">Share Page Link</button>
-              </div>
-              <p id="solutionSubmissionStatus" class="helper-text wide"></p>
-            </form>
-          </section>
+              <form id="solutionSubmissionForm" class="form-grid solution-form-grid">
+                <div class="form-section wide">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Organisation</p>
+                    <h4>GRE Supplier and Submission Contact</h4>
+                  </div>
+                  <div class="form-grid">
+                    <label>
+                      <span>Approved GRE Supplier</span>
+                      <select id="solutionTraderSelect" name="existing_trader_id" required></select>
+                    </label>
+                    <label>
+                      <span>Organisation Name</span>
+                      <input name="organization_name" id="solutionOrgName" required />
+                    </label>
+                    <label>
+                      <span>Contact Person</span>
+                      <input name="submitter_name" />
+                    </label>
+                    <label>
+                      <span>Contact Email</span>
+                      <input name="submitter_email" type="email" />
+                    </label>
+                    <label>
+                      <span>Contact Phone</span>
+                      <input name="submitter_phone" />
+                    </label>
+                  </div>
+                </div>
+
+                <div class="form-section wide">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Solution</p>
+                    <h4>Core Solution Details</h4>
+                  </div>
+                  <div class="form-grid">
+                    <label>
+                      <span>Solution Name</span>
+                      <input name="solution_name" required />
+                    </label>
+                    <label class="wide">
+                      <span>Solution Description</span>
+                      <textarea name="about_solution_text" rows="4" required></textarea>
+                    </label>
+                    <label>
+                      <span>Primary Value Chain</span>
+                      <select id="solutionPrimaryValuechain" name="primary_valuechain" required></select>
+                    </label>
+                    <label>
+                      <span>Primary Application</span>
+                      <select id="solutionPrimaryApplication" name="primary_application" required></select>
+                    </label>
+                    <label>
+                      <span>Secondary Value Chain</span>
+                      <select id="solutionSecondaryValuechain" name="secondary_valuechain"></select>
+                    </label>
+                    <label>
+                      <span>Secondary Application</span>
+                      <select id="solutionSecondaryApplication" name="secondary_application"></select>
+                    </label>
+                    <div class="wide">
+                      <span class="field-label">Who Can avail it</span>
+                      <div class="checkbox-grid audience-grid" id="solutionAudienceGroup">
+                        <label><input type="checkbox" name="solution_audience" value="Individuals" /> Individuals</label>
+                        <label><input type="checkbox" name="solution_audience" value="Groups" /> Groups</label>
+                        <label><input type="checkbox" name="solution_audience" value="SHGs" /> SHGs</label>
+                        <label><input type="checkbox" name="solution_audience" value="Organisations" /> Organisations</label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-section wide">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Offering</p>
+                    <h4>Offering Structure</h4>
+                  </div>
+                  <div class="form-grid">
+                    <label>
+                      <span>Offering Category</span>
+                      <select id="solutionOfferingCategory" name="offering_category" required>
+                        <option value="Service offerings">Service</option>
+                        <option value="Product offerings">Product</option>
+                        <option value="Knowledge offerings">Knowledge</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Offering Type</span>
+                      <select id="solutionOfferingType" name="offering_type" required></select>
+                    </label>
+                    <label>
+                      <span>Offering Name</span>
+                      <input name="offering_name" required />
+                    </label>
+                    <label class="wide">
+                      <span>Offering Description</span>
+                      <textarea name="about_offering_text" rows="4" required></textarea>
+                    </label>
+                  </div>
+                </div>
+
+                <div id="productOfferingFields" class="form-section wide conditional-offering-section" data-offering-kind="Product offerings">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Product Offering</p>
+                    <h4>Product Details</h4>
+                  </div>
+                  <div class="form-grid">
+                    <div class="wide">
+                      <span class="field-label">Who Can avail it</span>
+                      <div class="checkbox-grid audience-grid" id="productAudienceGroup">
+                        <label><input type="checkbox" name="product_audience" value="Individuals" /> Individuals</label>
+                        <label><input type="checkbox" name="product_audience" value="Groups" /> Groups</label>
+                        <label><input type="checkbox" name="product_audience" value="SHGs" /> SHGs</label>
+                        <label><input type="checkbox" name="product_audience" value="Organisations" /> Organisations</label>
+                      </div>
+                    </div>
+                    <label>
+                      <span>Grade/Capacity</span>
+                      <input name="grade_capacity" />
+                    </label>
+                    <label>
+                      <span>Cost</span>
+                      <input name="product_cost" />
+                    </label>
+                    <label>
+                      <span>Lead Time</span>
+                      <input name="lead_time" />
+                    </label>
+                    <label>
+                      <span>Product Brochure</span>
+                      <input name="product_brochure_upload" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png" />
+                    </label>
+                    <label class="wide">
+                      <span>Support Services</span>
+                      <textarea name="support_details" rows="3"></textarea>
+                    </label>
+                  </div>
+                </div>
+
+                <div id="serviceOfferingFields" class="form-section wide conditional-offering-section" data-offering-kind="Service offerings">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Service Offering</p>
+                    <h4>Service Delivery Details</h4>
+                  </div>
+                  <div class="form-grid">
+                    <label>
+                      <span>Facilitator Name</span>
+                      <input name="trainer_name" />
+                    </label>
+                    <label>
+                      <span>Facilitator Email Address</span>
+                      <input name="trainer_email" type="email" />
+                    </label>
+                    <label>
+                      <span>Facilitator Phone Number</span>
+                      <input name="trainer_phone" />
+                    </label>
+                    <label class="wide">
+                      <span>Facilitator Details</span>
+                      <textarea name="trainer_details_text" rows="3"></textarea>
+                    </label>
+                    <label class="wide">
+                      <span>Languages</span>
+                      <select id="solutionLanguagesSelect" name="languages" multiple size="4"></select>
+                    </label>
+                    <label class="wide">
+                      <span>Geographies</span>
+                      <input name="geographies" id="solutionGeographies" list="solutionGeographyOptions" placeholder="Start typing and separate multiple places with semicolons" />
+                    </label>
+                    <label>
+                      <span>Duration</span>
+                      <input name="duration" />
+                    </label>
+                    <label>
+                      <span>Duration Units</span>
+                      <select name="duration_unit">
+                        <option value="">Select</option>
+                        <option value="Days">Days</option>
+                        <option value="Hours">Hours</option>
+                        <option value="Months">Months</option>
+                        <option value="Weeks">Weeks</option>
+                      </select>
+                    </label>
+                    <label class="wide">
+                      <span>Prerequisites - Participants and Training</span>
+                      <textarea name="prerequisites" rows="3"></textarea>
+                    </label>
+                    <div class="wide">
+                      <span class="field-label">Location Availability</span>
+                      <div class="checkbox-grid">
+                        <label><input type="checkbox" name="location_availability" value="At Service Provider" /> At Service Provider</label>
+                        <label><input type="checkbox" name="location_availability" value="At Service Seeker" /> At Service Seeker</label>
+                        <label><input type="checkbox" name="location_availability" value="Others" /> Others</label>
+                      </div>
+                    </div>
+                    <label>
+                      <span>Cost</span>
+                      <input name="service_cost" />
+                    </label>
+                    <label>
+                      <span>Cost Units</span>
+                      <select name="service_cost_unit">
+                        <option value="">Select</option>
+                        <option value="Can be quoted after finalising scope">Can be quoted after finalising scope</option>
+                        <option value="Per day">Per day</option>
+                        <option value="Per hour">Per hour</option>
+                        <option value="Per person">Per person</option>
+                      </select>
+                    </label>
+                    <label class="wide">
+                      <span>Remarks on Cost</span>
+                      <textarea name="cost_remarks" rows="2"></textarea>
+                    </label>
+                    <label>
+                      <span>Support Post Service</span>
+                      <select name="support_post_service">
+                        <option value="">Select</option>
+                        <option value="Not Provided if outside the service location">Not Provided</option>
+                        <option value="Yes,Provided if in the service location">Provided, if in the Service Location</option>
+                        <option value="Yes, Provided if in the service location and outside the service location">Provided, for both Service Location and Outside Service Location</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Support Post Service Cost</span>
+                      <select name="support_post_service_cost">
+                        <option value="">Select</option>
+                        <option value="No Cost, if in the service location and outside the service location">No Cost</option>
+                        <option value="No Cost if in the service location">No Cost if in Service Location, Additional Cost if Outside Service Location</option>
+                        <option value="Additional cost apply if in the service location">Additional Cost for both Service Location and Outside Service Location</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Is it Offered Online / Offline</span>
+                      <select name="delivery_mode">
+                        <option value="">Select</option>
+                        <option value="Online">Online</option>
+                        <option value="Offline">Offline</option>
+                        <option value="Online & Offline">Online & Offline</option>
+                      </select>
+                    </label>
+                    <div>
+                      <span class="field-label">Certification Offered</span>
+                      <div class="toggle-choice">
+                        <label><input type="radio" name="certification_offered" value="Provided" /> Provided</label>
+                        <label><input type="radio" name="certification_offered" value="Not Provided" checked /> Not Provided</label>
+                      </div>
+                    </div>
+                    <label class="wide">
+                      <span>Service Offering Brochure</span>
+                      <input name="service_brochure_upload" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png" />
+                    </label>
+                  </div>
+                </div>
+
+                <div id="knowledgeOfferingFields" class="form-section wide conditional-offering-section" data-offering-kind="Knowledge offerings">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Knowledge Offering</p>
+                    <h4>Knowledge Resource Details</h4>
+                  </div>
+                  <div class="form-grid">
+                    <label class="wide">
+                      <span>Knowledge Offering Content</span>
+                      <input name="knowledge_content_upload" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.mp4" />
+                    </label>
+                    <label class="wide">
+                      <span>Knowledge Offering Content Link</span>
+                      <input name="knowledge_content_link" type="url" placeholder="https://..." />
+                    </label>
+                    <label class="wide">
+                      <span>Contact Details</span>
+                      <textarea name="contact_details" rows="3"></textarea>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="form-section wide">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Media and Tags</p>
+                    <h4>Supporting Assets</h4>
+                  </div>
+                  <div class="form-grid">
+                    <label class="wide">
+                      <span>Offering Image</span>
+                      <input name="offering_image_upload" type="file" accept=".jpg,.jpeg,.png,.webp" />
+                    </label>
+                    <label class="wide">
+                      <span>Tags</span>
+                      <input name="tags" id="solutionTagsInput" list="solutionTagOptions" placeholder="Start typing or add fresh tags, separated by commas" />
+                    </label>
+                  </div>
+                </div>
+
+                <div class="wide intake-actions">
+                  <button type="submit" class="btn btn-primary">Submit Solution to Admin Review</button>
+                  <button type="button" id="shareSolutionFormBtn" class="btn btn-secondary">Share Page Link</button>
+                </div>
+                <p id="solutionSubmissionStatus" class="helper-text wide"></p>
+              </form>
+              <datalist id="solutionGeographyOptions"></datalist>
+              <datalist id="solutionTagOptions"></datalist>
+            </section>
 
           <section class="panel">
             <div class="panel-head">
