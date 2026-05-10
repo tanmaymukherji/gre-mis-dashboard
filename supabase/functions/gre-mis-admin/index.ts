@@ -1289,6 +1289,38 @@ function buildGreVarietyTagIdentifier(genericProductCode: string, applicationNam
   return base && suffix ? `TAG.${base}.${suffix}` : "";
 }
 
+function buildGreNameMl(text: string) {
+  return buildGreTextList(text);
+}
+
+function prettifyGreCodeTail(code: string) {
+  return requireString(code)
+    .split(".")
+    .pop()
+    ?.replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (character) => character.toUpperCase()) || "";
+}
+
+function buildGreClassificationStub(tagMeta: Record<string, unknown> | null) {
+  if (!tagMeta) return [];
+  const subCategoryCode = requireString(tagMeta.subCategoryCode);
+  const context = requireString(tagMeta.context) || "COMMONS.GRE";
+  if (!subCategoryCode) return [];
+  return [
+    {
+      id: 241,
+      code: subCategoryCode,
+      context,
+      name: buildGreNameMl(prettifyGreCodeTail(subCategoryCode)),
+      description: [],
+      productType: "VALUE_CHAIN",
+      iconPic: "",
+      logoURL: "",
+    },
+  ];
+}
+
 async function resolveGreHierarchyMatch(
   primaryValuechain: string,
   primaryApplication: string,
@@ -1374,6 +1406,20 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
   const genericProductId = requireString(primaryMatch.primary_valuechain_id);
   const primaryApplicationId = requireString(primaryMatch.primary_application_id);
   const genericProduct = await fetchGreGenericProductDetail(genericProductId, sessionId);
+  const primaryTagCode = buildGreTagIdentifierFromCode(requireString(genericProduct.genericProductCode || genericProduct.code));
+  const primaryVarietyTagCode = buildGreVarietyTagIdentifier(
+    requireString(genericProduct.genericProductCode || genericProduct.code),
+    primaryApplication,
+  );
+  const primaryTagRecords = await fetchGreTagsByCodes(
+    [primaryTagCode, primaryVarietyTagCode].filter(Boolean),
+    sessionId,
+  );
+  const primaryProductTag = primaryTagRecords.find((item) => requireString(item.code) === primaryTagCode) || null;
+  const primaryVarietyTag = primaryTagRecords.find((item) => requireString(item.code) === primaryVarietyTagCode) || null;
+  if (!requireString(genericProduct.id)) {
+    genericProduct.id = parseNumber(genericProduct.genericProductId, 0) || parseNumber(genericProductId, 0);
+  }
   if (!requireString(genericProduct.tagIdentifier) && requireString(genericProduct.genericProductCode || genericProduct.code)) {
     genericProduct.tagIdentifier = buildGreTagIdentifierFromCode(requireString(genericProduct.genericProductCode || genericProduct.code));
   }
@@ -1383,6 +1429,18 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
   if (!Array.isArray(genericProduct.name) && Array.isArray(genericProduct.genericProductName)) {
     genericProduct.name = genericProduct.genericProductName;
   }
+  if (!Array.isArray(genericProduct.name)) {
+    genericProduct.name = buildGreNameMl(primaryValuechain);
+  }
+  if (!Array.isArray(genericProduct.description)) {
+    genericProduct.description = Array.isArray(genericProduct.genericProductDescription) ? genericProduct.genericProductDescription : [];
+  }
+  if (!Array.isArray(genericProduct.classificationList) || !genericProduct.classificationList.length) {
+    genericProduct.classificationList = buildGreClassificationStub(primaryProductTag);
+  }
+  if (genericProduct.marketId === undefined) genericProduct.marketId = parseNumber(greMarketId, 0);
+  if (genericProduct.isPrivate === undefined) genericProduct.isPrivate = false;
+  if (!requireString(genericProduct.type)) genericProduct.type = "VALUE_CHAIN";
   const primaryApplications = await fetchGreGenericProductApplications(genericProductId, sessionId);
   const genericProductVariety = resolveGreVarietyFromProductDetail(genericProduct, primaryApplicationId, primaryApplication)
     || primaryApplications.find((item) =>
@@ -1390,11 +1448,26 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
       normalizeGreLabel(extractGreEntityName(item)) === normalizeComparable(primaryApplication)
     );
   const resolvedPrimaryVariety = genericProductVariety || buildGreFallbackVariety(primaryApplicationId, primaryApplication);
+  if (!requireString(resolvedPrimaryVariety.id)) {
+    resolvedPrimaryVariety.id = parseNumber(primaryApplicationId, 0);
+  }
   if (!requireString(resolvedPrimaryVariety.tagIdentifier)) {
     resolvedPrimaryVariety.tagIdentifier = buildGreVarietyTagIdentifier(
       requireString(genericProduct.code || genericProduct.genericProductCode),
       primaryApplication,
     );
+  }
+  if (!requireString(resolvedPrimaryVariety.varietyCode)) {
+    resolvedPrimaryVariety.varietyCode = requireString(resolvedPrimaryVariety.tagIdentifier).replace(/^TAG\./, "") || `GRE_MIS.${primaryApplicationId}`;
+  }
+  if (!Array.isArray(resolvedPrimaryVariety.name)) {
+    resolvedPrimaryVariety.name = buildGreNameMl(primaryApplication);
+  }
+  if (!Array.isArray(resolvedPrimaryVariety.description)) {
+    resolvedPrimaryVariety.description = [];
+  }
+  if (!Array.isArray(genericProduct.genericProductVarietyList) || !genericProduct.genericProductVarietyList.length) {
+    genericProduct.genericProductVarietyList = [resolvedPrimaryVariety];
   }
 
   const tagCodes = [
@@ -1406,14 +1479,39 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
     try {
       const secondaryMatch = await resolveGreHierarchyMatch(secondaryValuechain, secondaryApplication);
       const secondaryGenericProduct = await fetchGreGenericProductDetail(requireString(secondaryMatch.primary_valuechain_id), sessionId);
+      const secondaryTagCode = buildGreTagIdentifierFromCode(requireString(secondaryGenericProduct.genericProductCode || secondaryGenericProduct.code));
+      const secondaryVarietyTagCode = buildGreVarietyTagIdentifier(
+        requireString(secondaryGenericProduct.genericProductCode || secondaryGenericProduct.code),
+        secondaryApplication,
+      );
       if (!requireString(secondaryGenericProduct.tagIdentifier) && requireString(secondaryGenericProduct.genericProductCode || secondaryGenericProduct.code)) {
         secondaryGenericProduct.tagIdentifier = buildGreTagIdentifierFromCode(requireString(secondaryGenericProduct.genericProductCode || secondaryGenericProduct.code));
+      }
+      if (!requireString(secondaryGenericProduct.id)) {
+        secondaryGenericProduct.id = parseNumber(secondaryGenericProduct.genericProductId, 0) || parseNumber(secondaryMatch.primary_valuechain_id, 0);
       }
       if (!requireString(secondaryGenericProduct.code) && requireString(secondaryGenericProduct.genericProductCode)) {
         secondaryGenericProduct.code = requireString(secondaryGenericProduct.genericProductCode);
       }
       if (!Array.isArray(secondaryGenericProduct.name) && Array.isArray(secondaryGenericProduct.genericProductName)) {
         secondaryGenericProduct.name = secondaryGenericProduct.genericProductName;
+      }
+      if (!Array.isArray(secondaryGenericProduct.name)) {
+        secondaryGenericProduct.name = buildGreNameMl(secondaryValuechain);
+      }
+      if (!Array.isArray(secondaryGenericProduct.description)) {
+        secondaryGenericProduct.description = Array.isArray(secondaryGenericProduct.genericProductDescription) ? secondaryGenericProduct.genericProductDescription : [];
+      }
+      if (secondaryGenericProduct.marketId === undefined) secondaryGenericProduct.marketId = parseNumber(greMarketId, 0);
+      if (secondaryGenericProduct.isPrivate === undefined) secondaryGenericProduct.isPrivate = false;
+      if (!requireString(secondaryGenericProduct.type)) secondaryGenericProduct.type = "VALUE_CHAIN";
+      const secondaryTagRecords = await fetchGreTagsByCodes(
+        [secondaryTagCode, secondaryVarietyTagCode].filter(Boolean),
+        sessionId,
+      );
+      const secondaryProductTag = secondaryTagRecords.find((item) => requireString(item.code) === secondaryTagCode) || null;
+      if (!Array.isArray(secondaryGenericProduct.classificationList) || !secondaryGenericProduct.classificationList.length) {
+        secondaryGenericProduct.classificationList = buildGreClassificationStub(secondaryProductTag);
       }
       const secondaryApplications = await fetchGreGenericProductApplications(requireString(secondaryMatch.primary_valuechain_id), sessionId);
       const secondaryVariety = resolveGreVarietyFromProductDetail(
@@ -1429,6 +1527,14 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
           requireString(secondaryGenericProduct.code || secondaryGenericProduct.genericProductCode),
           secondaryApplication,
         );
+      }
+      if (secondaryVariety) {
+        if (!requireString(secondaryVariety.id)) secondaryVariety.id = parseNumber(secondaryMatch.primary_application_id, 0);
+        if (!requireString(secondaryVariety.varietyCode)) {
+          secondaryVariety.varietyCode = requireString(secondaryVariety.tagIdentifier).replace(/^TAG\./, "") || `GRE_MIS.${requireString(secondaryMatch.primary_application_id)}`;
+        }
+        if (!Array.isArray(secondaryVariety.name)) secondaryVariety.name = buildGreNameMl(secondaryApplication);
+        if (!Array.isArray(secondaryVariety.description)) secondaryVariety.description = [];
       }
       [secondaryGenericProduct, secondaryVariety].forEach((entry) => {
         const code = requireString(entry?.tagIdentifier);
