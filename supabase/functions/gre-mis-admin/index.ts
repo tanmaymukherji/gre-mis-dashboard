@@ -1212,6 +1212,16 @@ function extractGreTagEntry(entity: Record<string, unknown> | null, sequence: nu
   };
 }
 
+function buildGreFallbackVariety(applicationId: string, applicationName: string) {
+  return {
+    id: parseNumber(applicationId, 0),
+    varietyCode: `GRE_MIS.${applicationId || "VARIETY"}`,
+    name: buildGreTextList(applicationName || "Application"),
+    description: buildGreTextList(""),
+    tagIdentifier: "",
+  };
+}
+
 async function resolveGreHierarchyMatch(
   primaryValuechain: string,
   primaryApplication: string,
@@ -1303,13 +1313,11 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
       String(item.id ?? "") === primaryApplicationId ||
       normalizeGreLabel(extractGreEntityName(item)) === normalizeComparable(primaryApplication)
     );
-  if (!genericProductVariety) {
-    throw new Error(`GRE application detail could not be loaded for "${primaryApplication}".`);
-  }
+  const resolvedPrimaryVariety = genericProductVariety || buildGreFallbackVariety(primaryApplicationId, primaryApplication);
 
   const solutionTagList = [
     extractGreTagEntry(genericProduct, 0),
-    extractGreTagEntry(genericProductVariety, 1),
+    extractGreTagEntry(resolvedPrimaryVariety, 1),
   ].filter(Boolean) as Record<string, unknown>[];
 
   if (secondaryValuechain && secondaryApplication) {
@@ -1338,7 +1346,7 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
     genericProductId,
     primaryApplicationId,
     genericProduct,
-    genericProductVariety,
+    genericProductVariety: resolvedPrimaryVariety,
     solutionTagList,
   };
 }
