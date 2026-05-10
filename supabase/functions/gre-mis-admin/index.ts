@@ -361,6 +361,26 @@ const greServiceOfferingSubtypeFallbacks: Record<string, string> = {
   "technology transfer": "OFFERINGS_CATEGORY.TECHNOLOGY_TRANSFER",
 };
 
+const greTrainingLanguageFallbacks: Record<string, string> = {
+  "eng": "TRAINING_LANGUAGE.ENG",
+  "english": "TRAINING_LANGUAGE.ENG",
+  "hin": "TRAINING_LANGUAGE.HIN",
+  "hindi": "TRAINING_LANGUAGE.HIN",
+  "bengali": "TRAINING_LANGUAGE.BENGALI",
+  "bangla": "TRAINING_LANGUAGE.BENGALI",
+  "marathi": "TRAINING_LANGUAGE.MARATHI",
+  "kannada": "TRAINING_LANGUAGE.KANNADA",
+  "malayalam": "TRAINING_LANGUAGE.MALAYALAM",
+  "tamil": "TRAINING_LANGUAGE.TAMIL",
+  "telugu": "TRAINING_LANGUAGE.TELUGU",
+  "odia": "TRAINING_LANGUAGE.ODIA",
+  "oriya": "TRAINING_LANGUAGE.ODIA",
+  "gujarati": "TRAINING_LANGUAGE.GUJARATI",
+  "punjabi": "TRAINING_LANGUAGE.PUNJABI",
+  "assamese": "TRAINING_LANGUAGE.ASSAMESE",
+  "urdu": "TRAINING_LANGUAGE.URDU",
+};
+
 type GreUserResolution = {
   status: string;
   greUserId: number | null;
@@ -1594,7 +1614,21 @@ async function resolveGreChipValues(
 ) {
   const options = await fetchGreProductRefData(classCode, sessionId);
   return labels.map((label, index) => {
-    const matched = findGreRefDataOption(options, label, aliasMap[label] || aliasMap[normalizeComparable(label)] || []);
+    const normalizedLabel = normalizeComparable(label);
+    const fallbackCode = classCode === "CLASS.TRAINING_LANGUAGE"
+      ? greTrainingLanguageFallbacks[normalizedLabel]
+      : "";
+    let matched = findGreRefDataOption(options, label, aliasMap[label] || aliasMap[normalizedLabel] || []);
+    if (!matched && fallbackCode) {
+      matched = options.find((option) => requireString(option.code) === fallbackCode) || null;
+    }
+    if (!matched && fallbackCode) {
+      return {
+        code: fallbackCode,
+        id: 0,
+        sequence: index,
+      };
+    }
     if (!matched) throw new Error(`Could not map GRE option "${label}" for ${classCode}.`);
     return {
       code: requireString(matched.code),
