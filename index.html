@@ -326,10 +326,15 @@
                       <span class="field-label">Languages</span>
                       <div id="solutionLanguagesGroup" class="checkbox-grid choice-grid choice-grid-2 language-choice-grid"></div>
                     </div>
-                    <label class="wide">
-                      <span>Geographies</span>
-                      <input name="geographies" id="solutionGeographies" list="solutionGeographyOptions" placeholder="Start typing a block, city, or state and separate multiple places with semicolons" />
-                    </label>
+                    <div class="wide choice-block">
+                      <span class="field-label">Geographies</span>
+                      <div class="tag-entry-row geography-entry-row">
+                        <input id="solutionGeographyEntry" list="solutionGeographyOptions" placeholder="Search a block, city, state, or country" />
+                        <button type="button" id="addSolutionGeographyBtn" class="btn btn-secondary btn-compact">Add Location</button>
+                      </div>
+                      <input type="hidden" name="geographies" id="solutionGeographies" />
+                      <div id="solutionGeographyChips" class="tag-cloud tag-chip-editor"></div>
+                    </div>
                     <label>
                       <span>Duration</span>
                       <input name="duration" />

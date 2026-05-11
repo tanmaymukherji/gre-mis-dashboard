@@ -46,11 +46,12 @@ const greSolutionReportName =
 const githubAssetToken =
   Deno.env.get("GRE_MIS_GITHUB_TOKEN") ??
   Deno.env.get("GITHUB_TOKEN") ??
+  Deno.env.get("GITHUB_ACTIONS_TOKEN") ??
   Deno.env.get("GRE_GITHUB_TOKEN") ??
   "";
-const githubAssetRepo = Deno.env.get("GRE_MIS_GITHUB_ASSET_REPO") ?? "tanmaymukherji/gre-mis-dashboard";
+const githubAssetRepo = Deno.env.get("GRE_MIS_GITHUB_ASSET_REPO") ?? "tanmaymukherji/gre-chatbot";
 const githubAssetBranch = Deno.env.get("GRE_MIS_GITHUB_ASSET_BRANCH") ?? "main";
-const githubAssetRoot = Deno.env.get("GRE_MIS_GITHUB_ASSET_ROOT") ?? "public/uploads/gre-mis";
+const githubAssetRoot = Deno.env.get("GRE_MIS_GITHUB_ASSET_ROOT") ?? "public/uploads/local-offerings";
 
 const adminClient = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false },
@@ -3780,7 +3781,7 @@ async function uploadAttachmentToGithub(
     const message = await response.text();
     throw new Error(`GitHub asset upload failed for ${sourceName}: ${message}`);
   }
-  return `https://cdn.jsdelivr.net/gh/${githubAssetRepo}@${githubAssetBranch}/${path}`;
+  return `https://raw.githubusercontent.com/${githubAssetRepo}/${githubAssetBranch}/${path}`;
 }
 
 function buildLocalContactDetails(payload: Record<string, unknown>) {

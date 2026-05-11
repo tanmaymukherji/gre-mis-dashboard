@@ -40,6 +40,7 @@ const state = {
   submissionReviewId: "",
   localSolutionReviewId: "",
   solutionTags: [],
+  solutionGeographies: [],
   adminUserRoleTab: "admin",
   localSolutionFilters: {
     search: "",
@@ -2531,9 +2532,9 @@ async function collectSingleFileAttachment(form, fieldName) {
 }
 
 async function updateSolutionGeographySuggestions(rawValue) {
-  const input = byId("solutionGeographies");
+  const input = byId("solutionGeographyEntry");
   if (!input) return;
-  const query = normalizeText(String(rawValue || "").split(";").pop() || "");
+  const query = normalizeText(String(rawValue || ""));
   const requestToken = Date.now();
   state.lgdSearchToken = requestToken;
   if (query.length < 2) {
@@ -2543,6 +2544,38 @@ async function updateSolutionGeographySuggestions(rawValue) {
   const suggestions = await store.searchLgdGeographies(query);
   if (state.lgdSearchToken !== requestToken) return;
   setDatalistOptions("solutionGeographyOptions", suggestions);
+}
+
+function renderSolutionGeographyChips() {
+  const target = byId("solutionGeographyChips");
+  const hidden = byId("solutionGeographies");
+  if (!target || !hidden) return;
+  hidden.value = state.solutionGeographies.join("; ");
+  target.innerHTML = state.solutionGeographies.length
+    ? state.solutionGeographies
+        .map(
+          (location) => `
+            <span class="tag-chip">
+              ${esc(location)}
+              <button type="button" class="tag-chip-remove" data-remove-solution-geo="${escAttr(location)}" aria-label="Remove ${escAttr(location)}">&times;</button>
+            </span>
+          `,
+        )
+        .join("")
+    : `<span class="helper-text">No locations added yet.</span>`;
+}
+
+function addSolutionGeography(rawValue) {
+  const location = normalizeText(rawValue);
+  if (!location) return false;
+  if (!state.solutionGeographies.includes(location)) state.solutionGeographies.push(location);
+  renderSolutionGeographyChips();
+  return true;
+}
+
+function removeSolutionGeography(location) {
+  state.solutionGeographies = state.solutionGeographies.filter((item) => item !== location);
+  renderSolutionGeographyChips();
 }
 
 function renderSolutionTagChips() {
@@ -2911,7 +2944,9 @@ function renderSubmissionViews() {
   fillSupplierSelect("needTraderSelect", "needOrgName");
   renderSolutionReferenceInputs();
   state.solutionTags = [];
+  state.solutionGeographies = [];
   renderSolutionTagChips();
+  renderSolutionGeographyChips();
   renderSharePanel("solutionSharePanel", "solution");
   renderSharePanel("needSharePanel", "need");
   populateSubmissionDefaults(byId("solutionSubmissionForm"));
@@ -4650,7 +4685,9 @@ function bindStaticEvents() {
         : await store.submitSharedForm("solution", payload);
       event.target.reset();
       state.solutionTags = [];
+      state.solutionGeographies = [];
       renderSolutionTagChips();
+      renderSolutionGeographyChips();
       if (isSharedFormMode()) {
         event.target.innerHTML = `<div class="empty-state">Solution Sent for Approval</div>`;
       } else {
@@ -4692,9 +4729,17 @@ function bindStaticEvents() {
   byId("solutionOfferingCategory")?.addEventListener("change", () => updateSolutionOfferingForm());
   byId("solutionPrimaryValuechain")?.addEventListener("change", () => updateSolutionApplicationOptions());
   byId("solutionSecondaryValuechain")?.addEventListener("change", () => updateSolutionApplicationOptions());
-  byId("solutionGeographies")?.addEventListener("input", safeAsync(async (event) => {
+  byId("solutionGeographyEntry")?.addEventListener("input", safeAsync(async (event) => {
     await updateSolutionGeographySuggestions(event.target.value);
   }));
+  byId("addSolutionGeographyBtn")?.addEventListener("click", () => {
+    const input = byId("solutionGeographyEntry");
+    if (!input) return;
+    if (addSolutionGeography(input.value)) {
+      input.value = "";
+      setDatalistOptions("solutionGeographyOptions", []);
+    }
+  });
   byId("addSolutionTagBtn")?.addEventListener("click", () => {
     const input = byId("solutionTagEntry");
     if (!input) return;
@@ -4732,6 +4777,15 @@ function bindStaticEvents() {
     const input = event.target;
     if (addSolutionTag(input.value)) input.value = "";
   });
+  byId("solutionGeographyEntry")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const input = event.target;
+    if (addSolutionGeography(input.value)) {
+      input.value = "";
+      setDatalistOptions("solutionGeographyOptions", []);
+    }
+  });
     document.querySelectorAll('input[name="solution_audience"]').forEach((input) => {
       input.addEventListener("change", () => {
         if ((byId("solutionOfferingCategory")?.value || "Service offerings") === "Product offerings") {
@@ -4744,6 +4798,11 @@ function bindStaticEvents() {
     const removeTagButton = event.target.closest("[data-remove-solution-tag]");
     if (removeTagButton) {
       removeSolutionTag(removeTagButton.dataset.removeSolutionTag);
+      return;
+    }
+    const removeGeoButton = event.target.closest("[data-remove-solution-geo]");
+    if (removeGeoButton) {
+      removeSolutionGeography(removeGeoButton.dataset.removeSolutionGeo);
       return;
     }
     const button = event.target.closest("[data-copy-share-url]");
