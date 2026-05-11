@@ -38,7 +38,13 @@ const state = {
   userSession: null,
   adminSession: null,
   submissionReviewId: "",
+  localSolutionReviewId: "",
   solutionTags: [],
+  adminUserRoleTab: "admin",
+  localSolutionFilters: {
+    search: "",
+    provider: "all",
+  },
     puterModelsLoaded: false,
     puterModels: [],
     puterRecommendations: {},
@@ -66,6 +72,7 @@ const state = {
       pendingFormSubmissions: [],
       aiReviewNeeds: [],
       users: [],
+      localSolutions: [],
   },
 };
 
@@ -401,6 +408,17 @@ function parseArray(value) {
       .filter(Boolean);
   }
   return [];
+}
+
+function parseDelimitedList(value, delimiter = ",") {
+  return normalizeText(value)
+    .split(delimiter)
+    .map((item) => normalizeText(item))
+    .filter(Boolean);
+}
+
+function parseCommaList(value) {
+  return parseDelimitedList(value, ",");
 }
 
 function ensureList(value) {
@@ -1731,6 +1749,7 @@ class GreMisStore {
       state.data.pendingFormSubmissions = [];
       state.data.aiReviewNeeds = [];
       state.data.users = [];
+      state.data.localSolutions = [];
       return;
     }
     const data = await this.callAdmin("adminSnapshot", {}, true);
@@ -1739,6 +1758,7 @@ class GreMisStore {
     state.data.pendingFormSubmissions = ensureList(data.pendingFormSubmissions);
     state.data.aiReviewNeeds = ensureList(data.aiReviewNeeds);
     state.data.users = ensureList(data.users);
+    state.data.localSolutions = ensureList(data.localSolutions);
   }
 
   async refreshUserDirectory() {
@@ -1749,6 +1769,14 @@ class GreMisStore {
 
   async applyNeedOverride(needId, patch, conflictNote = "", resolveConflict = false) {
     return this.callAdmin("applyNeedOverride", { needId, patch, conflictNote, resolveConflict }, true);
+  }
+
+  async updateLocalSolution(offeringId, payload) {
+    return this.callAdmin("updateLocalSolution", { offeringId, payload }, true);
+  }
+
+  async deleteLocalSolution(offeringId) {
+    return this.callAdmin("deleteLocalSolution", { offeringId }, true);
   }
 
   async createNeed(payload) {
@@ -3754,10 +3782,28 @@ function renderAdminQueue() {
 function renderUserManagement() {
   const list = byId("userManagementList");
   if (!list) return;
-  list.innerHTML = isAdminUser()
-    ? ensureList(state.data.users).length
-      ? ensureList(state.data.users).map((user) => `
-          <article class="approval-card">
+  if (!isAdminUser()) {
+    list.innerHTML = `<div class="empty-state">Login as admin to manage users.</div>`;
+    return;
+  }
+  const tabs = [
+    ["admin", "Admin"],
+    ["curator", "Curator"],
+    ["user", "Users"],
+  ];
+  const filteredUsers = ensureList(state.data.users).filter((user) => requireString(user.role).toLowerCase() === state.adminUserRoleTab);
+  list.innerHTML = `
+    <div class="admin-role-tabs">
+      ${tabs.map(([role, label]) => `
+        <button class="btn ${state.adminUserRoleTab === role ? "btn-primary" : "btn-secondary"}" type="button" data-action="set-user-role-tab" data-role-tab="${esc(role)}">
+          ${esc(label)}
+        </button>
+      `).join("")}
+    </div>
+    ${
+      filteredUsers.length
+        ? `<div class="user-management-grid">${filteredUsers.map((user) => `
+          <article class="approval-card user-management-card">
             <div class="status-row">
               <span class="status-pill ${badgeTone(user.role)}">${esc(user.role)}</span>
               <span class="status-pill info">${esc(user.is_active ? "Active" : "Inactive")}</span>
@@ -3806,9 +3852,135 @@ function renderUserManagement() {
               </div>
             ` : ""}
           </article>
-        `).join("")
-      : `<div class="empty-state">No user records found.</div>`
-    : `<div class="empty-state">Login as admin to manage users.</div>`;
+        `).join("")}</div>`
+        : `<div class="empty-state">No ${esc(state.adminUserRoleTab)} records found.</div>`
+    }
+  `;
+}
+
+function getLocalSolutionByOfferingId(offeringId) {
+  return ensureList(state.data.localSolutions).find((item) => String(item.offering_id) === String(offeringId)) || null;
+}
+
+function getLocalSolutionProviders() {
+  return uniq(
+    ensureList(state.data.localSolutions)
+      .map((item) => normalizeText(item?.trader?.organisation_name || item?.trader?.trader_name || ""))
+      .filter(Boolean),
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function getFilteredLocalSolutions() {
+  const search = normalizeText(state.localSolutionFilters.search).toLowerCase();
+  const provider = normalizeText(state.localSolutionFilters.provider);
+  return ensureList(state.data.localSolutions).filter((item) => {
+    const providerName = normalizeText(item?.trader?.organisation_name || item?.trader?.trader_name || "");
+    const haystack = [
+      normalizeText(item.offering_name),
+      normalizeText(item?.solution?.solution_name),
+      providerName,
+      ...parseArray(item.tags),
+      normalizeText(item.about_offering_text),
+    ].join(" ").toLowerCase();
+    const providerMatch = provider === "all" || providerName === provider;
+    const searchMatch = !search || haystack.includes(search);
+    return providerMatch && searchMatch;
+  });
+}
+
+function openLocalSolutionReviewDialog(offeringId) {
+  const solution = getLocalSolutionByOfferingId(offeringId);
+  if (!solution) {
+    toast("This local solution is no longer available.");
+    return;
+  }
+  state.localSolutionReviewId = offeringId;
+  const dialog = byId("localSolutionReviewDialog");
+  const form = byId("localSolutionReviewForm");
+  if (!dialog || !form) return;
+  const provider = solution.trader || {};
+  const linkedSolution = solution.solution || {};
+  const meta = byId("localSolutionReviewMeta");
+  if (meta) {
+    meta.innerHTML = `
+      <div><strong>Offering ID:</strong> ${esc(solution.offering_id)}</div>
+      <div><strong>Solution ID:</strong> ${esc(solution.solution_id)}</div>
+      <div><strong>Provider:</strong> ${esc(provider.organisation_name || provider.trader_name || "Not set")}</div>
+      <div><strong>Status:</strong> ${esc(solution.publish_status || "Not set")}</div>
+    `;
+  }
+  const setValue = (name, value) => {
+    const field = form.querySelector(`[name="${name}"]`);
+    if (field) field.value = value || "";
+  };
+  setValue("offering_id", solution.offering_id);
+  setValue("organization_name", provider.organisation_name || provider.trader_name || "");
+  setValue("submitter_name", provider.poc_name || "");
+  setValue("submitter_email", provider.email || "");
+  setValue("submitter_phone", provider.mobile || "");
+  setValue("solution_name", linkedSolution.solution_name || "");
+  setValue("about_solution_text", linkedSolution.about_solution_text || "");
+  setValue("offering_category", solution.offering_category || "");
+  setValue("offering_type", solution.offering_type || "");
+  setValue("offering_name", solution.offering_name || "");
+  setValue("about_offering_text", solution.about_offering_text || "");
+  setValue("trainer_name", solution.trainer_name || "");
+  setValue("trainer_email", solution.trainer_email || "");
+  setValue("trainer_phone", solution.trainer_phone || "");
+  setValue("trainer_details_text", solution.trainer_details_text || "");
+  setValue("languages", parseArray(solution.languages).join(", "));
+  setValue("geographies", parseArray(solution.geographies).join("; "));
+  setValue("service_cost", solution.service_cost || "");
+  setValue("product_cost", solution.product_cost || "");
+  setValue("lead_time", solution.lead_time || "");
+  setValue("support_details", solution.support_details || "");
+  setValue("contact_details", solution.contact_details || "");
+  setValue("tags", parseArray(solution.tags).join(", "));
+  byId("localSolutionReviewStatus").textContent = "";
+  dialog.showModal();
+}
+
+function renderLocalSolutionManagement() {
+  const list = byId("localSolutionsList");
+  const providerSelect = byId("localSolutionProviderFilter");
+  const searchInput = byId("localSolutionSearch");
+  if (!list || !providerSelect || !searchInput) return;
+  if (!isAdminUser()) {
+    list.innerHTML = `<div class="empty-state">Login as admin to manage local Supabase solutions.</div>`;
+    providerSelect.innerHTML = `<option value="all">All solution providers</option>`;
+    searchInput.value = "";
+    return;
+  }
+  const providers = getLocalSolutionProviders();
+  providerSelect.innerHTML = [`<option value="all">All solution providers</option>`, ...providers.map((item) => `<option value="${esc(item)}">${esc(item)}</option>`)].join("");
+  providerSelect.value = state.localSolutionFilters.provider || "all";
+  searchInput.value = state.localSolutionFilters.search || "";
+  const rows = getFilteredLocalSolutions();
+  list.innerHTML = rows.length
+    ? `<div class="local-solutions-grid">${rows.map((item) => {
+        const providerName = item?.trader?.organisation_name || item?.trader?.trader_name || "Unmapped provider";
+        return `
+          <article class="approval-card local-solution-card">
+            <div class="status-row">
+              <span class="status-pill info">${esc(item.offering_category || "Offering")}</span>
+              <span class="status-pill good">${esc(item.publish_status || "MIS Published")}</span>
+            </div>
+            <h4>${esc(item.offering_name || item?.solution?.solution_name || "Untitled offering")}</h4>
+            <div class="detail-list">
+              <div><strong>Solution:</strong> ${esc(item?.solution?.solution_name || "Not set")}</div>
+              <div><strong>Provider:</strong> ${esc(providerName)}</div>
+              <div><strong>Type:</strong> ${esc(item.offering_type || "Not set")}</div>
+              <div><strong>Tags:</strong> ${esc(parseArray(item.tags).join(", ") || "None")}</div>
+            </div>
+            <p class="helper-text">${esc(clipText(item.about_offering_text || "", 180) || "No summary available.")}</p>
+            <div class="card-actions">
+              <button class="btn btn-secondary" type="button" data-action="edit-local-solution" data-offering-id="${esc(item.offering_id)}">Edit</button>
+              <button class="btn btn-danger" type="button" data-action="delete-local-solution" data-offering-id="${esc(item.offering_id)}">Delete</button>
+            </div>
+          </article>
+        `;
+      }).join("")}</div>`
+    : `<div class="empty-state">No local Supabase-only solutions match the current filters.</div>`;
 }
 
 function chooseUserRemovalMode(name) {
@@ -3937,6 +4109,7 @@ async function rerender(options = {}) {
   renderWorkbench();
   renderAdminQueue();
   renderUserManagement();
+  renderLocalSolutionManagement();
   renderAdminState();
   if (!byId("overviewView") && byId("adminView")) {
     const headline = byId("datasetHeadline");
@@ -3959,6 +4132,7 @@ async function refreshAll() {
             state.data.pendingFormSubmissions = [];
             state.data.aiReviewNeeds = [];
             state.data.users = [];
+            state.data.localSolutions = [];
           })
         : Promise.resolve().then(() => {
             state.data.pendingNeeds = [];
@@ -3966,6 +4140,7 @@ async function refreshAll() {
             state.data.pendingFormSubmissions = [];
             state.data.aiReviewNeeds = [];
             state.data.users = [];
+            state.data.localSolutions = [];
         }),
   ]);
   const displayNeeds = getDisplayNeeds();
@@ -4255,6 +4430,7 @@ function bindStaticEvents() {
   const workbenchDialog = byId("workbenchDialog");
   const matchDetailDialog = byId("matchDetailDialog");
   const submissionReviewDialog = byId("submissionReviewDialog");
+  const localSolutionReviewDialog = byId("localSolutionReviewDialog");
   byId("newNeedBtn")?.addEventListener("click", () => dialog?.showModal());
   byId("closeNeedDialog")?.addEventListener("click", () => dialog?.close());
   byId("closeMissingOrgDialog")?.addEventListener("click", () => missingOrgDialog?.close());
@@ -4271,6 +4447,7 @@ function bindStaticEvents() {
   byId("closeWorkbenchDialog")?.addEventListener("click", () => workbenchDialog?.close());
   byId("closeMatchDetailDialog")?.addEventListener("click", () => matchDetailDialog?.close());
   byId("closeSubmissionReviewDialog")?.addEventListener("click", () => submissionReviewDialog?.close());
+  byId("closeLocalSolutionReviewDialog")?.addEventListener("click", () => localSolutionReviewDialog?.close());
   byId("submissionReviewTraderSelect")?.addEventListener("change", (event) => {
     const trader = getTraderById(event.target.value);
     const orgInput = byId("submissionReviewForm")?.querySelector('[name="organization_name"]');
@@ -4473,6 +4650,53 @@ function bindStaticEvents() {
     await store.changePassword(form.get("current_password"), form.get("new_password"));
     event.target.reset();
     if (status) status.textContent = "Password changed successfully.";
+  }));
+
+  byId("localSolutionSearch")?.addEventListener("input", (event) => {
+    state.localSolutionFilters.search = event.target.value || "";
+    renderLocalSolutionManagement();
+  });
+
+  byId("localSolutionProviderFilter")?.addEventListener("change", (event) => {
+    state.localSolutionFilters.provider = event.target.value || "all";
+    renderLocalSolutionManagement();
+  });
+
+  byId("localSolutionReviewForm")?.addEventListener("submit", safeAsync(async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const status = byId("localSolutionReviewStatus");
+    if (status) status.textContent = "Saving local solution changes...";
+    const offeringId = form.get("offering_id");
+    const payload = {
+      organization_name: form.get("organization_name"),
+      submitter_name: form.get("submitter_name"),
+      submitter_email: form.get("submitter_email"),
+      submitter_phone: form.get("submitter_phone"),
+      solution_name: form.get("solution_name"),
+      about_solution_text: form.get("about_solution_text"),
+      offering_category: form.get("offering_category"),
+      offering_type: form.get("offering_type"),
+      offering_name: form.get("offering_name"),
+      about_offering_text: form.get("about_offering_text"),
+      trainer_name: form.get("trainer_name"),
+      trainer_email: form.get("trainer_email"),
+      trainer_phone: form.get("trainer_phone"),
+      trainer_details_text: form.get("trainer_details_text"),
+      languages: parseCommaList(form.get("languages")),
+      geographies: parseDelimitedList(form.get("geographies"), ";"),
+      service_cost: form.get("service_cost"),
+      product_cost: form.get("product_cost"),
+      lead_time: form.get("lead_time"),
+      support_details: form.get("support_details"),
+      contact_details: form.get("contact_details"),
+      tags: parseCommaList(form.get("tags")),
+    };
+    const result = await store.updateLocalSolution(offeringId, payload);
+    await refreshAll();
+    if (status) status.textContent = result.message || "Local solution saved.";
+    localSolutionReviewDialog?.close();
+    toast(result.message || "Local solution updated.");
   }));
 
   byId("userLogoutBtn")?.addEventListener("click", safeAsync(async () => {
@@ -4769,6 +4993,11 @@ function bindStaticEvents() {
       await refreshAll();
       toast(field === "all" ? "Recommendation accepted." : "Field override accepted.");
     }
+    if (button.dataset.action === "set-user-role-tab") {
+      state.adminUserRoleTab = button.dataset.roleTab || "admin";
+      renderUserManagement();
+      return;
+    }
     if (button.dataset.action === "update-user-role") {
       const userId = button.dataset.userId;
       const card = button.closest(".approval-card");
@@ -4800,6 +5029,19 @@ function bindStaticEvents() {
       const result = await store.removeManagedUser(userId, removalMode);
       await refreshAll();
       toast(result.message || "User removed.");
+    }
+    if (button.dataset.action === "edit-local-solution") {
+      openLocalSolutionReviewDialog(button.dataset.offeringId);
+      return;
+    }
+    if (button.dataset.action === "delete-local-solution") {
+      const offeringId = button.dataset.offeringId;
+      const card = button.closest(".approval-card");
+      const name = card?.querySelector("h4")?.textContent?.trim() || "this solution";
+      if (!window.confirm(`Delete ${name} from local Supabase solution records? This cannot be undone.`)) return;
+      const result = await store.deleteLocalSolution(offeringId);
+      await refreshAll();
+      toast(result.message || "Local solution deleted.");
     }
   }));
 

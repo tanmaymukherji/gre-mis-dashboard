@@ -2969,7 +2969,7 @@ async function adminLogout(token: string) {
 }
 
 async function getAdminSnapshot() {
-  const [pendingNeeds, pendingUpdates, aiReviewNeeds, users, pendingFormSubmissions] = await Promise.all([
+  const [pendingNeeds, pendingUpdates, aiReviewNeeds, users, pendingFormSubmissions, localSolutions] = await Promise.all([
     adminClient
       .from("gre_mis_needs")
       .select("id, organization_name, state, district, status, internal_status, requested_on, curator_id, problem_statement, source_kind")
@@ -2997,6 +2997,46 @@ async function getAdminSnapshot() {
         .select("*")
         .eq("approval_status", "pending_admin")
         .order("created_at", { ascending: false }),
+      adminClient
+        .from("offerings")
+        .select(`
+          offering_id,
+          solution_id,
+          trader_id,
+          publish_status,
+          offering_name,
+          offering_category,
+          offering_group,
+          offering_type,
+          tags,
+          languages,
+          geographies,
+          about_offering_text,
+          contact_details,
+          service_cost,
+          product_cost,
+          lead_time,
+          support_details,
+          updated_at,
+          solution:solutions (
+            solution_id,
+            solution_name,
+            about_solution_text,
+            solution_image_url
+          ),
+          trader:traders (
+            trader_id,
+            trader_name,
+            organisation_name,
+            email,
+            mobile,
+            poc_name,
+            association_status
+          )
+        `)
+        .eq("publish_status", "MIS Published")
+        .order("updated_at", { ascending: false })
+        .limit(500),
     ]);
 
   if (pendingNeeds.error) throw new Error(pendingNeeds.error.message);
@@ -3004,6 +3044,7 @@ async function getAdminSnapshot() {
   if (aiReviewNeeds.error) throw new Error(aiReviewNeeds.error.message);
   if (users.error) throw new Error(users.error.message);
   if (pendingFormSubmissions.error) throw new Error(pendingFormSubmissions.error.message);
+  if (localSolutions.error) throw new Error(localSolutions.error.message);
   const reconciledUsers = await reconcileGreUserMappings((users.data || []) as Record<string, unknown>[]);
 
   return {
@@ -3013,6 +3054,7 @@ async function getAdminSnapshot() {
     aiReviewNeeds: aiReviewNeeds.data || [],
     users: reconciledUsers,
     pendingFormSubmissions: pendingFormSubmissions.data || [],
+    localSolutions: localSolutions.data || [],
   };
 }
 
@@ -4220,6 +4262,207 @@ async function updateFormSubmission(submissionId: string, update: Record<string,
   return {
     ok: true,
     message: "Submission draft updated for admin review.",
+  };
+}
+
+async function updateLocalSolution(offeringId: string, payload: Record<string, unknown>, actorEmail: string) {
+  const normalizedOfferingId = requireString(offeringId);
+  if (!normalizedOfferingId) throw new Error("Offering ID is required.");
+
+  const { data: offering, error: offeringError } = await adminClient
+    .from("offerings")
+    .select("*, solution:solutions(*), trader:traders(*)")
+    .eq("offering_id", normalizedOfferingId)
+    .maybeSingle();
+  if (offeringError) throw new Error(offeringError.message);
+  if (!offering) throw new Error("Local solution offering not found.");
+  if (requireString(offering.publish_status) !== "MIS Published") {
+    throw new Error("Only locally managed MIS offerings can be edited here.");
+  }
+
+  const traderRow = Array.isArray(offering.trader) ? offering.trader[0] : offering.trader;
+  const solutionRow = Array.isArray(offering.solution) ? offering.solution[0] : offering.solution;
+  const nowIso = new Date().toISOString();
+
+  const organizationName = requireString(payload.organization_name || traderRow?.organisation_name || traderRow?.trader_name);
+  const submitterName = requireString(payload.submitter_name || traderRow?.poc_name);
+  const submitterEmail = requireString(payload.submitter_email || traderRow?.email).toLowerCase();
+  const submitterPhone = requireString(payload.submitter_phone || traderRow?.mobile);
+  const offeringName = requireString(payload.offering_name || offering.offering_name);
+  const offeringDescription = requireString(payload.about_offering_text || offering.about_offering_text);
+  const offeringCategory = requireString(payload.offering_category || offering.offering_category || "Service offerings");
+  const offeringGroup = requireString(payload.offering_group || offering.offering_group || offeringCategory.replace(/\s+offerings$/i, "").trim() || "Service");
+  const offeringType = requireString(payload.offering_type || offering.offering_type);
+  const solutionName = requireString(payload.solution_name || offeringName || solutionRow?.solution_name);
+  const solutionDescription = requireString(payload.about_solution_text || offeringDescription || solutionRow?.about_solution_text);
+  const tags = uniqueStrings(asStringArray(payload.tags || offering.tags));
+  if (!tags.length) throw new Error("At least one tag is required.");
+  const languages = uniqueStrings(asStringArray(payload.languages || offering.languages));
+  const geographies = uniqueStrings(asStringArray(payload.geographies || offering.geographies));
+  const locationAvailability = uniqueStrings(asStringArray(payload.location_availability)).join(", ") || requireString(offering.location_availability);
+  const productCost = requireString(payload.product_cost || offering.product_cost);
+  const serviceCost = requireString(payload.service_cost || offering.service_cost);
+  const contactDetails = buildLocalContactDetails({
+    ...payload,
+    submitter_name: submitterName,
+    submitter_email: submitterEmail,
+    submitter_phone: submitterPhone,
+    contact_details: payload.contact_details || payload.product_contact_details || offering.contact_details,
+  });
+  const offeringHtml = normalizeRichText(offeringDescription);
+  const solutionHtml = normalizeRichText(solutionDescription);
+  const rawPayload = {
+    ...(offering.raw_payload && typeof offering.raw_payload === "object" ? offering.raw_payload as Record<string, unknown> : {}),
+    last_manual_edit: {
+      updated_by: actorEmail,
+      updated_at: nowIso,
+      payload,
+    },
+  };
+
+  const traderPatch = {
+    organisation_name: organizationName || null,
+    trader_name: requireString(traderRow?.trader_name || organizationName) || null,
+    email: submitterEmail || null,
+    mobile: submitterPhone || null,
+    poc_name: submitterName || null,
+  };
+  const { error: traderUpdateError } = await adminClient
+    .from("traders")
+    .update(traderPatch)
+    .eq("trader_id", requireString(offering.trader_id));
+  if (traderUpdateError) throw new Error(traderUpdateError.message);
+
+  const solutionPatch = {
+    solution_name: solutionName,
+    about_solution_html: solutionHtml,
+    about_solution_text: stripHtml(solutionHtml),
+    solution_image_url: requireString(payload.solution_image_url || solutionRow?.solution_image_url) || null,
+    raw_payload: rawPayload,
+  };
+  const { error: solutionUpdateError } = await adminClient
+    .from("solutions")
+    .update(solutionPatch)
+    .eq("solution_id", requireString(offering.solution_id));
+  if (solutionUpdateError) throw new Error(solutionUpdateError.message);
+
+  const offeringPatch = {
+    offering_name: offeringName,
+    offering_category: offeringCategory,
+    offering_group: offeringGroup,
+    offering_type: offeringType,
+    tags,
+    languages,
+    geographies,
+    geographies_raw: geographies.join("; "),
+    about_offering_html: offeringHtml,
+    about_offering_text: stripHtml(offeringHtml),
+    trainer_name: requireString(payload.trainer_name || offering.trainer_name) || null,
+    trainer_email: requireString(payload.trainer_email || offering.trainer_email).toLowerCase() || null,
+    trainer_phone: requireString(payload.trainer_phone || offering.trainer_phone) || null,
+    trainer_details_html: normalizeRichText(payload.trainer_details_text || offering.trainer_details_text),
+    trainer_details_text: stripHtml(normalizeRichText(payload.trainer_details_text || offering.trainer_details_text)),
+    duration: [requireString(payload.duration), requireString(payload.duration_unit)].filter(Boolean).join(" ") || requireString(offering.duration) || null,
+    prerequisites: requireString(payload.prerequisites || offering.prerequisites) || null,
+    service_cost: serviceCost || null,
+    support_post_service: requireString(payload.support_post_service || offering.support_post_service) || null,
+    support_post_service_cost: requireString(payload.support_post_service_cost || offering.support_post_service_cost) || null,
+    delivery_mode: requireString(payload.delivery_mode || offering.delivery_mode) || null,
+    certification_offered: requireString(payload.certification_offered || offering.certification_offered) || null,
+    cost_remarks: requireString(payload.cost_remarks || offering.cost_remarks) || null,
+    location_availability: locationAvailability || null,
+    grade_capacity: requireString(payload.grade_capacity || offering.grade_capacity) || null,
+    product_cost: productCost || null,
+    lead_time: requireString(payload.lead_time || offering.lead_time) || null,
+    support_details: requireString(payload.support_details || offering.support_details) || null,
+    knowledge_content_url: requireString(payload.knowledge_content_url || offering.knowledge_content_url) || null,
+    contact_details: contactDetails || null,
+    search_document: buildSearchDocument([
+      solutionName,
+      offeringName,
+      offeringCategory,
+      offeringGroup,
+      offeringType,
+      tags,
+      languages,
+      geographies,
+      offeringDescription,
+      solutionDescription,
+      organizationName,
+      contactDetails,
+    ]),
+    raw_payload: rawPayload,
+    source_row_signature: stableRowSignature(rawPayload),
+  };
+  const { error: offeringUpdateError } = await adminClient
+    .from("offerings")
+    .update(offeringPatch)
+    .eq("offering_id", normalizedOfferingId);
+  if (offeringUpdateError) throw new Error(offeringUpdateError.message);
+
+  const refreshedOffering = {
+    ...offering,
+    ...offeringPatch,
+    offering_id: normalizedOfferingId,
+    solution_id: requireString(offering.solution_id),
+    trader_id: requireString(offering.trader_id),
+  };
+  const refreshedSolution = {
+    ...(solutionRow && typeof solutionRow === "object" ? solutionRow : {}),
+    ...solutionPatch,
+    solution_id: requireString(offering.solution_id),
+    trader_id: requireString(offering.trader_id),
+  };
+  const refreshedTrader = {
+    ...(traderRow && typeof traderRow === "object" ? traderRow : {}),
+    ...traderPatch,
+    trader_id: requireString(offering.trader_id),
+  };
+  await enrichOfferingIntelligence(refreshedOffering, refreshedSolution, refreshedTrader, defaultAiProvider || "openrouter");
+
+  return {
+    ok: true,
+    message: "Local solution updated in Supabase.",
+  };
+}
+
+async function deleteLocalSolution(offeringId: string) {
+  const normalizedOfferingId = requireString(offeringId);
+  if (!normalizedOfferingId) throw new Error("Offering ID is required.");
+  const { data: offering, error } = await adminClient
+    .from("offerings")
+    .select("offering_id, solution_id, publish_status")
+    .eq("offering_id", normalizedOfferingId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!offering) throw new Error("Local solution offering not found.");
+  if (requireString(offering.publish_status) !== "MIS Published") {
+    throw new Error("Only locally managed MIS offerings can be deleted here.");
+  }
+
+  const solutionId = requireString(offering.solution_id);
+  const { error: deleteOfferingError } = await adminClient
+    .from("offerings")
+    .delete()
+    .eq("offering_id", normalizedOfferingId);
+  if (deleteOfferingError) throw new Error(deleteOfferingError.message);
+
+  const { count, error: countError } = await adminClient
+    .from("offerings")
+    .select("offering_id", { count: "exact", head: true })
+    .eq("solution_id", solutionId);
+  if (countError) throw new Error(countError.message);
+  if (!count) {
+    const { error: deleteSolutionError } = await adminClient
+      .from("solutions")
+      .delete()
+      .eq("solution_id", solutionId);
+    if (deleteSolutionError) throw new Error(deleteSolutionError.message);
+  }
+
+  return {
+    ok: true,
+    message: "Local solution deleted from Supabase.",
   };
 }
 
@@ -5458,6 +5701,18 @@ Deno.serve(async (req) => {
         (payload.update && typeof payload.update === "object") ? payload.update as Record<string, unknown> : {},
         adminActorEmail,
       ));
+    }
+
+    if (action === "updateLocalSolution") {
+      return jsonResponse(await updateLocalSolution(
+        requireString(payload.offeringId),
+        (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
+        adminActorEmail,
+      ));
+    }
+
+    if (action === "deleteLocalSolution") {
+      return jsonResponse(await deleteLocalSolution(requireString(payload.offeringId)));
     }
 
     if (action === "upsertOption") {

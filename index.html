@@ -653,6 +653,28 @@
           <section class="panel panel-large">
             <div class="panel-head">
               <div>
+                <p class="eyebrow">Local Solutions</p>
+                <h3>Supabase Solution Management</h3>
+              </div>
+            </div>
+            <div class="local-solution-toolbar">
+              <label>
+                <span>Search Solution</span>
+                <input id="localSolutionSearch" type="search" placeholder="Search offering, solution, tag, provider" />
+              </label>
+              <label>
+                <span>Solution Provider</span>
+                <select id="localSolutionProviderFilter">
+                  <option value="all">All solution providers</option>
+                </select>
+              </label>
+            </div>
+            <div id="localSolutionsList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
                 <p class="eyebrow">Pending Intake</p>
                 <h3>Needs Awaiting Admin Approval</h3>
               </div>
@@ -888,6 +910,48 @@
     </form>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260511a"></script>
+  <dialog id="localSolutionReviewDialog" class="modal">
+    <form id="localSolutionReviewForm" class="modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Local Solution Review</p>
+          <h3>Edit Supabase Solution</h3>
+        </div>
+        <button type="button" id="closeLocalSolutionReviewDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div id="localSolutionReviewMeta" class="detail-list review-meta-list"></div>
+      <div class="form-grid">
+        <input type="hidden" name="offering_id" />
+        <label><span>Organisation Name</span><input name="organization_name" /></label>
+        <label><span>Contact Name</span><input name="submitter_name" /></label>
+        <label><span>Contact Email</span><input name="submitter_email" type="email" /></label>
+        <label><span>Contact Phone</span><input name="submitter_phone" /></label>
+        <label><span>Solution Name</span><input name="solution_name" /></label>
+        <label><span>Offering Category</span><input name="offering_category" /></label>
+        <label><span>Offering Type</span><input name="offering_type" /></label>
+        <label><span>Offering Name</span><input name="offering_name" /></label>
+        <label class="wide"><span>Solution Description</span><textarea name="about_solution_text" rows="3"></textarea></label>
+        <label class="wide"><span>Offering Description</span><textarea name="about_offering_text" rows="4"></textarea></label>
+        <label><span>Facilitator Name</span><input name="trainer_name" /></label>
+        <label><span>Facilitator Email</span><input name="trainer_email" type="email" /></label>
+        <label><span>Facilitator Phone</span><input name="trainer_phone" /></label>
+        <label class="wide"><span>Facilitator Details</span><textarea name="trainer_details_text" rows="3"></textarea></label>
+        <label class="wide"><span>Languages</span><input name="languages" placeholder="Comma-separated" /></label>
+        <label class="wide"><span>Geographies</span><textarea name="geographies" rows="2" placeholder="Separate geographies with semicolons"></textarea></label>
+        <label><span>Service Cost</span><input name="service_cost" /></label>
+        <label><span>Product Cost</span><input name="product_cost" /></label>
+        <label><span>Lead Time</span><input name="lead_time" /></label>
+        <label class="wide"><span>Support Details</span><textarea name="support_details" rows="3"></textarea></label>
+        <label class="wide"><span>Contact Details</span><textarea name="contact_details" rows="3"></textarea></label>
+        <label class="wide"><span>Tags</span><input name="tags" placeholder="Comma-separated" /></label>
+      </div>
+      <p id="localSolutionReviewStatus" class="helper-text"></p>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary">Save Solution</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./app.js?v=20260511b"></script>
 </body>
 </html>

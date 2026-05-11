@@ -1282,6 +1282,35 @@ input[type="radio"] {
   display: grid;
   gap: 10px;
 }
+.admin-role-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.user-management-grid,
+.local-solutions-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.user-management-card,
+.local-solution-card {
+  min-height: 100%;
+}
+.local-solution-toolbar {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.8fr);
+  margin-bottom: 14px;
+}
+.local-solution-toolbar label {
+  display: grid;
+  gap: 6px;
+}
+.local-solution-toolbar input,
+.local-solution-toolbar select {
+  width: 100%;
+}
 .user-detail-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1377,6 +1406,10 @@ input[type="radio"] {
   .user-detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .user-management-grid,
+  .local-solutions-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .pipeline-drilldown-split { grid-template-columns: 1fr; }
   .pipeline-drilldown-sidebar {
     min-height: auto;
@@ -1464,6 +1497,11 @@ input[type="radio"] {
     grid-template-columns: 1fr;
   }
   .user-detail-grid {
+    grid-template-columns: 1fr;
+  }
+  .user-management-grid,
+  .local-solutions-grid,
+  .local-solution-toolbar {
     grid-template-columns: 1fr;
   }
   .operations-filters-grid,
