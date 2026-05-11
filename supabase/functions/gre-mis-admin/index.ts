@@ -3854,6 +3854,20 @@ async function createLocalSolutionFromSubmission(
 
   const solutionHtml = normalizeRichText(solutionDescription);
   const offeringHtml = normalizeRichText(offeringDescription);
+  const offeringRules = classifyOfferingByRules({
+    offering_name: offeringName,
+    offering_group: offeringGroup,
+    offering_type: offeringType,
+    offering_category: offeringCategory,
+    tags,
+    languages,
+    geographies,
+    about_offering_text: offeringDescription,
+    contact_details: contactDetails,
+  }, {
+    solution_name: solutionName,
+    about_solution_text: solutionDescription,
+  });
 
   const solutionRow = {
     solution_id: solutionId,
@@ -3878,7 +3892,7 @@ async function createLocalSolutionFromSubmission(
     offering_category: offeringCategory,
     offering_group: offeringGroup,
     offering_type: offeringType,
-    domain_6m: "",
+    domain_6m: offeringRules.sixMSignals.join(", ") || null,
     primary_valuechain_id: null,
     primary_valuechain: null,
     primary_application_id: null,
@@ -4351,6 +4365,20 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
     offering_category: offeringCategory,
     offering_group: offeringGroup,
     offering_type: offeringType,
+    domain_6m: classifyOfferingByRules({
+      offering_name: offeringName,
+      offering_group: offeringGroup,
+      offering_type: offeringType,
+      offering_category: offeringCategory,
+      tags,
+      languages,
+      geographies,
+      about_offering_text: offeringDescription,
+      contact_details: contactDetails,
+    }, {
+      solution_name: solutionName,
+      about_solution_text: solutionDescription,
+    }).sixMSignals.join(", ") || null,
     tags,
     languages,
     geographies,
