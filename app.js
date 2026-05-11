@@ -2703,6 +2703,82 @@ function renderSubmissionReviewFields(submissionType, payload) {
     .join("");
 }
 
+function getSubmissionAttachmentConfigs(submissionType, payload = {}) {
+  if (submissionType !== "solution") return [];
+  const category = normalizeText(payload?.offering_category) || "Service offerings";
+  const configs = [];
+  if (category === "Product offerings") {
+    configs.push({
+      key: "product_brochure_attachment",
+      label: "Product Brochure",
+      inputName: "review_product_brochure_attachment",
+      accept: ".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png",
+    });
+  }
+  if (category === "Service offerings") {
+    configs.push({
+      key: "service_brochure_attachment",
+      label: "Service Brochure",
+      inputName: "review_service_brochure_attachment",
+      accept: ".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png",
+    });
+  }
+  if (category === "Knowledge offerings") {
+    configs.push({
+      key: "knowledge_content_attachment",
+      label: "Knowledge File",
+      inputName: "review_knowledge_content_attachment",
+      accept: ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.mp4",
+    });
+  }
+  configs.push({
+    key: "offering_image_attachment",
+    label: "Offering Image",
+    inputName: "review_offering_image_attachment",
+    accept: ".jpg,.jpeg,.png,.webp",
+  });
+  return configs;
+}
+
+function getAttachmentDisplayInfo(value) {
+  if (!value || typeof value !== "object") return null;
+  const dataUrl = normalizeText(value.dataUrl || value.url || "");
+  const name = normalizeText(value.name || value.fileName || "Attached file");
+  if (!dataUrl) return name ? { name, href: "" } : null;
+  return { name, href: dataUrl };
+}
+
+function renderSubmissionReviewAttachments(submissionType, payload) {
+  const target = byId("submissionReviewAttachments");
+  if (!target) return;
+  const configs = getSubmissionAttachmentConfigs(submissionType, payload);
+  if (!configs.length) {
+    target.innerHTML = `<div class="empty-state">No file attachments are relevant for this submission type.</div>`;
+    return;
+  }
+  target.innerHTML = configs.map((config) => {
+    const current = getAttachmentDisplayInfo(payload?.[config.key]);
+    return `
+      <article class="attachment-review-card">
+        <div class="attachment-review-copy">
+          <strong>${esc(config.label)}</strong>
+          ${
+            current
+              ? current.href
+                ? `<a href="${esc(current.href)}" target="_blank" rel="noreferrer">${esc(current.name)}</a>`
+                : `<span>${esc(current.name)}</span>`
+              : `<span class="helper-text">No file attached yet.</span>`
+          }
+        </div>
+        <label>
+          <span>Replace File</span>
+          <input name="${escAttr(config.inputName)}" type="file" accept="${escAttr(config.accept)}" />
+        </label>
+      </article>
+    `;
+  }).join("");
+}
+
 function getFormSubmissionById(submissionId) {
   return ensureList(state.data.pendingFormSubmissions).find((submission) => submission.id === submissionId) || null;
 }
@@ -2713,7 +2789,7 @@ function fillSubmissionReviewTraderSelect(selectedId = "") {
   select.innerHTML = buildSupplierOptionsHtml(selectedId);
 }
 
-function buildSubmissionReviewPatch() {
+async function buildSubmissionReviewPatch() {
   const form = byId("submissionReviewForm");
   if (!form) throw new Error("Submission review form is unavailable.");
   const submissionId = normalizeText(form.querySelector('[name="submission_id"]')?.value || "");
@@ -2733,6 +2809,11 @@ function buildSubmissionReviewPatch() {
       payload[key] = field.value;
     }
   });
+  const attachmentConfigs = getSubmissionAttachmentConfigs(submission?.submission_type || "", payload);
+  for (const config of attachmentConfigs) {
+    const attachment = await collectSingleFileAttachment(form, config.inputName);
+    if (attachment) payload[config.key] = attachment;
+  }
   const payloadField = form.querySelector('[name="payload_json"]');
   const trader = getTraderById(existingTraderId);
   if (!trader && !isSolution) throw new Error("Please choose a valid GRE supplier before saving the submission.");
@@ -2782,6 +2863,7 @@ function openSubmissionReviewDialog(submissionId) {
   if (payloadField) payloadField.value = JSON.stringify(payload, null, 2);
   fillSubmissionReviewTraderSelect(submission.existing_trader_id || payload.existing_trader_id || "");
   renderSubmissionReviewFields(submission.submission_type, payload);
+  renderSubmissionReviewAttachments(submission.submission_type, payload);
   meta.innerHTML = `
     <div><strong>Submission Type:</strong> ${esc(submission.submission_type)}</div>
     <div><strong>Source:</strong> ${esc(submission.source_mode || "shared_link")}</div>
@@ -4918,7 +5000,7 @@ function bindStaticEvents() {
   byId("saveSubmissionReviewBtn")?.addEventListener("click", safeAsync(async () => {
     const status = byId("submissionReviewStatus");
     if (status) status.textContent = "Saving submission changes...";
-    const patch = buildSubmissionReviewPatch();
+    const patch = await buildSubmissionReviewPatch();
     const result = await store.updateFormSubmission(patch.submissionId, patch.update);
     await refreshAll();
     openSubmissionReviewDialog(patch.submissionId);
@@ -4929,7 +5011,7 @@ function bindStaticEvents() {
   byId("approveSubmissionReviewBtn")?.addEventListener("click", safeAsync(async () => {
     const status = byId("submissionReviewStatus");
     if (status) status.textContent = "Saving changes and approving...";
-    const patch = buildSubmissionReviewPatch();
+    const patch = await buildSubmissionReviewPatch();
     await store.updateFormSubmission(patch.submissionId, patch.update);
     const result = await store.reviewFormSubmission(patch.submissionId, "approve", patch.update.adminReviewNotes || "");
     submissionReviewDialog?.close();
@@ -4940,7 +5022,7 @@ function bindStaticEvents() {
   byId("rejectSubmissionReviewBtn")?.addEventListener("click", safeAsync(async () => {
     const status = byId("submissionReviewStatus");
     if (status) status.textContent = "Saving changes and rejecting...";
-    const patch = buildSubmissionReviewPatch();
+    const patch = await buildSubmissionReviewPatch();
     await store.updateFormSubmission(patch.submissionId, patch.update);
     await store.reviewFormSubmission(patch.submissionId, "reject", patch.update.adminReviewNotes || "");
     submissionReviewDialog?.close();
