@@ -3791,7 +3791,7 @@ function renderUserManagement() {
     ["curator", "Curator"],
     ["user", "Users"],
   ];
-  const filteredUsers = ensureList(state.data.users).filter((user) => requireString(user.role).toLowerCase() === state.adminUserRoleTab);
+  const filteredUsers = ensureList(state.data.users).filter((user) => normalizeText(user.role).toLowerCase() === state.adminUserRoleTab);
   list.innerHTML = `
     <div class="admin-role-tabs">
       ${tabs.map(([role, label]) => `
