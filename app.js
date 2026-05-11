@@ -3956,6 +3956,64 @@ function getLocalSolutionByOfferingId(offeringId) {
   return ensureList(state.data.localSolutions).find((item) => String(item.offering_id) === String(offeringId)) || null;
 }
 
+function getLocalSolutionAttachmentConfigs(solution) {
+  const category = normalizeText(solution?.offering_category || "");
+  const configs = [];
+  if (category === "Product offerings") {
+    configs.push({
+      label: "Product Brochure",
+      url: solution?.product_brochure_url || "",
+      inputName: "local_product_brochure_attachment",
+      accept: ".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png",
+    });
+  }
+  if (category === "Service offerings") {
+    configs.push({
+      label: "Service Brochure",
+      url: solution?.service_brochure_url || "",
+      inputName: "local_service_brochure_attachment",
+      accept: ".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png",
+    });
+  }
+  if (category === "Knowledge offerings") {
+    configs.push({
+      label: "Knowledge Content",
+      url: solution?.knowledge_content_url || "",
+      inputName: "local_knowledge_content_attachment",
+      accept: ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.mp4",
+    });
+  }
+  configs.push({
+    label: "Offering Image",
+    url: solution?.solution?.solution_image_url || "",
+    inputName: "local_offering_image_attachment",
+    accept: ".jpg,.jpeg,.png,.webp",
+  });
+  return configs;
+}
+
+function renderLocalSolutionReviewAttachments(solution) {
+  const target = byId("localSolutionReviewAttachments");
+  if (!target) return;
+  const configs = getLocalSolutionAttachmentConfigs(solution);
+  target.innerHTML = configs.map((config) => `
+    <article class="attachment-review-card">
+      <div class="attachment-review-copy">
+        <strong>${esc(config.label)}</strong>
+        ${
+          config.url
+            ? `<a href="${esc(config.url)}" target="_blank" rel="noreferrer">Open current file</a>`
+            : `<span class="helper-text">No file attached yet.</span>`
+        }
+      </div>
+      <label>
+        <span>Replace File</span>
+        <input name="${escAttr(config.inputName)}" type="file" accept="${escAttr(config.accept)}" />
+      </label>
+    </article>
+  `).join("");
+}
+
 function getLocalSolutionProviders() {
   return uniq(
     ensureList(state.data.localSolutions)
@@ -4030,6 +4088,7 @@ function openLocalSolutionReviewDialog(offeringId) {
   setValue("support_details", solution.support_details || "");
   setValue("contact_details", solution.contact_details || "");
   setValue("tags", parseArray(solution.tags).join(", "));
+  renderLocalSolutionReviewAttachments(solution);
   byId("localSolutionReviewStatus").textContent = "";
   dialog.showModal();
 }
@@ -4762,6 +4821,10 @@ function bindStaticEvents() {
     const status = byId("localSolutionReviewStatus");
     if (status) status.textContent = "Saving local solution changes...";
     const offeringId = form.get("offering_id");
+    const productBrochure = await collectSingleFileAttachment(event.target, "local_product_brochure_attachment");
+    const serviceBrochure = await collectSingleFileAttachment(event.target, "local_service_brochure_attachment");
+    const knowledgeContent = await collectSingleFileAttachment(event.target, "local_knowledge_content_attachment");
+    const offeringImage = await collectSingleFileAttachment(event.target, "local_offering_image_attachment");
     const payload = {
       organization_name: form.get("organization_name"),
       submitter_name: form.get("submitter_name"),
@@ -4785,6 +4848,10 @@ function bindStaticEvents() {
       support_details: form.get("support_details"),
       contact_details: form.get("contact_details"),
       tags: parseCommaList(form.get("tags")),
+      product_brochure_attachment: productBrochure,
+      service_brochure_attachment: serviceBrochure,
+      knowledge_content_attachment: knowledgeContent,
+      offering_image_attachment: offeringImage,
     };
     const result = await store.updateLocalSolution(offeringId, payload);
     await refreshAll();

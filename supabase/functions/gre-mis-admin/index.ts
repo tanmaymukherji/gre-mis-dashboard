@@ -3025,6 +3025,9 @@ async function getAdminSnapshot() {
           product_cost,
           lead_time,
           support_details,
+          service_brochure_url,
+          product_brochure_url,
+          knowledge_content_url,
           updated_at,
           solution:solutions (
             solution_id,
@@ -4397,6 +4400,22 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
   });
   const offeringHtml = normalizeRichText(offeringDescription);
   const solutionHtml = normalizeRichText(solutionDescription);
+  const nextServiceBrochureUrl =
+    await uploadAttachmentToGithub(payload.service_brochure_attachment, "service-brochures", `${offeringName || "service-offering"}-${attachmentName(payload.service_brochure_attachment) || "brochure"}`) ||
+    attachmentDataUrl(payload.service_brochure_attachment) ||
+    requireString(offering.service_brochure_url);
+  const nextProductBrochureUrl =
+    await uploadAttachmentToGithub(payload.product_brochure_attachment, "product-brochures", `${offeringName || "product-offering"}-${attachmentName(payload.product_brochure_attachment) || "brochure"}`) ||
+    attachmentDataUrl(payload.product_brochure_attachment) ||
+    requireString(offering.product_brochure_url);
+  const nextKnowledgeContentUrl =
+    await uploadAttachmentToGithub(payload.knowledge_content_attachment, "knowledge-content", `${offeringName || "knowledge-offering"}-${attachmentName(payload.knowledge_content_attachment) || "content"}`) ||
+    attachmentDataUrl(payload.knowledge_content_attachment) ||
+    requireString(payload.knowledge_content_url || offering.knowledge_content_url);
+  const nextSolutionImageUrl =
+    await uploadAttachmentToGithub(payload.offering_image_attachment, "offering-images", `${offeringName || "offering"}-${attachmentName(payload.offering_image_attachment) || "image"}`) ||
+    attachmentDataUrl(payload.offering_image_attachment) ||
+    requireString(payload.solution_image_url || solutionRow?.solution_image_url);
   const rawPayload = {
     ...(offering.raw_payload && typeof offering.raw_payload === "object" ? offering.raw_payload as Record<string, unknown> : {}),
     last_manual_edit: {
@@ -4423,7 +4442,7 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
     solution_name: solutionName,
     about_solution_html: solutionHtml,
     about_solution_text: stripHtml(solutionHtml),
-    solution_image_url: requireString(payload.solution_image_url || solutionRow?.solution_image_url) || null,
+    solution_image_url: nextSolutionImageUrl || null,
     raw_payload: rawPayload,
   };
   const { error: solutionUpdateError } = await adminClient
@@ -4475,7 +4494,9 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
     product_cost: productCost || null,
     lead_time: requireString(payload.lead_time || offering.lead_time) || null,
     support_details: requireString(payload.support_details || offering.support_details) || null,
-    knowledge_content_url: requireString(payload.knowledge_content_url || offering.knowledge_content_url) || null,
+    service_brochure_url: nextServiceBrochureUrl || null,
+    product_brochure_url: nextProductBrochureUrl || null,
+    knowledge_content_url: nextKnowledgeContentUrl || null,
     contact_details: contactDetails || null,
     search_document: buildSearchDocument([
       solutionName,
