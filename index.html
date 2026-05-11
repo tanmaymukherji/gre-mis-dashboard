@@ -6,8 +6,8 @@
   <title>GRE MIS Dashboard</title>
   <link rel="icon" href="data:," />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./config.js?v=20260509a"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260510b" />
+  <script src="./config.js?v=20260511a"></script>
+  <link rel="stylesheet" href="./styles.css?v=20260511a" />
 </head>
 <body>
   <div class="shell">
@@ -208,12 +208,12 @@
                 <div class="form-section wide">
                   <div class="form-section-head">
                     <p class="eyebrow">Organisation</p>
-                    <h4>GRE Supplier and Submission Contact</h4>
+                    <h4>Organisation and Submission Contact</h4>
                   </div>
                   <div class="form-grid">
                     <label>
-                      <span>Approved GRE Supplier</span>
-                      <select id="solutionTraderSelect" name="existing_trader_id" required></select>
+                      <span>Existing Organisation in Supabase</span>
+                      <select id="solutionTraderSelect" name="existing_trader_id"></select>
                     </label>
                     <label>
                       <span>Organisation Name</span>
@@ -225,54 +225,12 @@
                     </label>
                     <label>
                       <span>Contact Email</span>
-                      <input name="submitter_email" type="email" />
+                      <input name="submitter_email" type="email" required />
                     </label>
                     <label>
                       <span>Contact Phone</span>
                       <input name="submitter_phone" />
                     </label>
-                  </div>
-                </div>
-
-                <div class="form-section wide">
-                  <div class="form-section-head">
-                    <p class="eyebrow">Solution</p>
-                    <h4>Core Solution Details</h4>
-                  </div>
-                  <div class="form-grid">
-                    <label>
-                      <span>Solution Name</span>
-                      <input name="solution_name" required />
-                    </label>
-                    <label class="wide">
-                      <span>Solution Description</span>
-                      <textarea name="about_solution_text" rows="4" required></textarea>
-                    </label>
-                    <label>
-                      <span>Primary Value Chain</span>
-                      <select id="solutionPrimaryValuechain" name="primary_valuechain" required></select>
-                    </label>
-                    <label>
-                      <span>Primary Application</span>
-                      <select id="solutionPrimaryApplication" name="primary_application" required></select>
-                    </label>
-                    <label>
-                      <span>Secondary Value Chain</span>
-                      <select id="solutionSecondaryValuechain" name="secondary_valuechain"></select>
-                    </label>
-                    <label>
-                      <span>Secondary Application</span>
-                      <select id="solutionSecondaryApplication" name="secondary_application"></select>
-                    </label>
-                    <div class="wide choice-block">
-                      <span class="field-label">Who Can avail it</span>
-                      <div class="checkbox-grid choice-grid choice-grid-2" id="solutionAudienceGroup">
-                        <label><input type="checkbox" name="solution_audience" value="Individuals" /><span>Individuals</span></label>
-                        <label><input type="checkbox" name="solution_audience" value="Groups" /><span>Groups</span></label>
-                        <label><input type="checkbox" name="solution_audience" value="SHGs" /><span>SHGs</span></label>
-                        <label><input type="checkbox" name="solution_audience" value="Organisations" /><span>Organisations</span></label>
-                      </div>
-                    </div>
                   </div>
                 </div>
 
@@ -311,15 +269,6 @@
                     <h4>Product Details</h4>
                   </div>
                   <div class="form-grid">
-                    <div class="wide choice-block">
-                      <span class="field-label">Who Can avail it</span>
-                      <div class="checkbox-grid choice-grid choice-grid-2" id="productAudienceGroup">
-                        <label><input type="checkbox" name="product_audience" value="Individuals" /><span>Individuals</span></label>
-                        <label><input type="checkbox" name="product_audience" value="Groups" /><span>Groups</span></label>
-                        <label><input type="checkbox" name="product_audience" value="SHGs" /><span>SHGs</span></label>
-                        <label><input type="checkbox" name="product_audience" value="Organisations" /><span>Organisations</span></label>
-                      </div>
-                    </div>
                     <label>
                       <span>Grade/Capacity</span>
                       <input name="grade_capacity" />
@@ -327,6 +276,10 @@
                     <label>
                       <span>Cost</span>
                       <input name="product_cost" />
+                    </label>
+                    <label class="inline-check">
+                      <input type="checkbox" name="product_cost_quote_on_scope" value="yes" />
+                      <span>Can be quoted after finalising scope</span>
                     </label>
                     <label>
                       <span>Lead Time</span>
@@ -339,6 +292,10 @@
                     <label class="wide">
                       <span>Support Services</span>
                       <textarea name="support_details" rows="3"></textarea>
+                    </label>
+                    <label class="wide">
+                      <span>Contact Details for Product</span>
+                      <textarea name="product_contact_details" rows="3" placeholder="Use this if the product contact differs from the organisation contact"></textarea>
                     </label>
                   </div>
                 </div>
@@ -494,8 +451,10 @@
                       <div class="tag-entry-shell">
                         <input id="solutionTagEntry" list="solutionTagOptions" placeholder="Select or type a tag, then press Enter" />
                         <button type="button" id="addSolutionTagBtn" class="btn btn-secondary btn-compact">Add Tag</button>
+                        <button type="button" id="generateSolutionTagsBtn" class="btn btn-secondary btn-compact">AI Generate Tags</button>
                       </div>
-                      <input type="hidden" name="tags" id="solutionTagsInput" />
+                      <input type="hidden" name="tags" id="solutionTagsInput" required />
+                      <p class="helper-text">Tags are compulsory for discovery. Generate a first draft or add them manually.</p>
                       <div id="solutionTagChips" class="tag-cloud tag-chip-editor"></div>
                     </div>
                   </div>
@@ -929,6 +888,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260510b"></script>
+  <script type="module" src="./app.js?v=20260511a"></script>
 </body>
 </html>

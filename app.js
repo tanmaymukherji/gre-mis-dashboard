@@ -1839,6 +1839,10 @@ class GreMisStore {
     return this.callAdmin("updateFormSubmission", { submissionId, update }, true);
   }
 
+  async suggestSolutionTags(payload) {
+    return this.callAdmin("suggestSolutionTags", { payload }, false);
+  }
+
   async searchLgdGeographies(query) {
     const client = this.getClient();
     const search = normalizeText(query);
@@ -2149,8 +2153,8 @@ function findSupplierByName(name) {
   }) || null;
 }
 
-function buildSupplierOptionsHtml(selectedId = "") {
-  const options = [`<option value="">Choose approved GRE supplier</option>`];
+function buildSupplierOptionsHtml(selectedId = "", placeholder = "Choose approved GRE supplier") {
+  const options = [`<option value="">${esc(placeholder)}</option>`];
   getSupplierOptions().forEach((row) => {
     const label = row.organisation_name || row.trader_name || `Supplier ${row.trader_id}`;
     options.push(`<option value="${esc(row.trader_id)}" ${String(row.trader_id) === String(selectedId) ? "selected" : ""}>${esc(label)}</option>`);
@@ -2163,7 +2167,10 @@ function fillSupplierSelect(selectId, orgInputId) {
   const orgInput = byId(orgInputId);
   if (!select) return;
   const currentValue = select.value;
-  select.innerHTML = buildSupplierOptionsHtml(currentValue);
+  const placeholder = selectId === "solutionTraderSelect"
+    ? "Choose existing organisation (optional)"
+    : "Choose approved GRE supplier";
+  select.innerHTML = buildSupplierOptionsHtml(currentValue, placeholder);
   if (orgInput && !orgInput.value && select.value) {
     const trader = getTraderById(select.value);
     if (trader) orgInput.value = trader.organisation_name || trader.trader_name || "";
@@ -2410,16 +2417,12 @@ function updateSolutionOfferingForm() {
   productFields.forEach((field) => { field.disabled = category !== "Product offerings"; });
   serviceFields.forEach((field) => { field.disabled = category !== "Service offerings"; });
   knowledgeFields.forEach((field) => { field.disabled = category !== "Knowledge offerings"; });
-  if (category === "Product offerings") syncProductAudienceFromSolution();
 }
 
 function renderSolutionReferenceInputs() {
   const master = state.data.offeringMaster || buildOfferingMasterData([]);
-  setSelectOptions("solutionPrimaryValuechain", master.valuechains, true);
-  setSelectOptions("solutionSecondaryValuechain", master.valuechains, true);
   setCheckboxGroupOptions("solutionLanguagesGroup", "languages", master.languages);
   setDatalistOptions("solutionTagOptions", master.tags);
-  updateSolutionApplicationOptions();
   updateSolutionOfferingForm();
 }
 
@@ -2546,6 +2549,38 @@ function removeSolutionTag(tag) {
   renderSolutionTagChips();
 }
 
+function deriveLocalSolutionTags(draft) {
+  const text = [
+    normalizeText(draft.offering_name),
+    normalizeText(draft.offering_type),
+    normalizeText(draft.about_offering_text),
+    normalizeText(draft.organization_name),
+  ].join(" ").toLowerCase();
+  const hintMap = [
+    ["dairy", ["dairy", "milk", "milking", "fodder", "cattle", "cow", "livestock"]],
+    ["goatery", ["goat", "goatery"]],
+    ["poultry", ["poultry", "broiler", "layer", "chicken"]],
+    ["soap", ["soap", "detergent"]],
+    ["solar", ["solar", "street light", "street lights"]],
+    ["training", ["training", "capacity building"]],
+    ["consulting", ["consulting", "consultancy", "advisory"]],
+    ["mentoring", ["mentoring"]],
+    ["technology transfer", ["technology transfer"]],
+    ["market support", ["market support", "market linkage", "branding", "packaging"]],
+    ["financial support", ["financial support", "finance", "credit", "loan"]],
+  ];
+  const tags = hintMap
+    .filter(([, patterns]) => patterns.some((pattern) => text.includes(pattern)))
+    .map(([label]) => label);
+  const tokenTags = uniq(
+    text
+      .split(/[^a-z0-9]+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 4 && !["with", "from", "that", "this", "service", "solution", "support", "offering"].includes(token)),
+  ).slice(0, 8);
+  return uniq([...tags, ...tokenTags]).slice(0, 12);
+}
+
 function getSubmissionReviewFieldConfig(submissionType) {
   if (submissionType === "need") {
     return [
@@ -2567,20 +2602,35 @@ function getSubmissionReviewFieldConfig(submissionType) {
     { key: "submitter_name", label: "Contact Person" },
     { key: "submitter_email", label: "Contact Email" },
     { key: "submitter_phone", label: "Contact Phone" },
-    { key: "solution_name", label: "Solution Name" },
-    { key: "about_solution_text", label: "Solution Description", multiline: true, wide: true },
-    { key: "primary_valuechain", label: "Primary Value Chain" },
-    { key: "primary_application", label: "Primary Application" },
-    { key: "secondary_valuechain", label: "Secondary Value Chain" },
-    { key: "secondary_application", label: "Secondary Application" },
-    { key: "solution_audience", label: "Who Can Avail It", multiline: true, list: true },
     { key: "offering_category", label: "Offering Category" },
     { key: "offering_type", label: "Offering Type" },
     { key: "offering_name", label: "Offering Name" },
     { key: "about_offering_text", label: "Offering Description", multiline: true, wide: true },
+    { key: "grade_capacity", label: "Grade / Capacity" },
+    { key: "product_cost", label: "Product Cost" },
+    { key: "product_cost_quote_on_scope", label: "Quote on Scope" },
+    { key: "lead_time", label: "Lead Time" },
+    { key: "support_details", label: "Support Services", multiline: true },
+    { key: "product_contact_details", label: "Product Contact Details", multiline: true },
+    { key: "trainer_name", label: "Facilitator Name" },
+    { key: "trainer_email", label: "Facilitator Email" },
+    { key: "trainer_phone", label: "Facilitator Phone" },
+    { key: "trainer_details_text", label: "Facilitator Details", multiline: true, wide: true },
     { key: "languages", label: "Languages", multiline: true, list: true },
     { key: "geographies", label: "Geographies", multiline: true, list: true },
+    { key: "duration", label: "Duration" },
+    { key: "duration_unit", label: "Duration Units" },
+    { key: "prerequisites", label: "Prerequisites", multiline: true },
     { key: "location_availability", label: "Location Availability", multiline: true, list: true },
+    { key: "service_cost", label: "Service Cost" },
+    { key: "service_cost_unit", label: "Service Cost Units" },
+    { key: "cost_remarks", label: "Cost Remarks", multiline: true },
+    { key: "support_post_service", label: "Support Post Service" },
+    { key: "support_post_service_cost", label: "Support Post Service Cost" },
+    { key: "delivery_mode", label: "Delivery Mode" },
+    { key: "certification_offered", label: "Certification Offered" },
+    { key: "knowledge_content_link", label: "Knowledge Content Link" },
+    { key: "contact_details", label: "Knowledge Contact Details", multiline: true },
     { key: "tags", label: "Tags", multiline: true, list: true },
   ];
 }
@@ -2631,6 +2681,7 @@ function buildSubmissionReviewPatch() {
   const existingTraderId = normalizeText(form.querySelector('[name="existing_trader_id"]')?.value || "");
   const adminReviewNotes = normalizeText(form.querySelector('[name="admin_review_notes"]')?.value || "");
   const submission = getFormSubmissionById(submissionId);
+  const isSolution = submission?.submission_type === "solution";
   const payloadBase = submission?.payload && typeof submission.payload === "object" ? { ...submission.payload } : {};
   const payload = payloadBase;
   form.querySelectorAll("[data-review-field]").forEach((field) => {
@@ -2644,16 +2695,20 @@ function buildSubmissionReviewPatch() {
   });
   const payloadField = form.querySelector('[name="payload_json"]');
   const trader = getTraderById(existingTraderId);
-  if (!trader) throw new Error("Please choose a valid GRE supplier before saving the submission.");
-  payload.organization_name = organizationName || payload.organization_name || trader.organisation_name || trader.trader_name || "";
-  payload.existing_trader_id = trader.trader_id;
-  payload.existing_trader_name = trader.organisation_name || trader.trader_name || "";
+  if (!trader && !isSolution) throw new Error("Please choose a valid GRE supplier before saving the submission.");
+  payload.organization_name = organizationName
+    || payload.organization_name
+    || trader?.organisation_name
+    || trader?.trader_name
+    || "";
+  payload.existing_trader_id = trader?.trader_id || "";
+  payload.existing_trader_name = trader?.organisation_name || trader?.trader_name || "";
   if (payloadField) payloadField.value = JSON.stringify(payload, null, 2);
   return {
     submissionId,
     update: {
       organizationName: payload.organization_name,
-      existingTraderId: trader.trader_id,
+      existingTraderId: trader?.trader_id || "",
       existingTraderName: payload.existing_trader_name,
       adminReviewNotes,
       payload,
@@ -2743,7 +2798,7 @@ function renderSubmissionViews() {
   const solutionTitle = document.querySelector('#solutionView h3');
   const needTitle = document.querySelector('#need-intakeView h3');
   if (solutionTitle) {
-    solutionTitle.textContent = isSharedFormMode() ? "Share a Solution with GRE" : "Add Solution to GRE Review Queue";
+    solutionTitle.textContent = isSharedFormMode() ? "Share a Solution for GRE Review" : "Add Solution to Admin Review Queue";
   }
   if (needTitle) {
     needTitle.textContent = isSharedFormMode() ? "Share a Need with GRE" : "Add Need to GRE Review Queue";
@@ -3980,13 +4035,13 @@ async function collectSubmissionPayload(form, submissionType = "need") {
     if (value instanceof File) continue;
     appendSubmissionEntry(entries, key, value);
   }
-  const traderId = normalizeText(entries.existing_trader_id);
-  const trader = getTraderById(traderId);
-  if (!trader) {
-    openMissingOrgDialog(entries.organization_name || "");
-    throw new Error("Please select an approved GRE supplier before submitting.");
-  }
   if (submissionType !== "solution") {
+    const traderId = normalizeText(entries.existing_trader_id);
+    const trader = getTraderById(traderId);
+    if (!trader) {
+      openMissingOrgDialog(entries.organization_name || "");
+      throw new Error("Please select an approved GRE supplier before submitting.");
+    }
     return {
       ...entries,
       existing_trader_id: trader.trader_id,
@@ -3998,55 +4053,69 @@ async function collectSubmissionPayload(form, submissionType = "need") {
     };
   }
 
+  const traderId = normalizeText(entries.existing_trader_id);
+  const selectedTrader = getTraderById(traderId);
+  const nameMatchedTrader = findSupplierByName(entries.organization_name || "");
+  const trader = selectedTrader || nameMatchedTrader || null;
   const offeringCategory = normalizeText(entries.offering_category) || "Service offerings";
-  const solutionAudience = getCheckedValues(form, "solution_audience");
-  const productAudience = getCheckedValues(form, "product_audience");
+  const offeringGroup = offeringCategory.replace(/\s+offerings$/i, "").trim() || "Service";
+  const defaultAudience = ["Individuals", "Groups", "SHGs", "Organisations"];
   const serviceLanguages = normalizeMultiTextValue(entries.languages);
   const tags = uniq([
     ...parseLooseListInput(entries.tags),
     ...normalizeMultiTextValue(entries.keywords),
   ]);
   const geographies = normalizeSemicolonSeparatedValue(entries.geographies);
-  const valuechains = uniq([
-    normalizeText(entries.primary_valuechain),
-    normalizeText(entries.secondary_valuechain),
-  ].filter(Boolean));
-  const applications = uniq([
-    normalizeText(entries.primary_application),
-    normalizeText(entries.secondary_application),
-  ].filter(Boolean));
+  const offeringName = normalizeText(entries.offering_name);
+  const offeringDescription = normalizeText(entries.about_offering_text);
+  const organizationName = normalizeText(entries.organization_name) || trader?.organisation_name || trader?.trader_name || "";
+  if (!organizationName) throw new Error("Organisation name is required.");
+  if (!normalizeText(entries.submitter_email)) throw new Error("Contact email is required.");
+  if (!offeringName) throw new Error("Offering name is required.");
+  if (!offeringDescription) throw new Error("Offering description is required.");
+  if (!tags.length) throw new Error("Please add at least one tag before submitting.");
 
   const productBrochure = await collectSingleFileAttachment(form, "product_brochure_upload");
   const serviceBrochure = await collectSingleFileAttachment(form, "service_brochure_upload");
   const knowledgeContent = await collectSingleFileAttachment(form, "knowledge_content_upload");
   const offeringImage = await collectSingleFileAttachment(form, "offering_image_upload");
+  const productCostQuoteOnScope = normalizeText(entries.product_cost_quote_on_scope).toLowerCase() === "yes";
+  const normalizedProductCost = productCostQuoteOnScope && !normalizeText(entries.product_cost)
+    ? "Can be quoted after finalising scope"
+    : normalizeText(entries.product_cost);
+  const contactDetails = normalizeText(entries.product_contact_details || entries.contact_details || "");
 
   return {
     ...entries,
-    existing_trader_id: trader.trader_id,
-    existing_trader_name: trader.organisation_name || trader.trader_name || entries.organization_name || "",
-    organization_name: entries.organization_name || trader.organisation_name || trader.trader_name || "",
+    existing_trader_id: trader?.trader_id || "",
+    existing_trader_name: trader?.organisation_name || trader?.trader_name || "",
+    organization_name: organizationName,
+    submitter_email: normalizeText(entries.submitter_email).toLowerCase(),
     offering_category: offeringCategory,
-    offering_group: offeringCategory,
+    offering_group: offeringGroup,
     offering_kind: offeringCategory.replace(/\s+offerings$/i, "").toLowerCase(),
     service_kind: offeringCategory === "Service offerings" ? normalizeText(entries.offering_type) : "",
-    about_solution_html: normalizeText(entries.about_solution_text || ""),
-    about_offering_html: normalizeText(entries.about_offering_text || ""),
-    primary_valuechain: normalizeText(entries.primary_valuechain || ""),
-    primary_application: normalizeText(entries.primary_application || ""),
-    secondary_valuechain: normalizeText(entries.secondary_valuechain || ""),
-    secondary_application: normalizeText(entries.secondary_application || ""),
-    valuechains,
-    applications,
-    solution_audience: solutionAudience,
-    audience: offeringCategory === "Product offerings" ? (productAudience.length ? productAudience : solutionAudience) : solutionAudience,
-    product_audience: productAudience,
+    solution_name: offeringName,
+    about_solution_text: offeringDescription,
+    about_solution_html: offeringDescription,
+    about_offering_html: offeringDescription,
+    solution_audience: defaultAudience,
+    audience: defaultAudience,
     languages: serviceLanguages,
     geographies,
     location_availability: getCheckedValues(form, "location_availability"),
     tags,
     keywords: tags,
+    primary_valuechain: "",
+    primary_application: "",
+    secondary_valuechain: "",
+    secondary_application: "",
+    valuechains: [],
+    applications: [],
     certification_offered: normalizeText(entries.certification_offered || "Not Provided"),
+    product_cost_quote_on_scope: productCostQuoteOnScope,
+    product_cost: normalizedProductCost,
+    contact_details: contactDetails,
     product_brochure_attachment: productBrochure,
     service_brochure_attachment: serviceBrochure,
     knowledge_content_attachment: knowledgeContent,
@@ -4225,7 +4294,7 @@ function bindStaticEvents() {
       if (matchingSupplier && select) {
         select.value = matchingSupplier.trader_id;
         event.target.value = matchingSupplier.organisation_name || matchingSupplier.trader_name || orgName;
-      } else if (!matchingSupplier && !(select && select.value)) {
+      } else if (kind !== "solution" && !matchingSupplier && !(select && select.value)) {
         openMissingOrgDialog(orgName);
       }
     });
@@ -4250,9 +4319,15 @@ function bindStaticEvents() {
         ? await store.submitSignedInForm("solution", payload)
         : await store.submitSharedForm("solution", payload);
       event.target.reset();
-      fillSupplierSelect("solutionTraderSelect", "solutionOrgName");
-      renderSolutionReferenceInputs();
-      if (status) status.textContent = result.message || "Solution submission sent to admin review.";
+      state.solutionTags = [];
+      renderSolutionTagChips();
+      if (isSharedFormMode()) {
+        event.target.innerHTML = `<div class="empty-state">Solution Sent for Approval</div>`;
+      } else {
+        fillSupplierSelect("solutionTraderSelect", "solutionOrgName");
+        renderSolutionReferenceInputs();
+        if (status) status.textContent = result.message || "Solution submission sent to admin review.";
+      }
       if (isAdminUser()) await refreshAll();
       toast("Solution submission queued for admin review.");
     }));
@@ -4295,6 +4370,32 @@ function bindStaticEvents() {
     if (!input) return;
     if (addSolutionTag(input.value)) input.value = "";
   });
+  byId("generateSolutionTagsBtn")?.addEventListener("click", safeAsync(async () => {
+    const status = byId("solutionSubmissionStatus");
+    const form = byId("solutionSubmissionForm");
+    if (!form) return;
+    if (status) status.textContent = "Generating AI tags from the current offering draft...";
+    const draft = {
+      organization_name: normalizeText(form.querySelector('[name="organization_name"]')?.value || ""),
+      offering_category: normalizeText(form.querySelector('[name="offering_category"]')?.value || ""),
+      offering_type: normalizeText(form.querySelector('[name="offering_type"]')?.value || ""),
+      offering_name: normalizeText(form.querySelector('[name="offering_name"]')?.value || ""),
+      about_offering_text: normalizeText(form.querySelector('[name="about_offering_text"]')?.value || ""),
+      trainer_details_text: normalizeText(form.querySelector('[name="trainer_details_text"]')?.value || ""),
+      contact_details: normalizeText(form.querySelector('[name="contact_details"]')?.value || form.querySelector('[name="product_contact_details"]')?.value || ""),
+      tags: [...state.solutionTags],
+    };
+    if (!draft.offering_name || !draft.about_offering_text) {
+      throw new Error("Please add the offering name and description before generating tags.");
+    }
+    const result = await store.suggestSolutionTags(draft);
+    const generatedTags = parseArray(result.tags);
+    const tagsToAdd = generatedTags.length ? generatedTags : deriveLocalSolutionTags(draft);
+    tagsToAdd.forEach((tag) => addSolutionTag(tag));
+    if (status) status.textContent = generatedTags.length
+      ? result.message || "AI tags added. You can remove any tag before submitting."
+      : "AI suggestions were unavailable, so local smart tags were added instead.";
+  }));
   byId("solutionTagEntry")?.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== ",") return;
     event.preventDefault();

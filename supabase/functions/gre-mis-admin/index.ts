@@ -3660,6 +3660,322 @@ async function removeManagedUser(userId: string, removalMode = "org_only") {
   };
 }
 
+function attachmentDataUrl(value: unknown) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return requireString((value as Record<string, unknown>).dataUrl);
+  }
+  return "";
+}
+
+function attachmentName(value: unknown) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return requireString((value as Record<string, unknown>).name);
+  }
+  return "";
+}
+
+function buildLocalContactDetails(payload: Record<string, unknown>) {
+  const explicit = requireString(payload.product_contact_details || payload.contact_details);
+  if (explicit) return explicit;
+  return [
+    requireString(payload.submitter_name),
+    requireString(payload.submitter_email),
+    requireString(payload.submitter_phone),
+  ].filter(Boolean).join(" | ");
+}
+
+async function resolveLocalTraderForSolution(payload: Record<string, unknown>, submissionId: string) {
+  const requestedTraderId = requireString(payload.existing_trader_id);
+  const organizationName = requireString(payload.organization_name);
+  const submitterEmail = requireString(payload.submitter_email).toLowerCase();
+  const submitterPhone = requireString(payload.submitter_phone);
+  const submitterName = requireString(payload.submitter_name);
+  const nowIso = new Date().toISOString();
+
+  let trader: Record<string, unknown> | null = null;
+  if (requestedTraderId) {
+    const { data, error } = await adminClient
+      .from("traders")
+      .select("*")
+      .eq("trader_id", requestedTraderId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    trader = data;
+  }
+
+  if (trader) {
+    const patch = {
+      organisation_name: organizationName || requireString(trader.organisation_name || trader.trader_name),
+      trader_name: requireString(trader.trader_name || organizationName),
+      email: submitterEmail || requireString(trader.email),
+      mobile: submitterPhone || requireString(trader.mobile),
+      poc_name: submitterName || requireString(trader.poc_name),
+      association_status: requireString(trader.association_status) || "Approved",
+      raw_payload: {
+        ...(trader.raw_payload && typeof trader.raw_payload === "object" ? trader.raw_payload as Record<string, unknown> : {}),
+        mis_local_solution_contact_update: {
+          submission_id: submissionId,
+          organization_name: organizationName,
+          submitter_name: submitterName,
+          submitter_email: submitterEmail,
+          submitter_phone: submitterPhone,
+          updated_at: nowIso,
+        },
+      },
+    };
+    const { data: updated, error: updateError } = await adminClient
+      .from("traders")
+      .update(patch)
+      .eq("trader_id", requireString(trader.trader_id))
+      .select("*")
+      .single();
+    if (updateError) throw new Error(updateError.message);
+    return updated as Record<string, unknown>;
+  }
+
+  const traderId = `MIS-TRADER-${crypto.randomUUID()}`;
+  const row = {
+    trader_id: traderId,
+    trader_name: organizationName,
+    organisation_name: organizationName,
+    mobile: submitterPhone || null,
+    email: submitterEmail || null,
+    poc_name: submitterName || null,
+    tenant_id: null,
+    profile_id: null,
+    description: null,
+    short_description: null,
+    tagline: null,
+    website: null,
+    created_at_source: nowIso,
+    association_status: "MIS Local",
+    raw_payload: {
+      source: "gre_mis_local_solution_submission",
+      submission_id: submissionId,
+      organization_name: organizationName,
+      submitter_name: submitterName,
+      submitter_email: submitterEmail,
+      submitter_phone: submitterPhone,
+    },
+  };
+  const { data, error } = await adminClient.from("traders").insert(row).select("*").single();
+  if (error) throw new Error(error.message);
+  return data as Record<string, unknown>;
+}
+
+async function createLocalSolutionFromSubmission(
+  submissionId: string,
+  payload: Record<string, unknown>,
+  actorEmail: string,
+) {
+  const nowIso = new Date().toISOString();
+  const trader = await resolveLocalTraderForSolution(payload, submissionId);
+  const traderId = requireString(trader.trader_id);
+  const solutionId = `MIS-SOLUTION-${crypto.randomUUID()}`;
+  const offeringId = `MIS-OFFERING-${crypto.randomUUID()}`;
+  const offeringCategory = requireString(payload.offering_category) || "Service offerings";
+  const offeringGroup = requireString(payload.offering_group) || offeringCategory.replace(/\s+offerings$/i, "").trim() || "Service";
+  const offeringType = requireString(payload.offering_type);
+  const offeringName = requireString(payload.offering_name);
+  const offeringDescription = requireString(payload.about_offering_text);
+  const solutionName = requireString(payload.solution_name || offeringName);
+  const solutionDescription = requireString(payload.about_solution_text || offeringDescription || offeringName);
+  const tags = uniqueStrings(asStringArray(payload.tags));
+  const languages = uniqueStrings(asStringArray(payload.languages));
+  const geographies = uniqueStrings(asStringArray(payload.geographies));
+  const locationAvailability = uniqueStrings(asStringArray(payload.location_availability));
+  const contactDetails = buildLocalContactDetails(payload);
+  const audience = "Individuals, Groups, SHGs, Organisations";
+  const duration = [requireString(payload.duration), requireString(payload.duration_unit)].filter(Boolean).join(" ");
+  const serviceCost = [requireString(payload.service_cost), requireString(payload.service_cost_unit)].filter(Boolean).join(" ");
+  const productCost = parseBoolean(payload.product_cost_quote_on_scope) && !requireString(payload.product_cost)
+    ? "Can be quoted after finalising scope"
+    : requireString(payload.product_cost);
+  const serviceBrochureUrl = attachmentDataUrl(payload.service_brochure_attachment);
+  const productBrochureUrl = attachmentDataUrl(payload.product_brochure_attachment);
+  const knowledgeContentUrl = attachmentDataUrl(payload.knowledge_content_attachment) || requireString(payload.knowledge_content_url);
+  const solutionImageUrl = attachmentDataUrl(payload.offering_image_attachment);
+
+  const rawPayload = {
+    source: "gre_mis_local_solution_submission",
+    submission_id: submissionId,
+    approved_by: actorEmail,
+    approved_at: nowIso,
+    payload,
+    files: {
+      service_brochure_name: attachmentName(payload.service_brochure_attachment),
+      product_brochure_name: attachmentName(payload.product_brochure_attachment),
+      knowledge_content_name: attachmentName(payload.knowledge_content_attachment),
+      offering_image_name: attachmentName(payload.offering_image_attachment),
+    },
+  };
+
+  const solutionHtml = normalizeRichText(solutionDescription);
+  const offeringHtml = normalizeRichText(offeringDescription);
+
+  const solutionRow = {
+    solution_id: solutionId,
+    trader_id: traderId,
+    solution_name: solutionName,
+    solution_status: "Approved in MIS",
+    publish_status: "MIS Published",
+    created_at_source: nowIso,
+    about_solution_html: solutionHtml,
+    about_solution_text: stripHtml(solutionHtml),
+    solution_image_url: solutionImageUrl || null,
+    raw_payload: rawPayload,
+  };
+
+  const offeringRow = {
+    offering_id: offeringId,
+    solution_id: solutionId,
+    trader_id: traderId,
+    publish_status: "MIS Published",
+    created_at_source: nowIso,
+    offering_name: offeringName,
+    offering_category: offeringCategory,
+    offering_group: offeringGroup,
+    offering_type: offeringType,
+    domain_6m: "",
+    primary_valuechain_id: null,
+    primary_valuechain: null,
+    primary_application_id: null,
+    primary_application: null,
+    valuechains: [] as string[],
+    applications: [] as string[],
+    tags,
+    languages,
+    geographies,
+    geographies_raw: geographies.join("; "),
+    about_offering_html: offeringHtml,
+    about_offering_text: stripHtml(offeringHtml),
+    audience,
+    trainer_name: requireString(payload.trainer_name) || null,
+    trainer_email: requireString(payload.trainer_email).toLowerCase() || null,
+    trainer_phone: requireString(payload.trainer_phone) || null,
+    trainer_details_html: normalizeRichText(payload.trainer_details_text),
+    trainer_details_text: stripHtml(normalizeRichText(payload.trainer_details_text)),
+    duration: duration || null,
+    prerequisites: requireString(payload.prerequisites) || null,
+    service_cost: serviceCost || null,
+    support_post_service: requireString(payload.support_post_service) || null,
+    support_post_service_cost: requireString(payload.support_post_service_cost) || null,
+    delivery_mode: requireString(payload.delivery_mode) || null,
+    certification_offered: requireString(payload.certification_offered) || null,
+    cost_remarks: requireString(payload.cost_remarks) || null,
+    location_availability: locationAvailability.join(", ") || null,
+    service_brochure_url: serviceBrochureUrl || null,
+    grade_capacity: requireString(payload.grade_capacity) || null,
+    product_cost: productCost || null,
+    lead_time: requireString(payload.lead_time) || null,
+    support_details: requireString(payload.support_details) || null,
+    product_brochure_url: productBrochureUrl || null,
+    knowledge_content_url: knowledgeContentUrl || null,
+    contact_details: contactDetails || null,
+    gre_link: null,
+    search_document: buildSearchDocument([
+      solutionName,
+      offeringName,
+      offeringCategory,
+      offeringGroup,
+      offeringType,
+      tags,
+      languages,
+      geographies,
+      offeringDescription,
+      solutionDescription,
+      requireString(trader.organisation_name || trader.trader_name),
+      contactDetails,
+    ]),
+    last_import_id: null,
+    raw_payload: rawPayload,
+    source_row_signature: stableRowSignature(rawPayload),
+  };
+
+  const { error: solutionError } = await adminClient.from("solutions").insert(solutionRow);
+  if (solutionError) throw new Error(solutionError.message);
+
+  const { error: offeringError } = await adminClient.from("offerings").insert(offeringRow);
+  if (offeringError) throw new Error(offeringError.message);
+
+  await enrichOfferingIntelligence(offeringRow, solutionRow, trader, defaultAiProvider || "openrouter");
+
+  return {
+    traderId,
+    solutionId,
+    offeringId,
+  };
+}
+
+async function suggestSolutionTags(payload: Record<string, unknown>) {
+  const normalized = {
+    offering_name: requireString(payload.offering_name),
+    offering_category: requireString(payload.offering_category),
+    offering_type: requireString(payload.offering_type),
+    about_offering_text: requireString(payload.about_offering_text),
+    trainer_details_text: requireString(payload.trainer_details_text),
+    organization_name: requireString(payload.organization_name),
+    contact_details: requireString(payload.contact_details),
+  };
+  const rules = classifyOfferingByRules({
+    offering_name: normalized.offering_name,
+    offering_category: normalized.offering_category,
+    offering_group: normalized.offering_category.replace(/\s+offerings$/i, ""),
+    offering_type: normalized.offering_type,
+    about_offering_text: normalized.about_offering_text,
+    contact_details: normalized.contact_details,
+  }, {
+    solution_name: normalized.offering_name,
+    about_solution_text: normalized.about_offering_text,
+  });
+  try {
+    const ai = await callAiJson(defaultAiProvider || "openrouter", `You are helping classify a rural economy solution offering for search discovery.
+
+Return valid JSON only in this shape:
+{
+  "tags": ["", ""]
+}
+
+Rules:
+- give 6 to 12 tags
+- prefer thematic area, offering type, use-case, beneficiary, and commodity terms
+- avoid generic filler like "service", "solution", "support"
+- keep tags short
+
+Organisation: ${normalized.organization_name}
+Offering Category: ${normalized.offering_category}
+Offering Type: ${normalized.offering_type}
+Offering Name: ${normalized.offering_name}
+Offering Description: ${normalized.about_offering_text}
+Facilitator / Contact Notes: ${normalized.trainer_details_text || normalized.contact_details}`);
+    const tags = uniqueStrings(asStringArray(ai.tags)).slice(0, 12);
+    if (tags.length) {
+      return {
+        ok: true,
+        tags,
+        message: "AI tags added. You can remove any tag before submitting.",
+      };
+    }
+  } catch {}
+
+  const tags = uniqueStrings([
+    ...rules.thematicHints,
+    ...rules.serviceHints,
+    ...rules.keywords,
+    ...tokenizeLooseText([
+      normalized.offering_name,
+      normalized.offering_type,
+      normalized.about_offering_text,
+      normalized.organization_name,
+    ].filter(Boolean).join(" "), 4),
+  ]).slice(0, 12);
+  return {
+    ok: true,
+    tags,
+    message: "AI was unavailable, so a rule-based tag draft was added instead.",
+  };
+}
+
 async function submitFormSubmission(
   submissionType: string,
   payload: Record<string, unknown>,
@@ -3677,15 +3993,26 @@ async function submitFormSubmission(
   const shareContext = requireString(payload.share_context || payload.shareContext);
 
   if (!organizationName) throw new Error("Organization name is required.");
-  if (!existingTraderId) throw new Error("Please select an existing GRE supplier organization first.");
-
-  const { data: trader, error: traderError } = await adminClient
-    .from("traders")
-    .select("trader_id, organisation_name, trader_name")
-    .eq("trader_id", existingTraderId)
-    .maybeSingle();
-  if (traderError) throw new Error(traderError.message);
-  if (!trader) throw new Error("Selected GRE supplier organization could not be found.");
+  let trader: Record<string, unknown> | null = null;
+  if (normalizedType !== "solution") {
+    if (!existingTraderId) throw new Error("Please select an existing GRE supplier organization first.");
+    const { data, error: traderError } = await adminClient
+      .from("traders")
+      .select("trader_id, organisation_name, trader_name")
+      .eq("trader_id", existingTraderId)
+      .maybeSingle();
+    if (traderError) throw new Error(traderError.message);
+    if (!data) throw new Error("Selected GRE supplier organization could not be found.");
+    trader = data;
+  } else if (existingTraderId) {
+    const { data, error: traderError } = await adminClient
+      .from("traders")
+      .select("trader_id, organisation_name, trader_name")
+      .eq("trader_id", existingTraderId)
+      .maybeSingle();
+    if (traderError) throw new Error(traderError.message);
+    trader = data;
+  }
 
   const submissionRow = {
     submission_type: normalizedType,
@@ -3695,9 +4022,9 @@ async function submitFormSubmission(
     submitter_phone: submitterPhone || null,
     submitter_user_id: requireString(userCtx?.user?.id) || null,
     organization_name: organizationName,
-    existing_trader_id: trader.trader_id,
-    existing_trader_name: trader.organisation_name || trader.trader_name || existingTraderName || organizationName,
-    org_exists_on_gre: true,
+    existing_trader_id: trader ? requireString(trader.trader_id) : existingTraderId || null,
+    existing_trader_name: trader ? requireString(trader.organisation_name || trader.trader_name) : existingTraderName || null,
+    org_exists_on_gre: Boolean(trader),
     payload,
     share_context: shareContext || null,
   };
@@ -3725,6 +4052,14 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
   if (error || !submission) throw new Error(error?.message || "Form submission not found.");
 
   if (decision === "reject") {
+    if (requireString(submission.submission_type) === "solution") {
+      const { error: deleteError } = await adminClient
+        .from("gre_mis_form_submissions")
+        .delete()
+        .eq("id", submissionId);
+      if (deleteError) throw new Error(deleteError.message);
+      return { ok: true, deleted: true };
+    }
     const { error: rejectError } = await adminClient
       .from("gre_mis_form_submissions")
       .update({
@@ -3783,15 +4118,15 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
   }
 
   try {
-    const greWrite = await syncApprovedSolutionToGre(payload);
-    const greSyncStatus = "synced_gre_pending_local_refresh";
-    const greSyncMessage = `Solution and offering were synced to GRE successfully. Solution ID ${greWrite.solutionId}${greWrite.offeringId ? `, Offering ID ${greWrite.offeringId}` : ""}. Run GRE Chatbot data refresh separately to pull the new record into local Supabase datasets.`;
+    const localWrite = await createLocalSolutionFromSubmission(submissionId, payload, actorEmail);
+    const greSyncStatus = "synced_local_only";
+    const greSyncMessage = `Solution and offering were saved to local Supabase successfully. Local Solution ID ${localWrite.solutionId}, Local Offering ID ${localWrite.offeringId}. These records will be discoverable in AskGRE with View Details only.`;
 
     const nextPayload = {
       ...payload,
-      gre_solution_id: greWrite.solutionId,
-      gre_offering_id: greWrite.offeringId,
-      gre_sku_id: greWrite.skuId,
+      local_trader_id: localWrite.traderId,
+      local_solution_id: localWrite.solutionId,
+      local_offering_id: localWrite.offeringId,
     };
     const { error: approveError } = await adminClient
       .from("gre_mis_form_submissions")
@@ -3801,7 +4136,9 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
         reviewed_by_email: actorEmail,
         reviewed_at: new Date().toISOString(),
         payload: nextPayload,
-        target_solution_id: String(greWrite.solutionId),
+        target_solution_id: String(localWrite.solutionId),
+        existing_trader_id: localWrite.traderId,
+        synced_to_gre: false,
         gre_sync_status: greSyncStatus,
         gre_sync_message: greSyncMessage,
       })
@@ -3811,8 +4148,8 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       ok: true,
       greSyncStatus,
       message: greSyncMessage,
-      greSolutionId: greWrite.solutionId,
-      greOfferingId: greWrite.offeringId,
+      solutionId: localWrite.solutionId,
+      offeringId: localWrite.offeringId,
     };
   } catch (syncError) {
     const errorMessage = syncError instanceof Error ? syncError.message : String(syncError);
@@ -3845,27 +4182,31 @@ async function updateFormSubmission(submissionId: string, update: Record<string,
   if (!payload) throw new Error("A valid submission payload is required.");
 
   const existingTraderId = requireString(update.existingTraderId || payload.existing_trader_id || submission.existing_trader_id);
-  if (!existingTraderId) throw new Error("Please select a valid GRE supplier before saving the submission.");
-  const { data: trader, error: traderError } = await adminClient
-    .from("traders")
-    .select("trader_id, trader_name, organisation_name")
-    .eq("trader_id", existingTraderId)
-    .maybeSingle();
-  if (traderError) throw new Error(traderError.message);
-  if (!trader) throw new Error("Selected GRE supplier organization could not be found.");
+  const isSolution = requireString(submission.submission_type) === "solution";
+  let trader: Record<string, unknown> | null = null;
+  if (existingTraderId) {
+    const { data, error: traderError } = await adminClient
+      .from("traders")
+      .select("trader_id, trader_name, organisation_name")
+      .eq("trader_id", existingTraderId)
+      .maybeSingle();
+    if (traderError) throw new Error(traderError.message);
+    trader = data;
+  }
+  if (!trader && !isSolution) throw new Error("Please select a valid GRE supplier before saving the submission.");
 
   const organizationName =
     requireString(update.organizationName) ||
     requireString(payload.organization_name) ||
-    requireString(trader.organisation_name || trader.trader_name);
+    requireString(trader?.organisation_name || trader?.trader_name);
   payload.organization_name = organizationName;
-  payload.existing_trader_id = requireString(trader.trader_id);
-  payload.existing_trader_name = requireString(trader.organisation_name || trader.trader_name);
+  payload.existing_trader_id = requireString(trader?.trader_id);
+  payload.existing_trader_name = requireString(trader?.organisation_name || trader?.trader_name);
 
   const patch = {
     organization_name: organizationName,
-    existing_trader_id: requireString(trader.trader_id),
-    existing_trader_name: requireString(trader.organisation_name || trader.trader_name),
+    existing_trader_id: requireString(trader?.trader_id),
+    existing_trader_name: requireString(trader?.organisation_name || trader?.trader_name),
     payload,
     admin_review_notes: requireString(update.adminReviewNotes) || submission.admin_review_notes || null,
   };
@@ -4971,6 +5312,12 @@ Deno.serve(async (req) => {
         (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
         requireString(payload.sourceMode) || "shared_link",
         null,
+      ));
+    }
+
+    if (action === "suggestSolutionTags") {
+      return jsonResponse(await suggestSolutionTags(
+        (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
       ));
     }
 
