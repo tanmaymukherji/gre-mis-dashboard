@@ -2609,7 +2609,7 @@ function deriveLocalSolutionTags(draft) {
   return uniq([...tags, ...tokenTags]).slice(0, 12);
 }
 
-function getSubmissionReviewFieldConfig(submissionType) {
+function getSubmissionReviewFieldConfig(submissionType, payload = {}) {
   if (submissionType === "need") {
     return [
       { key: "contact_person", label: "Contact Person" },
@@ -2626,7 +2626,8 @@ function getSubmissionReviewFieldConfig(submissionType) {
       { key: "problem_statement", label: "Problem Statement", multiline: true, wide: true },
     ];
   }
-  return [
+  const category = normalizeText(payload?.offering_category) || "Service offerings";
+  const baseFields = [
     { key: "submitter_name", label: "Contact Person" },
     { key: "submitter_email", label: "Contact Email" },
     { key: "submitter_phone", label: "Contact Phone" },
@@ -2634,12 +2635,16 @@ function getSubmissionReviewFieldConfig(submissionType) {
     { key: "offering_type", label: "Offering Type" },
     { key: "offering_name", label: "Offering Name" },
     { key: "about_offering_text", label: "Offering Description", multiline: true, wide: true },
+  ];
+  const productFields = [
     { key: "grade_capacity", label: "Grade / Capacity" },
     { key: "product_cost", label: "Product Cost" },
     { key: "product_cost_quote_on_scope", label: "Quote on Scope" },
     { key: "lead_time", label: "Lead Time" },
     { key: "support_details", label: "Support Services", multiline: true },
     { key: "product_contact_details", label: "Product Contact Details", multiline: true },
+  ];
+  const serviceFields = [
     { key: "trainer_name", label: "Facilitator Name" },
     { key: "trainer_email", label: "Facilitator Email" },
     { key: "trainer_phone", label: "Facilitator Phone" },
@@ -2657,10 +2662,17 @@ function getSubmissionReviewFieldConfig(submissionType) {
     { key: "support_post_service_cost", label: "Support Post Service Cost" },
     { key: "delivery_mode", label: "Delivery Mode" },
     { key: "certification_offered", label: "Certification Offered" },
+  ];
+  const knowledgeFields = [
     { key: "knowledge_content_link", label: "Knowledge Content Link" },
     { key: "contact_details", label: "Knowledge Contact Details", multiline: true },
+  ];
+  const trailingFields = [
     { key: "tags", label: "Tags", multiline: true, list: true },
   ];
+  if (category === "Product offerings") return [...baseFields, ...productFields, ...trailingFields];
+  if (category === "Knowledge offerings") return [...baseFields, ...knowledgeFields, ...trailingFields];
+  return [...baseFields, ...serviceFields, ...trailingFields];
 }
 
 function renderSubmissionReviewFields(submissionType, payload) {
@@ -2668,7 +2680,7 @@ function renderSubmissionReviewFields(submissionType, payload) {
   const title = byId("submissionStructuredTitle");
   if (!target) return;
   if (title) title.textContent = submissionType === "need" ? "Need Submission Details" : "Solution Submission Details";
-  const config = getSubmissionReviewFieldConfig(submissionType);
+  const config = getSubmissionReviewFieldConfig(submissionType, payload);
   target.innerHTML = config
     .map((field) => {
       const rawValue = payload?.[field.key];
