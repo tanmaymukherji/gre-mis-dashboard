@@ -52,6 +52,7 @@ const githubAssetToken =
 const githubAssetRepo = Deno.env.get("GRE_MIS_GITHUB_ASSET_REPO") ?? "tanmaymukherji/gre-chatbot";
 const githubAssetBranch = Deno.env.get("GRE_MIS_GITHUB_ASSET_BRANCH") ?? "main";
 const githubAssetRoot = Deno.env.get("GRE_MIS_GITHUB_ASSET_ROOT") ?? "public/uploads/local-offerings";
+const askGreBaseUrl = Deno.env.get("ASKGRE_BASE_URL") ?? "https://askgre.grameee.org";
 
 const adminClient = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false },
@@ -116,6 +117,26 @@ function stripHtml(html: string | null) {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
+}
+
+async function invalidateAskGreSearchCache() {
+  const target = `${askGreBaseUrl.replace(/\/+$/, "")}/api/admin/cache`;
+  try {
+    const response = await fetch(target, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+      },
+      body: JSON.stringify({ source: "gre-mis-admin" }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      console.warn("AskGRE cache invalidation failed:", response.status, text);
+    }
+  } catch (error) {
+    console.warn("AskGRE cache invalidation request failed:", error instanceof Error ? error.message : String(error));
+  }
 }
 
 function tokenizeLooseText(value: unknown, minimumLength = 4) {
@@ -4276,6 +4297,7 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       })
       .eq("id", submissionId);
     if (approveError) throw new Error(approveError.message);
+    await invalidateAskGreSearchCache();
     return {
       ok: true,
       greSyncStatus,
@@ -4541,6 +4563,7 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
     trader_id: requireString(offering.trader_id),
   };
   await enrichOfferingIntelligence(refreshedOffering, refreshedSolution, refreshedTrader, defaultAiProvider || "openrouter");
+  await invalidateAskGreSearchCache();
 
   return {
     ok: true,
@@ -4581,6 +4604,7 @@ async function deleteLocalSolution(offeringId: string) {
       .eq("solution_id", solutionId);
     if (deleteSolutionError) throw new Error(deleteSolutionError.message);
   }
+  await invalidateAskGreSearchCache();
 
   return {
     ok: true,
