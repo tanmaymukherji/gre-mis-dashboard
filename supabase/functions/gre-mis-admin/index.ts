@@ -43,6 +43,14 @@ const greInboundReportName = Deno.env.get("GRE_INBOUND_REPORT_NAME") ?? "MARKIFY
 const greTraderReportName = Deno.env.get("GRE_TRADER_REPORT_NAME") ?? "MARKIFY_REPORT.MARKET_TRADER_BASIC_DETAILS";
 const greSolutionReportName =
   Deno.env.get("GRE_SOLUTION_REPORT_NAME") ?? "MARKIFY_REPORT.GRE_SOLUTION_WITH_OFFERINGS_DETAILS";
+const githubAssetToken =
+  Deno.env.get("GRE_MIS_GITHUB_TOKEN") ??
+  Deno.env.get("GITHUB_TOKEN") ??
+  Deno.env.get("GRE_GITHUB_TOKEN") ??
+  "";
+const githubAssetRepo = Deno.env.get("GRE_MIS_GITHUB_ASSET_REPO") ?? "tanmaymukherji/gre-mis-dashboard";
+const githubAssetBranch = Deno.env.get("GRE_MIS_GITHUB_ASSET_BRANCH") ?? "main";
+const githubAssetRoot = Deno.env.get("GRE_MIS_GITHUB_ASSET_ROOT") ?? "public/uploads/gre-mis";
 
 const adminClient = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false },
@@ -3716,6 +3724,62 @@ function attachmentName(value: unknown) {
   return "";
 }
 
+function attachmentMimeType(value: unknown) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return requireString((value as Record<string, unknown>).type);
+  }
+  return "";
+}
+
+function sanitizeFileName(value: string) {
+  const cleaned = value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return cleaned || `asset-${Date.now()}`;
+}
+
+function parseDataUrl(value: string) {
+  const match = value.match(/^data:([^;,]+)?(?:;charset=[^;,]+)?;base64,(.+)$/);
+  if (!match) return null;
+  return {
+    mimeType: requireString(match[1]) || "application/octet-stream",
+    base64: match[2],
+  };
+}
+
+async function uploadAttachmentToGithub(
+  attachment: unknown,
+  folder: string,
+  preferredName: string,
+) {
+  const dataUrl = attachmentDataUrl(attachment);
+  if (!dataUrl) return null;
+  const parsed = parseDataUrl(dataUrl);
+  if (!parsed) return dataUrl;
+  if (!githubAssetToken) return dataUrl;
+
+  const sourceName = attachmentName(attachment) || preferredName;
+  const safeName = sanitizeFileName(sourceName);
+  const path = `${githubAssetRoot}/${folder}/${Date.now()}-${safeName}`;
+  const response = await fetch(`https://api.github.com/repos/${githubAssetRepo}/contents/${encodeURIComponent(path).replace(/%2F/g, "/")}`, {
+    method: "PUT",
+    headers: {
+      "Authorization": `Bearer ${githubAssetToken}`,
+      "Accept": "application/vnd.github+json",
+      "Content-Type": "application/json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    body: JSON.stringify({
+      message: `Upload GRE MIS asset ${safeName}`,
+      branch: githubAssetBranch,
+      content: parsed.base64,
+    }),
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`GitHub asset upload failed for ${sourceName}: ${message}`);
+  }
+  return `https://cdn.jsdelivr.net/gh/${githubAssetRepo}@${githubAssetBranch}/${path}`;
+}
+
 function buildLocalContactDetails(payload: Record<string, unknown>) {
   const explicit = requireString(payload.product_contact_details || payload.contact_details);
   if (explicit) return explicit;
@@ -3833,10 +3897,18 @@ async function createLocalSolutionFromSubmission(
   const productCost = parseBoolean(payload.product_cost_quote_on_scope) && !requireString(payload.product_cost)
     ? "Can be quoted after finalising scope"
     : requireString(payload.product_cost);
-  const serviceBrochureUrl = attachmentDataUrl(payload.service_brochure_attachment);
-  const productBrochureUrl = attachmentDataUrl(payload.product_brochure_attachment);
-  const knowledgeContentUrl = attachmentDataUrl(payload.knowledge_content_attachment) || requireString(payload.knowledge_content_url);
-  const solutionImageUrl = attachmentDataUrl(payload.offering_image_attachment);
+  const serviceBrochureUrl =
+    await uploadAttachmentToGithub(payload.service_brochure_attachment, "service-brochures", `${offeringName || "service-offering"}-${attachmentName(payload.service_brochure_attachment) || "brochure"}`) ||
+    attachmentDataUrl(payload.service_brochure_attachment);
+  const productBrochureUrl =
+    await uploadAttachmentToGithub(payload.product_brochure_attachment, "product-brochures", `${offeringName || "product-offering"}-${attachmentName(payload.product_brochure_attachment) || "brochure"}`) ||
+    attachmentDataUrl(payload.product_brochure_attachment);
+  const uploadedKnowledgeContent =
+    await uploadAttachmentToGithub(payload.knowledge_content_attachment, "knowledge-content", `${offeringName || "knowledge-offering"}-${attachmentName(payload.knowledge_content_attachment) || "content"}`);
+  const knowledgeContentUrl = uploadedKnowledgeContent || attachmentDataUrl(payload.knowledge_content_attachment) || requireString(payload.knowledge_content_url);
+  const solutionImageUrl =
+    await uploadAttachmentToGithub(payload.offering_image_attachment, "offering-images", `${offeringName || "offering"}-${attachmentName(payload.offering_image_attachment) || "image"}`) ||
+    attachmentDataUrl(payload.offering_image_attachment);
 
   const rawPayload = {
     source: "gre_mis_local_solution_submission",
