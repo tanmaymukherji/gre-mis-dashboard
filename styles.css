@@ -1332,6 +1332,28 @@ input[type="radio"] {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px 14px;
 }
+.user-detail-grid > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+.user-detail-grid strong {
+  display: block;
+  color: var(--ink);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.user-detail-grid span {
+  display: block;
+  min-width: 0;
+  color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .user-sync-grid {
   margin-top: 10px;
   padding-top: 10px;
@@ -1341,16 +1363,25 @@ input[type="radio"] {
   display: grid;
   gap: 6px;
   min-width: 190px;
+  min-width: 0;
 }
 .inline-select select {
-  min-width: 190px;
+  min-width: 0;
+  width: 100%;
 }
 .inline-input input {
-  min-width: 190px;
+  min-width: 0;
+  width: 100%;
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid var(--line);
   background: #fff;
+}
+.user-management-card .card-actions {
+  align-items: end;
+}
+.user-management-card .card-actions .btn {
+  min-width: 0;
 }
 .activation-actions {
   align-items: end;

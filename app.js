@@ -3950,23 +3950,23 @@ function renderUserManagement() {
             </div>
             <h4>${esc(user.full_name || user.first_name || user.username)}</h4>
             <div class="detail-list user-detail-grid">
-              <div><strong>Username:</strong> ${esc(user.username)}</div>
-              <div><strong>Email:</strong> ${esc(user.email || "Not set")}</div>
-              <div><strong>Phone:</strong> ${esc(user.phone || "Not set")}</div>
-              <div><strong>Role:</strong> ${esc(user.role || "Not set")}</div>
+              <div><strong>Username</strong><span>${esc(user.username)}</span></div>
+              <div><strong>Email</strong><span>${esc(user.email || "Not set")}</span></div>
+              <div><strong>Phone</strong><span>${esc(user.phone || "Not set")}</span></div>
+              <div><strong>Role</strong><span>${esc(user.role || "Not set")}</span></div>
             </div>
             <div class="detail-list user-detail-grid user-sync-grid">
-              <div><strong>GRE Login:</strong> ${esc(user.gre_login_name || "Not mapped")}</div>
-              <div><strong>GRE User ID:</strong> ${esc(user.gre_user_id || "Not mapped")}</div>
-              <div><strong>GRE Sync:</strong> ${esc(user.gre_sync_status ? user.gre_sync_status.replaceAll("_", " ") : "Not attempted")}</div>
-              <div><strong>Synced At:</strong> ${esc(user.gre_synced_at ? formatDate(user.gre_synced_at) : "Not synced")}</div>
+              <div><strong>GRE Login</strong><span>${esc(user.gre_login_name || "Not mapped")}</span></div>
+              <div><strong>GRE User ID</strong><span>${esc(user.gre_user_id || "Not mapped")}</span></div>
+              <div><strong>GRE Sync</strong><span>${esc(user.gre_sync_status ? user.gre_sync_status.replaceAll("_", " ") : "Not attempted")}</span></div>
+              <div><strong>Synced At</strong><span>${esc(user.gre_synced_at ? formatDate(user.gre_synced_at) : "Not synced")}</span></div>
             </div>
             ${user.gre_pending_role ? `
               <div class="detail-list user-detail-grid user-sync-grid">
-                <div><strong>Pending GRE Role:</strong> ${esc(user.gre_pending_role)}</div>
-                <div><strong>Activation Requested:</strong> ${esc(user.gre_activation_requested_at ? formatDate(user.gre_activation_requested_at) : "Not started")}</div>
-                <div><strong>OTP Status:</strong> ${esc(user.gre_sync_status === "awaiting_gre_activation" ? "Awaiting OTP" : "Not required")}</div>
-                <div><strong>GRE Temp Password:</strong> ${esc(user.gre_pending_role ? "gre@1234" : "-")}</div>
+                <div><strong>Pending GRE Role</strong><span>${esc(user.gre_pending_role)}</span></div>
+                <div><strong>Activation Requested</strong><span>${esc(user.gre_activation_requested_at ? formatDate(user.gre_activation_requested_at) : "Not started")}</span></div>
+                <div><strong>OTP Status</strong><span>${esc(user.gre_sync_status === "awaiting_gre_activation" ? "Awaiting OTP" : "Not required")}</span></div>
+                <div><strong>GRE Temp Password</strong><span>${esc(user.gre_pending_role ? "gre@1234" : "-")}</span></div>
               </div>
             ` : ""}
             ${user.gre_sync_message ? `<p class="helper-text">${esc(user.gre_sync_message)}</p>` : ""}
