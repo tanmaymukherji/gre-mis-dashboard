@@ -713,6 +713,127 @@ function getGreRoleSetFromProfile(profile: Record<string, unknown>) {
   return roles;
 }
 
+function buildUniqueUsername(base: string, existingUsers: Record<string, unknown>[], greUserId: number) {
+  const normalizedBase = requireString(base).toLowerCase().replace(/[^a-z0-9._-]/g, "") || `greuser${greUserId}`;
+  const existing = new Set(existingUsers.map((user) => requireString(user.username).toLowerCase()).filter(Boolean));
+  if (!existing.has(normalizedBase)) return normalizedBase;
+  const withId = `${normalizedBase}${greUserId}`;
+  if (!existing.has(withId)) return withId;
+  let counter = 2;
+  while (existing.has(`${normalizedBase}${counter}`)) counter += 1;
+  return `${normalizedBase}${counter}`;
+}
+
+function findLocalUserForGreProfile(profile: Record<string, unknown>, users: Record<string, unknown>[]) {
+  const greUserId = parseNumber(profile.id, 0);
+  const email = requireString(profile.Email).toLowerCase();
+  const phone = normalizePhoneLogin(profile.Contact || profile.Login);
+  const fullName = normalizeComparable(profile.UserName || profile.firstName || "");
+
+  return users.find((user) => {
+    if (greUserId > 0 && Number(user.gre_user_id || 0) === greUserId) return true;
+    if (email && requireString(user.email).toLowerCase() === email) return true;
+    if (phone && normalizePhoneLogin(user.phone) === phone) return true;
+    if (fullName && normalizeComparable(user.full_name || user.first_name || user.username || "") === fullName) return true;
+    return false;
+  }) || null;
+}
+
+async function createLocalUserFromGreProfile(profile: Record<string, unknown>, existingUsers: Record<string, unknown>[]) {
+  const greRoles = getGreRoleSetFromProfile(profile);
+  const role = greRoles.has("admin") ? "admin" : greRoles.has("curator") ? "curator" : "user";
+  const greUserId = parseNumber(profile.id, 0);
+  const firstName = requireString(profile.firstName) || requireString(profile.UserName).split(/\s+/).filter(Boolean)[0] || "GRE";
+  const fullName = requireString(profile.UserName) || firstName;
+  const email = requireString(profile.Email).toLowerCase() || `${normalizePhoneLogin(profile.Contact || profile.Login) || `gre${greUserId}`}@greenruraleconomy.in`;
+  const phone = normalizePhoneLogin(profile.Contact || profile.Login) || null;
+  const usernameBase =
+    requireString(profile.firstName) ||
+    requireString(profile.UserName).split(/\s+/).filter(Boolean)[0] ||
+    email.split("@")[0] ||
+    `greuser${greUserId}`;
+  const username = buildUniqueUsername(usernameBase, existingUsers, greUserId);
+
+  const { data: userId, error } = await adminClient.rpc("gre_mis_register_user", {
+    p_username: username,
+    p_first_name: firstName,
+    p_full_name: fullName,
+    p_email: email,
+    p_phone: phone,
+    p_password: greTemporaryUserPassword,
+  });
+  if (error) throw new Error(error.message);
+
+  const { error: passwordError } = await adminClient.rpc("gre_mis_user_set_password", {
+    p_user_id: userId,
+    p_password: greTemporaryUserPassword,
+    p_must_change_password: true,
+  });
+  if (passwordError) throw new Error(passwordError.message);
+
+  const patch = buildGreMappedPatch(
+    {
+      id: userId,
+      username,
+      first_name: firstName,
+      full_name: fullName,
+      email,
+      phone,
+      role,
+    },
+    profile,
+  );
+
+  const { data: insertedUser, error: updateError } = await adminClient
+    .from("gre_mis_users")
+    .update({
+      ...patch,
+      role,
+      must_change_password: true,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", userId)
+    .select("id, username, first_name, full_name, email, phone, role, is_active, must_change_password, last_login_at, created_at, gre_user_id, gre_login_name, gre_sync_status, gre_sync_message, gre_synced_at, gre_pending_role, gre_activation_mod_key, gre_activation_requested_at")
+    .single();
+  if (updateError || !insertedUser) throw new Error(updateError?.message || "New GRE user could not be loaded into MIS.");
+
+  if (greRoles.has("curator")) {
+    await syncCanonicalCuratorRowForUser(
+      insertedUser as Record<string, unknown>,
+      greRoles.has("admin")
+        ? "Created from GRE refresh with combined admin and curator access."
+        : "Created from GRE refresh with curator access.",
+    );
+  }
+
+  return insertedUser as Record<string, unknown>;
+}
+
+async function ensureMissingGreDirectoryUsers(users: Record<string, unknown>[], profiles: Record<string, unknown>[]) {
+  const localUsers = [...users];
+  let createdAny = false;
+
+  for (const profile of profiles) {
+    const greRoles = getGreRoleSetFromProfile(profile);
+    if (!greRoles.has("curator") && !greRoles.has("admin")) continue;
+    if (findLocalUserForGreProfile(profile, localUsers)) continue;
+    const inserted = await createLocalUserFromGreProfile(profile, localUsers);
+    localUsers.push(inserted);
+    createdAny = true;
+  }
+
+  if (!createdAny) return localUsers;
+
+  const { data: refreshedUsers, error } = await adminClient
+    .from("gre_mis_users")
+    .select("id, username, first_name, full_name, email, phone, role, is_active, must_change_password, last_login_at, created_at, gre_user_id, gre_login_name, gre_sync_status, gre_sync_message, gre_synced_at, gre_pending_role, gre_activation_mod_key, gre_activation_requested_at")
+    .order("role", { ascending: true })
+    .order("first_name", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (refreshedUsers || []) as Record<string, unknown>[];
+}
+
 async function updateUserGreSyncFields(
   userId: string,
   patch: {
@@ -3078,7 +3199,9 @@ async function getAdminSnapshot() {
   if (users.error) throw new Error(users.error.message);
   if (pendingFormSubmissions.error) throw new Error(pendingFormSubmissions.error.message);
   if (localSolutions.error) throw new Error(localSolutions.error.message);
-  const reconciledUsers = await reconcileGreUserMappings((users.data || []) as Record<string, unknown>[]);
+  const greProfiles = await fetchGreTenantUsers(true);
+  const usersWithGreSeed = await ensureMissingGreDirectoryUsers((users.data || []) as Record<string, unknown>[], greProfiles);
+  const reconciledUsers = await reconcileGreUserMappings(usersWithGreSeed);
 
   return {
     ok: true,
@@ -3098,8 +3221,9 @@ async function refreshUserDirectory() {
     .order("role", { ascending: true })
     .order("first_name", { ascending: true });
   if (error) throw new Error(error.message);
-  await fetchGreTenantUsers(true);
-  const reconciledUsers = await reconcileGreUserMappings((users || []) as Record<string, unknown>[]);
+  const greProfiles = await fetchGreTenantUsers(true);
+  const usersWithGreSeed = await ensureMissingGreDirectoryUsers((users || []) as Record<string, unknown>[], greProfiles);
+  const reconciledUsers = await reconcileGreUserMappings(usersWithGreSeed);
   for (const refreshedUser of reconciledUsers) {
     const primaryRole = requireString(refreshedUser.role).toLowerCase() || "user";
     const greRoles = requireString((refreshedUser as Record<string, unknown>).__gre_roles)
