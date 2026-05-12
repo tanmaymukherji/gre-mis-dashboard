@@ -1299,7 +1299,10 @@ function getOverviewFocusPayload() {
     const need = getCaseNeed(item);
     if (activeMetrics.length && !activeMetrics.some((metricId) => metricMatchesItem(metricId, item))) return false;
     if (activePipelines.length && !activePipelines.some((pipelineId) => pipelineMatchesNeed(pipelineId, need))) return false;
-    if (activeCurators.length && !activeCurators.includes(need?.curator_id || "")) return false;
+    if (
+      activeCurators.length &&
+      !activeCurators.some((curatorId) => (curatorId === "unassigned" ? !need?.curator_id : need?.curator_id === curatorId))
+    ) return false;
     if (activeStates.length && !activeStates.includes(normalizeText(need?.state))) return false;
     if (activeCategories.length && !activeCategories.some((category) => categoryFilterMatches(category, need))) return false;
     return true;
@@ -1333,7 +1336,9 @@ function getOverviewFocusPayload() {
     const segment = PIPELINE_SEGMENTS.find((item) => item.id === pipelineId);
     labels.push(segment?.label || pipelineId);
   });
-  activeCurators.forEach((curatorId) => labels.push(`Curator: ${getCuratorById(curatorId)?.display_name || curatorId}`));
+  activeCurators.forEach((curatorId) =>
+    labels.push(`Curator: ${curatorId === "unassigned" ? "Unassigned" : getCuratorById(curatorId)?.display_name || curatorId}`),
+  );
   activeStates.forEach((stateName) => labels.push(`State: ${stateName}`));
   activeCategories.forEach((category) => labels.push(`Category: ${category}`));
 
@@ -2129,7 +2134,11 @@ function getNeedMatchCacheKey(need) {
 function getVisibleNeeds() {
   return [...getDisplayNeeds()]
     .filter((need) => state.filters.status === "all" || need.status === state.filters.status)
-    .filter((need) => state.filters.curator === "all" || (need.curator_id || "unassigned") === state.filters.curator)
+    .filter((need) => {
+      if (state.filters.curator === "all") return true;
+      if (state.filters.curator === "unassigned") return !need.curator_id;
+      return need.curator_id === state.filters.curator;
+    })
     .filter((need) => state.filters.state === "all" || normalizeText(need.state) === state.filters.state)
     .filter((need) => {
       if (!state.filters.search) return true;
