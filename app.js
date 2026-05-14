@@ -39,6 +39,7 @@ const state = {
   adminSession: null,
   submissionReviewId: "",
   localSolutionReviewId: "",
+  localNeedReviewId: "",
   solutionTags: [],
   solutionGeographies: [],
   needTags: [],
@@ -47,6 +48,10 @@ const state = {
   localSolutionFilters: {
     search: "",
     provider: "all",
+  },
+  localNeedFilters: {
+    search: "",
+    category: "all",
   },
     puterModelsLoaded: false,
     puterModels: [],
@@ -76,6 +81,7 @@ const state = {
       aiReviewNeeds: [],
       users: [],
       localSolutions: [],
+      localNeeds: [],
   },
 };
 
@@ -1812,6 +1818,7 @@ class GreMisStore {
       state.data.aiReviewNeeds = [];
       state.data.users = [];
       state.data.localSolutions = [];
+      state.data.localNeeds = [];
       return;
     }
     const data = await this.callAdmin("adminSnapshot", {}, true);
@@ -1821,6 +1828,7 @@ class GreMisStore {
     state.data.aiReviewNeeds = ensureList(data.aiReviewNeeds);
     state.data.users = ensureList(data.users);
     state.data.localSolutions = ensureList(data.localSolutions);
+    state.data.localNeeds = ensureList(data.localNeeds);
   }
 
   async refreshUserDirectory() {
@@ -1839,6 +1847,14 @@ class GreMisStore {
 
   async deleteLocalSolution(offeringId) {
     return this.callAdmin("deleteLocalSolution", { offeringId }, true);
+  }
+
+  async updateLocalNeed(needId, payload) {
+    return this.callAdmin("updateLocalNeed", { needId, payload }, true);
+  }
+
+  async deleteLocalNeed(needId) {
+    return this.callAdmin("deleteLocalNeed", { needId }, true);
   }
 
   async createNeed(payload) {
@@ -2926,12 +2942,15 @@ function getAttachmentDisplayInfo(value) {
 
 function renderSubmissionReviewAttachments(submissionType, payload) {
   const target = byId("submissionReviewAttachments");
+  const section = byId("submissionReviewAttachmentsSection");
   if (!target) return;
   const configs = getSubmissionAttachmentConfigs(submissionType, payload);
   if (!configs.length) {
-    target.innerHTML = `<div class="empty-state">No file attachments are relevant for this submission type.</div>`;
+    if (section) section.hidden = true;
+    target.innerHTML = "";
     return;
   }
+  if (section) section.hidden = false;
   target.innerHTML = configs.map((config) => {
     const current = getAttachmentDisplayInfo(payload?.[config.key]);
     return `
@@ -4319,6 +4338,115 @@ function renderLocalSolutionManagement() {
     : `<div class="empty-state">No local Supabase-only solutions match the current filters.</div>`;
 }
 
+function getLocalNeedById(needId) {
+  return ensureList(state.data.localNeeds).find((item) => String(item.id) === String(needId)) || null;
+}
+
+function getLocalNeedCategories() {
+  return uniq(
+    ensureList(state.data.localNeeds)
+      .map((item) => normalizeText(item.submitted_offering_category || item.ai_need_kind || ""))
+      .filter(Boolean),
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function getFilteredLocalNeeds() {
+  const search = normalizeText(state.localNeedFilters.search).toLowerCase();
+  const category = normalizeText(state.localNeedFilters.category);
+  return ensureList(state.data.localNeeds).filter((item) => {
+    const itemCategory = normalizeText(item.submitted_offering_category || item.ai_need_kind || "");
+    const haystack = [
+      normalizeText(item.organization_name),
+      normalizeText(item.contact_person),
+      normalizeText(item.problem_statement),
+      normalizeText(item.submitted_thematic_area),
+      ...parseArray(item.submitted_keywords),
+      ...parseArray(item.deployment_locations),
+    ].join(" ").toLowerCase();
+    const categoryMatch = category === "all" || itemCategory === category;
+    const searchMatch = !search || haystack.includes(search);
+    return categoryMatch && searchMatch;
+  });
+}
+
+function openLocalNeedReviewDialog(needId) {
+  const need = getLocalNeedById(needId);
+  if (!need) {
+    toast("This local need is no longer available.");
+    return;
+  }
+  state.localNeedReviewId = needId;
+  const dialog = byId("localNeedReviewDialog");
+  const form = byId("localNeedReviewForm");
+  if (!dialog || !form) return;
+  const meta = byId("localNeedReviewMeta");
+  if (meta) {
+    meta.innerHTML = `
+      <div><strong>Need ID:</strong> ${esc(need.id)}</div>
+      <div><strong>Status:</strong> ${esc(need.status || "New")}</div>
+      <div><strong>Internal Status:</strong> ${esc(need.internal_status || "Need solution providers")}</div>
+      <div><strong>Source:</strong> ${esc(need.source_kind || "shared_form_submission")}</div>
+    `;
+  }
+  const setValue = (name, value) => {
+    const field = form.querySelector(`[name="${name}"]`);
+    if (field) field.value = value || "";
+  };
+  setValue("need_id", need.id);
+  setValue("organization_name", need.organization_name || "");
+  setValue("contact_person", need.contact_person || "");
+  setValue("seeker_email", need.seeker_email || "");
+  setValue("seeker_phone", need.seeker_phone || "");
+  setValue("submitted_offering_category", need.submitted_offering_category || "Service offerings");
+  setValue("submitted_offering_type", need.submitted_offering_type || "");
+  setValue("submitted_thematic_area", need.submitted_thematic_area || need.ai_thematic_area || "");
+  setValue("deployment_locations", parseArray(need.deployment_locations).join("; "));
+  setValue("submitted_keywords", parseArray(need.submitted_keywords).join(", "));
+  setValue("problem_statement", need.problem_statement || "");
+  byId("localNeedReviewStatus").textContent = "";
+  dialog.showModal();
+}
+
+function renderLocalNeedManagement() {
+  const list = byId("localNeedsList");
+  const categorySelect = byId("localNeedCategoryFilter");
+  const searchInput = byId("localNeedSearch");
+  if (!list || !categorySelect || !searchInput) return;
+  if (!isAdminUser()) {
+    list.innerHTML = `<div class="empty-state">Login as admin to manage local Supabase needs.</div>`;
+    categorySelect.innerHTML = `<option value="all">All need categories</option>`;
+    searchInput.value = "";
+    return;
+  }
+  const categories = getLocalNeedCategories();
+  categorySelect.innerHTML = [`<option value="all">All need categories</option>`, ...categories.map((item) => `<option value="${esc(item)}">${esc(item)}</option>`)].join("");
+  categorySelect.value = state.localNeedFilters.category || "all";
+  searchInput.value = state.localNeedFilters.search || "";
+  const rows = getFilteredLocalNeeds();
+  list.innerHTML = rows.length
+    ? `<div class="local-solutions-grid">${rows.map((item) => `
+          <article class="approval-card local-solution-card">
+            <div class="status-row">
+              <span class="status-pill info">${esc(item.submitted_offering_category || "Need")}</span>
+              <span class="status-pill good">${esc(item.status || "New")}</span>
+            </div>
+            <h4>${esc(item.organization_name || "Unnamed organisation")}</h4>
+            <div class="detail-list">
+              <div><strong>Need Type:</strong> ${esc(item.submitted_offering_type || "Not set")}</div>
+              <div><strong>Thematic Area:</strong> ${esc(item.submitted_thematic_area || item.ai_thematic_area || "Not set")}</div>
+              <div><strong>Keywords:</strong> ${esc(parseArray(item.submitted_keywords).join(", ") || "None")}</div>
+              <div><strong>Places:</strong> ${esc(parseArray(item.deployment_locations).join(", ") || "Not set")}</div>
+            </div>
+            <p class="helper-text">${esc(clipText(item.problem_statement || "", 180) || "No statement available.")}</p>
+            <div class="card-actions">
+              <button class="btn btn-secondary" type="button" data-action="edit-local-need" data-need-id="${esc(item.id)}">Edit</button>
+              <button class="btn btn-danger" type="button" data-action="delete-local-need" data-need-id="${esc(item.id)}">Delete</button>
+            </div>
+          </article>
+        `).join("")}</div>`
+    : `<div class="empty-state">No local Supabase-only needs match the current filters.</div>`;
+}
+
 function chooseUserRemovalMode(name) {
   const choice = window.prompt(
     `Choose removal mode for ${name}:\n1 = Remove from GRE organisation only and delete from MIS\n2 = Remove GRE account completely and delete from MIS\n\nType 1 or 2.`,
@@ -4446,6 +4574,7 @@ async function rerender(options = {}) {
   renderAdminQueue();
   renderUserManagement();
   renderLocalSolutionManagement();
+  renderLocalNeedManagement();
   renderAdminState();
   if (!byId("overviewView") && byId("adminView")) {
     const headline = byId("datasetHeadline");
@@ -4469,6 +4598,7 @@ async function refreshAll() {
             state.data.aiReviewNeeds = [];
             state.data.users = [];
             state.data.localSolutions = [];
+            state.data.localNeeds = [];
           })
         : Promise.resolve().then(() => {
             state.data.pendingNeeds = [];
@@ -4477,6 +4607,7 @@ async function refreshAll() {
             state.data.aiReviewNeeds = [];
             state.data.users = [];
             state.data.localSolutions = [];
+            state.data.localNeeds = [];
         }),
   ]);
   const displayNeeds = getDisplayNeeds();
@@ -4789,6 +4920,7 @@ function bindStaticEvents() {
   const matchDetailDialog = byId("matchDetailDialog");
   const submissionReviewDialog = byId("submissionReviewDialog");
   const localSolutionReviewDialog = byId("localSolutionReviewDialog");
+  const localNeedReviewDialog = byId("localNeedReviewDialog");
   byId("newNeedBtn")?.addEventListener("click", () => dialog?.showModal());
   byId("closeNeedDialog")?.addEventListener("click", () => dialog?.close());
   byId("closeMissingOrgDialog")?.addEventListener("click", () => missingOrgDialog?.close());
@@ -4806,6 +4938,7 @@ function bindStaticEvents() {
   byId("closeMatchDetailDialog")?.addEventListener("click", () => matchDetailDialog?.close());
   byId("closeSubmissionReviewDialog")?.addEventListener("click", () => submissionReviewDialog?.close());
   byId("closeLocalSolutionReviewDialog")?.addEventListener("click", () => localSolutionReviewDialog?.close());
+  byId("closeLocalNeedReviewDialog")?.addEventListener("click", () => localNeedReviewDialog?.close());
   byId("submissionReviewTraderSelect")?.addEventListener("change", (event) => {
     const trader = getTraderById(event.target.value);
     const orgInput = byId("submissionReviewForm")?.querySelector('[name="organization_name"]');
@@ -5114,6 +5247,16 @@ function bindStaticEvents() {
     renderLocalSolutionManagement();
   });
 
+  byId("localNeedSearch")?.addEventListener("input", (event) => {
+    state.localNeedFilters.search = event.target.value || "";
+    renderLocalNeedManagement();
+  });
+
+  byId("localNeedCategoryFilter")?.addEventListener("change", (event) => {
+    state.localNeedFilters.category = event.target.value || "all";
+    renderLocalNeedManagement();
+  });
+
   byId("localSolutionReviewForm")?.addEventListener("submit", safeAsync(async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -5157,6 +5300,44 @@ function bindStaticEvents() {
     if (status) status.textContent = result.message || "Local solution saved.";
     localSolutionReviewDialog?.close();
     toast(result.message || "Local solution updated.");
+  }));
+
+  byId("localNeedReviewForm")?.addEventListener("submit", safeAsync(async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const status = byId("localNeedReviewStatus");
+    if (status) status.textContent = "Saving local need changes...";
+    const needId = form.get("need_id");
+    const payload = {
+      organization_name: form.get("organization_name"),
+      contact_person: form.get("contact_person"),
+      seeker_email: form.get("seeker_email"),
+      seeker_phone: form.get("seeker_phone"),
+      submitted_offering_category: form.get("submitted_offering_category"),
+      submitted_offering_type: form.get("submitted_offering_type"),
+      submitted_thematic_area: form.get("submitted_thematic_area"),
+      deployment_locations: parseDelimitedList(form.get("deployment_locations"), ";"),
+      submitted_keywords: parseCommaList(form.get("submitted_keywords")),
+      problem_statement: form.get("problem_statement"),
+    };
+    const result = await store.updateLocalNeed(needId, payload);
+    await refreshAll();
+    if (status) status.textContent = result.message || "Local need saved.";
+    localNeedReviewDialog?.close();
+    toast(result.message || "Local need updated.");
+  }));
+
+  byId("deleteLocalNeedBtn")?.addEventListener("click", safeAsync(async () => {
+    const form = byId("localNeedReviewForm");
+    const needId = normalizeText(form?.querySelector('[name="need_id"]')?.value || "");
+    if (!needId) return;
+    const need = getLocalNeedById(needId);
+    const name = need?.organization_name || "this need";
+    if (!window.confirm(`Delete ${name} from local Supabase need records? This cannot be undone.`)) return;
+    const result = await store.deleteLocalNeed(needId);
+    localNeedReviewDialog?.close();
+    await refreshAll();
+    toast(result.message || "Local need deleted.");
   }));
 
   byId("userLogoutBtn")?.addEventListener("click", safeAsync(async () => {
@@ -5502,6 +5683,19 @@ function bindStaticEvents() {
       const result = await store.deleteLocalSolution(offeringId);
       await refreshAll();
       toast(result.message || "Local solution deleted.");
+    }
+    if (button.dataset.action === "edit-local-need") {
+      openLocalNeedReviewDialog(button.dataset.needId);
+      return;
+    }
+    if (button.dataset.action === "delete-local-need") {
+      const needId = button.dataset.needId;
+      const card = button.closest(".approval-card");
+      const name = card?.querySelector("h4")?.textContent?.trim() || "this need";
+      if (!window.confirm(`Delete ${name} from local Supabase need records? This cannot be undone.`)) return;
+      const result = await store.deleteLocalNeed(needId);
+      await refreshAll();
+      toast(result.message || "Local need deleted.");
     }
   }));
 

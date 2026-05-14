@@ -699,6 +699,28 @@
           <section class="panel panel-large">
             <div class="panel-head">
               <div>
+                <p class="eyebrow">Local Needs</p>
+                <h3>Supabase Need Management</h3>
+              </div>
+            </div>
+            <div class="local-solution-toolbar">
+              <label>
+                <span>Search Need</span>
+                <input id="localNeedSearch" type="search" placeholder="Search organisation, statement, thematic area, keyword" />
+              </label>
+              <label>
+                <span>Need Category</span>
+                <select id="localNeedCategoryFilter">
+                  <option value="all">All need categories</option>
+                </select>
+              </label>
+            </div>
+            <div id="localNeedsList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
                 <p class="eyebrow">Pending Intake</p>
                 <h3>Needs Awaiting Admin Approval</h3>
               </div>
@@ -916,7 +938,7 @@
         </div>
         <div id="submissionReviewFields" class="form-grid"></div>
       </section>
-      <section class="panel panel-soft">
+      <section id="submissionReviewAttachmentsSection" class="panel panel-soft">
         <div class="panel-head panel-head-tight">
           <div>
             <p class="eyebrow">Attachments</p>
@@ -990,6 +1012,71 @@
       <p id="localSolutionReviewStatus" class="helper-text"></p>
       <div class="modal-actions">
         <button type="submit" class="btn btn-primary">Save Solution</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="localNeedReviewDialog" class="modal">
+    <form id="localNeedReviewForm" class="modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Local Need Review</p>
+          <h3>Edit Local Need</h3>
+        </div>
+        <button type="button" id="closeLocalNeedReviewDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div id="localNeedReviewMeta" class="detail-list review-meta-list"></div>
+      <div class="form-grid">
+        <input type="hidden" name="need_id" />
+        <label>
+          <span>Organisation Name</span>
+          <input name="organization_name" required />
+        </label>
+        <label>
+          <span>Contact Person</span>
+          <input name="contact_person" />
+        </label>
+        <label>
+          <span>Email</span>
+          <input name="seeker_email" type="email" required />
+        </label>
+        <label>
+          <span>Phone</span>
+          <input name="seeker_phone" />
+        </label>
+        <label>
+          <span>Need Category</span>
+          <select name="submitted_offering_category">
+            <option value="Service offerings">Service</option>
+            <option value="Product offerings">Product</option>
+            <option value="Knowledge offerings">Knowledge</option>
+          </select>
+        </label>
+        <label>
+          <span>Need Type</span>
+          <input name="submitted_offering_type" />
+        </label>
+        <label class="wide">
+          <span>Thematic Area</span>
+          <input name="submitted_thematic_area" />
+        </label>
+        <label class="wide">
+          <span>Place of Deployment</span>
+          <textarea name="deployment_locations" rows="3"></textarea>
+        </label>
+        <label class="wide">
+          <span>Keywords for Need Statement</span>
+          <textarea name="submitted_keywords" rows="3"></textarea>
+        </label>
+        <label class="wide">
+          <span>Need Statement</span>
+          <textarea name="problem_statement" rows="6" required></textarea>
+        </label>
+      </div>
+      <p id="localNeedReviewStatus" class="helper-text"></p>
+      <div class="modal-actions modal-actions-spread">
+        <button type="button" id="deleteLocalNeedBtn" class="btn btn-danger">Delete Need</button>
+        <button type="submit" class="btn btn-primary">Save Need</button>
       </div>
     </form>
   </dialog>

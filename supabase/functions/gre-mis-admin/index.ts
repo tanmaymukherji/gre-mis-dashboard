@@ -3282,7 +3282,7 @@ async function adminLogout(token: string) {
 }
 
 async function getAdminSnapshot() {
-  const [pendingNeeds, pendingUpdates, aiReviewNeeds, users, pendingFormSubmissions, localSolutions] = await Promise.all([
+  const [pendingNeeds, pendingUpdates, aiReviewNeeds, users, pendingFormSubmissions, localSolutions, localNeeds] = await Promise.all([
     adminClient
       .from("gre_mis_needs")
       .select("id, organization_name, state, district, status, internal_status, requested_on, curator_id, problem_statement, source_kind")
@@ -3353,6 +3353,13 @@ async function getAdminSnapshot() {
         .eq("publish_status", "MIS Published")
         .order("updated_at", { ascending: false })
         .limit(500),
+      adminClient
+        .from("gre_mis_needs")
+        .select("id, organization_name, contact_person, seeker_email, seeker_phone, problem_statement, status, internal_status, deployment_locations, submitted_keywords, submitted_thematic_area, submitted_offering_category, submitted_offering_type, ai_thematic_area, requested_on, updated_at, source_kind")
+        .eq("approval_status", "approved")
+        .eq("source_kind", "shared_form_submission")
+        .order("updated_at", { ascending: false })
+        .limit(500),
     ]);
 
   if (pendingNeeds.error) throw new Error(pendingNeeds.error.message);
@@ -3361,6 +3368,7 @@ async function getAdminSnapshot() {
   if (users.error) throw new Error(users.error.message);
   if (pendingFormSubmissions.error) throw new Error(pendingFormSubmissions.error.message);
   if (localSolutions.error) throw new Error(localSolutions.error.message);
+  if (localNeeds.error) throw new Error(localNeeds.error.message);
   const greProfiles = await fetchGreTenantUsers(true);
   const usersWithGreSeed = await ensureMissingGreDirectoryUsers((users.data || []) as Record<string, unknown>[], greProfiles);
   const reconciledUsers = await reconcileGreUserMappings(usersWithGreSeed);
@@ -3373,6 +3381,7 @@ async function getAdminSnapshot() {
     users: reconciledUsers,
     pendingFormSubmissions: pendingFormSubmissions.data || [],
     localSolutions: localSolutions.data || [],
+    localNeeds: localNeeds.data || [],
   };
 }
 
@@ -4569,7 +4578,7 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
   if (error || !submission) throw new Error(error?.message || "Form submission not found.");
 
   if (decision === "reject") {
-    if (requireString(submission.submission_type) === "solution") {
+    if (["solution", "need"].includes(requireString(submission.submission_type))) {
       const { error: deleteError } = await adminClient
         .from("gre_mis_form_submissions")
         .delete()
@@ -4622,7 +4631,7 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       ai_keywords: submittedKeywords,
       approval_status: "approved",
       source_kind: "shared_form_submission",
-      next_action: "Allocate curator and sync to GRE",
+      next_action: "Allocate curator and continue curation",
       requested_on: new Date().toISOString(),
       last_status_change_at: new Date().toISOString(),
     };
@@ -4637,12 +4646,17 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
         reviewed_by_email: actorEmail,
         reviewed_at: new Date().toISOString(),
         target_need_id: nextNeedId,
-        gre_sync_status: "pending_gre_create_verification",
-        gre_sync_message: "Local need created. GRE request create API still needs explicit create-flow verification.",
+        synced_to_gre: false,
+        gre_sync_status: "synced_local_only",
+        gre_sync_message: `Need was saved to local Supabase successfully as ${nextNeedId}. This record will remain MIS-local and continue through curation inside MIS.`,
       })
       .eq("id", submissionId);
     if (approveError) throw new Error(approveError.message);
-    return { ok: true, targetNeedId: nextNeedId };
+    return {
+      ok: true,
+      targetNeedId: nextNeedId,
+      message: `Need was saved to local Supabase successfully as ${nextNeedId}.`,
+    };
   }
 
   try {
@@ -4694,6 +4708,119 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
     if (patchError) throw new Error(`${errorMessage} (Also failed to store MIS sync failure: ${patchError.message})`);
     throw new Error(errorMessage);
   }
+}
+
+async function updateLocalNeed(needId: string, payload: Record<string, unknown>) {
+  const { data: existing, error } = await adminClient
+    .from("gre_mis_needs")
+    .select("*")
+    .eq("id", needId)
+    .eq("source_kind", "shared_form_submission")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!existing) throw new Error("Local need not found.");
+
+  const submittedOfferingCategory = requireString(payload.submitted_offering_category || existing.submitted_offering_category);
+  const submittedOfferingType = requireString(payload.submitted_offering_type || existing.submitted_offering_type);
+  const submittedThematicArea = requireString(payload.submitted_thematic_area || existing.submitted_thematic_area);
+  const submittedKeywords = uniqueStrings(asStringArray(payload.submitted_keywords || existing.submitted_keywords));
+  const deploymentLocations = uniqueStrings(asStringArray(payload.deployment_locations || existing.deployment_locations));
+  const stateFromDeployment = deploymentLocations.length
+    ? deploymentLocations
+      .map((entry) => entry.split(",").map((item) => requireString(item)).filter(Boolean))
+      .map((parts) => parts.length >= 2 ? parts[parts.length - 2] : "")
+      .find(Boolean)
+    : "";
+  const districtFromDeployment = deploymentLocations.length
+    ? deploymentLocations
+      .map((entry) => entry.split(",").map((item) => requireString(item)).filter(Boolean))
+      .map((parts) => parts.length >= 3 ? parts[parts.length - 3] : parts[0] || "")
+      .find(Boolean)
+    : "";
+
+  const patch = {
+    organization_name: requireString(payload.organization_name || existing.organization_name),
+    contact_person: requireString(payload.contact_person || existing.contact_person),
+    seeker_email: requireString(payload.seeker_email || existing.seeker_email).toLowerCase(),
+    seeker_phone: requireString(payload.seeker_phone || existing.seeker_phone),
+    problem_statement: requireString(payload.problem_statement || existing.problem_statement),
+    deployment_locations: deploymentLocations,
+    submitted_keywords: submittedKeywords,
+    submitted_thematic_area: submittedThematicArea || null,
+    submitted_offering_category: submittedOfferingCategory || null,
+    submitted_offering_type: submittedOfferingType || null,
+    ai_thematic_area: submittedThematicArea || null,
+    ai_need_kind: submittedOfferingCategory.replace(/\s+offerings$/i, "").toLowerCase() || null,
+    ai_service_kind: submittedOfferingCategory === "Service offerings" ? submittedOfferingType || null : null,
+    ai_keywords: submittedKeywords,
+    curated_need: uniqueStrings([submittedThematicArea].filter(Boolean)),
+    state: stateFromDeployment || requireString(existing.state),
+    district: districtFromDeployment || requireString(existing.district),
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error: updateError } = await adminClient
+    .from("gre_mis_needs")
+    .update(patch)
+    .eq("id", needId);
+  if (updateError) throw new Error(updateError.message);
+
+  const { error: submissionUpdateError } = await adminClient
+    .from("gre_mis_form_submissions")
+    .update({
+      payload: {
+        ...(existing.raw_payload && typeof existing.raw_payload === "object" ? existing.raw_payload as Record<string, unknown> : {}),
+        organization_name: patch.organization_name,
+        contact_person: patch.contact_person,
+        seeker_email: patch.seeker_email,
+        seeker_phone: patch.seeker_phone,
+        problem_statement: patch.problem_statement,
+        deployment_locations: deploymentLocations,
+        keywords: submittedKeywords,
+        thematic_area: submittedThematicArea,
+        offering_category: submittedOfferingCategory,
+        offering_type: submittedOfferingType,
+      },
+      organization_name: patch.organization_name,
+      existing_trader_name: patch.organization_name,
+    })
+    .eq("target_need_id", needId)
+    .eq("submission_type", "need");
+  if (submissionUpdateError) throw new Error(submissionUpdateError.message);
+
+  try {
+    await enrichNeedIntelligence({ ...existing, ...patch }, defaultAiProvider || "openrouter");
+  } catch {}
+
+  return { ok: true, message: "Local need updated successfully." };
+}
+
+async function deleteLocalNeed(needId: string) {
+  const { data: need, error } = await adminClient
+    .from("gre_mis_needs")
+    .select("id, source_kind")
+    .eq("id", needId)
+    .eq("source_kind", "shared_form_submission")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!need) throw new Error("Local need not found.");
+
+  const { error: deleteNeedError } = await adminClient
+    .from("gre_mis_needs")
+    .delete()
+    .eq("id", needId);
+  if (deleteNeedError) throw new Error(deleteNeedError.message);
+
+  await adminClient
+    .from("gre_mis_form_submissions")
+    .update({
+      gre_sync_status: "deleted_local",
+      gre_sync_message: "Local need deleted from MIS by admin.",
+    })
+    .eq("target_need_id", needId)
+    .eq("submission_type", "need");
+
+  return { ok: true, message: "Local need deleted successfully." };
 }
 
 async function updateFormSubmission(submissionId: string, update: Record<string, unknown>, actorEmail: string) {
@@ -6240,6 +6367,17 @@ Deno.serve(async (req) => {
 
     if (action === "deleteLocalSolution") {
       return jsonResponse(await deleteLocalSolution(requireString(payload.offeringId)));
+    }
+
+    if (action === "updateLocalNeed") {
+      return jsonResponse(await updateLocalNeed(
+        requireString(payload.needId),
+        (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
+      ));
+    }
+
+    if (action === "deleteLocalNeed") {
+      return jsonResponse(await deleteLocalNeed(requireString(payload.needId)));
     }
 
     if (action === "upsertOption") {
