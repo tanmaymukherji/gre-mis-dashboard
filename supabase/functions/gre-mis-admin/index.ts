@@ -3282,106 +3282,105 @@ async function adminLogout(token: string) {
 }
 
 async function getAdminSnapshot() {
-  const [pendingNeeds, pendingUpdates, aiReviewNeeds, users, pendingFormSubmissions, localSolutions, localNeeds] = await Promise.all([
+  const [pendingNeeds, pendingUpdates, aiReviewNeeds, users, pendingFormSubmissions, localSolutions, localNeeds] = await Promise.allSettled([
     adminClient
       .from("gre_mis_needs")
       .select("id, organization_name, state, district, status, internal_status, requested_on, curator_id, problem_statement, source_kind")
       .eq("approval_status", "pending_admin")
       .order("requested_on", { ascending: false }),
     adminClient
-        .from("gre_mis_update_requests")
-        .select("*")
-        .eq("approval_status", "pending")
-        .order("created_at", { ascending: false }),
-      adminClient
-        .from("gre_mis_needs")
-        .select("id, organization_name, state, district, problem_statement, curation_notes, curated_need, ai_thematic_area, ai_application_area, ai_need_kind, ai_service_kind, ai_keywords, ai_6m_signals, ai_validation_status, ai_validation_flags, ai_confidence, ai_enrichment_status, ai_engine, ai_enriched_at, rule_thematic_hints, rule_6m_signals, override_thematic_area, override_application_area, override_need_kind, override_service_kind, override_keywords, override_6m_signals, override_summary, override_source, override_conflict_note, override_updated_at")
-        .eq("approval_status", "approved")
-        .or("ai_validation_status.is.null,ai_validation_status.eq.flagged,ai_enrichment_status.is.null")
-        .order("updated_at", { ascending: false })
-        .limit(60),
-      adminClient
-        .from("gre_mis_users")
-        .select("id, username, first_name, full_name, email, phone, role, is_active, must_change_password, last_login_at, created_at, gre_user_id, gre_login_name, gre_sync_status, gre_sync_message, gre_synced_at, gre_pending_role, gre_activation_mod_key, gre_activation_requested_at")
-        .order("role", { ascending: true })
-        .order("first_name", { ascending: true }),
-      adminClient
-        .from("gre_mis_form_submissions")
-        .select("*")
-        .eq("approval_status", "pending_admin")
-        .order("created_at", { ascending: false }),
-      adminClient
-        .from("offerings")
-        .select(`
-          offering_id,
+      .from("gre_mis_update_requests")
+      .select("*")
+      .eq("approval_status", "pending")
+      .order("created_at", { ascending: false }),
+    adminClient
+      .from("gre_mis_needs")
+      .select("id, organization_name, state, district, problem_statement, curation_notes, curated_need, ai_thematic_area, ai_application_area, ai_need_kind, ai_service_kind, ai_keywords, ai_6m_signals, ai_validation_status, ai_validation_flags, ai_confidence, ai_enrichment_status, ai_engine, ai_enriched_at, rule_thematic_hints, rule_6m_signals, override_thematic_area, override_application_area, override_need_kind, override_service_kind, override_keywords, override_6m_signals, override_summary, override_source, override_conflict_note, override_updated_at")
+      .eq("approval_status", "approved")
+      .or("ai_validation_status.is.null,ai_validation_status.eq.flagged,ai_enrichment_status.is.null")
+      .order("updated_at", { ascending: false })
+      .limit(60),
+    adminClient
+      .from("gre_mis_users")
+      .select("id, username, first_name, full_name, email, phone, role, is_active, must_change_password, last_login_at, created_at, gre_user_id, gre_login_name, gre_sync_status, gre_sync_message, gre_synced_at, gre_pending_role, gre_activation_mod_key, gre_activation_requested_at")
+      .order("role", { ascending: true })
+      .order("first_name", { ascending: true }),
+    adminClient
+      .from("gre_mis_form_submissions")
+      .select("*")
+      .or("approval_status.eq.pending_admin,approval_status.is.null")
+      .order("created_at", { ascending: false }),
+    adminClient
+      .from("offerings")
+      .select(`
+        offering_id,
+        solution_id,
+        trader_id,
+        publish_status,
+        offering_name,
+        offering_category,
+        offering_group,
+        offering_type,
+        tags,
+        languages,
+        geographies,
+        about_offering_text,
+        contact_details,
+        service_cost,
+        product_cost,
+        lead_time,
+        support_details,
+        service_brochure_url,
+        product_brochure_url,
+        knowledge_content_url,
+        updated_at,
+        solution:solutions (
           solution_id,
+          solution_name,
+          about_solution_text,
+          solution_image_url
+        ),
+        trader:traders (
           trader_id,
-          publish_status,
-          offering_name,
-          offering_category,
-          offering_group,
-          offering_type,
-          tags,
-          languages,
-          geographies,
-          about_offering_text,
-          contact_details,
-          service_cost,
-          product_cost,
-          lead_time,
-          support_details,
-          service_brochure_url,
-          product_brochure_url,
-          knowledge_content_url,
-          updated_at,
-          solution:solutions (
-            solution_id,
-            solution_name,
-            about_solution_text,
-            solution_image_url
-          ),
-          trader:traders (
-            trader_id,
-            trader_name,
-            organisation_name,
-            email,
-            mobile,
-            poc_name,
-            association_status
-          )
-        `)
-        .eq("publish_status", "MIS Published")
-        .order("updated_at", { ascending: false })
-        .limit(500),
-      adminClient
-        .from("gre_mis_needs")
-        .select("id, organization_name, contact_person, seeker_email, seeker_phone, problem_statement, status, internal_status, deployment_locations, submitted_keywords, submitted_thematic_area, submitted_offering_category, submitted_offering_type, ai_thematic_area, requested_on, updated_at, source_kind")
-        .eq("approval_status", "approved")
-        .eq("source_kind", "shared_form_submission")
-        .order("updated_at", { ascending: false })
-        .limit(500),
-    ]);
+          trader_name,
+          organisation_name,
+          email,
+          mobile,
+          poc_name,
+          association_status
+        )
+      `)
+      .eq("publish_status", "MIS Published")
+      .order("updated_at", { ascending: false })
+      .limit(500),
+    adminClient
+      .from("gre_mis_needs")
+      .select("id, organization_name, contact_person, seeker_email, seeker_phone, problem_statement, status, internal_status, deployment_locations, submitted_keywords, submitted_thematic_area, submitted_offering_category, submitted_offering_type, ai_thematic_area, requested_on, updated_at, source_kind, approval_status")
+      .eq("source_kind", "shared_form_submission")
+      .order("updated_at", { ascending: false })
+      .limit(500),
+  ]);
 
-  if (pendingNeeds.error) throw new Error(pendingNeeds.error.message);
-  if (pendingUpdates.error) throw new Error(pendingUpdates.error.message);
-  if (aiReviewNeeds.error) throw new Error(aiReviewNeeds.error.message);
-  if (users.error) throw new Error(users.error.message);
-  if (pendingFormSubmissions.error) throw new Error(pendingFormSubmissions.error.message);
-  if (localSolutions.error) throw new Error(localSolutions.error.message);
-  if (localNeeds.error) throw new Error(localNeeds.error.message);
+  const pendingNeedsResult = pendingNeeds.status === "fulfilled" && !pendingNeeds.value.error ? pendingNeeds.value.data || [] : [];
+  const pendingUpdatesResult = pendingUpdates.status === "fulfilled" && !pendingUpdates.value.error ? pendingUpdates.value.data || [] : [];
+  const aiReviewNeedsResult = aiReviewNeeds.status === "fulfilled" && !aiReviewNeeds.value.error ? aiReviewNeeds.value.data || [] : [];
+  const usersResult = users.status === "fulfilled" && !users.value.error ? users.value.data || [] : [];
+  const pendingFormSubmissionsResult = pendingFormSubmissions.status === "fulfilled" && !pendingFormSubmissions.value.error ? pendingFormSubmissions.value.data || [] : [];
+  const localSolutionsResult = localSolutions.status === "fulfilled" && !localSolutions.value.error ? localSolutions.value.data || [] : [];
+  const localNeedsResult = localNeeds.status === "fulfilled" && !localNeeds.value.error ? localNeeds.value.data || [] : [];
   const greProfiles = await fetchGreTenantUsers(true);
-  const usersWithGreSeed = await ensureMissingGreDirectoryUsers((users.data || []) as Record<string, unknown>[], greProfiles);
+  const usersWithGreSeed = await ensureMissingGreDirectoryUsers(usersResult as Record<string, unknown>[], greProfiles);
   const reconciledUsers = await reconcileGreUserMappings(usersWithGreSeed);
 
   return {
     ok: true,
-    pendingNeeds: pendingNeeds.data || [],
-    pendingUpdates: pendingUpdates.data || [],
-    aiReviewNeeds: aiReviewNeeds.data || [],
+    pendingNeeds: pendingNeedsResult,
+    pendingUpdates: pendingUpdatesResult,
+    aiReviewNeeds: aiReviewNeedsResult,
     users: reconciledUsers,
-    pendingFormSubmissions: pendingFormSubmissions.data || [],
-    localSolutions: localSolutions.data || [],
-    localNeeds: localNeeds.data || [],
+    pendingFormSubmissions: pendingFormSubmissionsResult,
+    localSolutions: localSolutionsResult,
+    localNeeds: localNeedsResult.filter((row) => requireString((row as Record<string, unknown>).approval_status) === "approved"),
   };
 }
 
