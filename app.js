@@ -554,7 +554,16 @@ function uniq(items) {
 }
 
 function getEffectiveNeedThematicArea(need) {
-  return normalizeText(need?.override_thematic_area || need?.ai_thematic_area);
+  return normalizeText(need?.override_thematic_area || need?.ai_thematic_area || need?.submitted_thematic_area);
+}
+
+function normalizeNeedCategoryKind(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (!normalized) return "";
+  if (normalized.includes("service")) return "service";
+  if (normalized.includes("product")) return "product";
+  if (normalized.includes("knowledge")) return "knowledge";
+  return normalized;
 }
 
 function getEffectiveNeedApplicationArea(need) {
@@ -562,15 +571,18 @@ function getEffectiveNeedApplicationArea(need) {
 }
 
 function getEffectiveNeedKind(need) {
-  return normalizeText(need?.override_need_kind || need?.ai_need_kind);
+  return normalizeText(need?.override_need_kind || need?.ai_need_kind || normalizeNeedCategoryKind(need?.submitted_offering_category));
 }
 
 function getEffectiveNeedServiceKind(need) {
-  return normalizeText(need?.override_service_kind || need?.ai_service_kind);
+  const submittedCategory = normalizeNeedCategoryKind(need?.submitted_offering_category);
+  return normalizeText(need?.override_service_kind || need?.ai_service_kind || (submittedCategory === "service" ? need?.submitted_offering_type : ""));
 }
 
 function getEffectiveNeedKeywords(need) {
   return uniq([
+    ...parseArray(need?.submitted_keywords).map((item) => item.toLowerCase()),
+    ...parseArray(need?.keywords).map((item) => item.toLowerCase()),
     ...parseArray(need?.override_keywords).map((item) => item.toLowerCase()),
     ...parseArray(need?.ai_keywords).map((item) => item.toLowerCase()),
   ]);
@@ -782,6 +794,7 @@ function buildNeedMatchProfile(need) {
   const ruleKeywords = uniq(parseArray(need.rule_keywords).map((item) => item.toLowerCase()).filter(Boolean));
   const ruleNeedKind = normalizeText(need.rule_need_kind).toLowerCase();
   const aiKeywords = getEffectiveNeedKeywords(need);
+  const submittedKeywords = uniq(parseArray(need.submitted_keywords).map((item) => item.toLowerCase()).filter(Boolean));
   const effectiveThematicArea = getEffectiveNeedThematicArea(need).toLowerCase();
   const effectiveApplicationArea = getEffectiveNeedApplicationArea(need).toLowerCase();
   const aiSignals = uniq([
@@ -799,13 +812,24 @@ function buildNeedMatchProfile(need) {
       .filter((item) => item && !GENERIC_THEMATIC_TERMS.has(item)),
   );
   const serviceTerms = uniq([...categoryParts.map((item) => item.service).filter(Boolean), ...ruleServices]);
-  const problemTokens = uniq([...ruleKeywords, ...tokenizeText(need.problem_statement, 7)]);
+  const priorityKeywordPhrases = uniq([
+    ...submittedKeywords.filter((item) => item.includes(" ")),
+    ...aiKeywords.filter((item) => item.includes(" ")),
+  ]);
+  const problemTokens = uniq([
+    ...submittedKeywords.flatMap((item) => tokenizeText(item, 4)),
+    ...aiKeywords.flatMap((item) => tokenizeText(item, 4)),
+    ...ruleKeywords,
+    ...tokenizeText(need.problem_statement, 7),
+  ]);
   const notesTokens = uniq([...ruleKeywords, ...tokenizeText(need.curation_notes, 5)]);
   const geographyTokens = tokenizeText(`${need.state || ""} ${need.district || ""}`, 3);
   const serviceTokens = serviceTerms.flatMap((item) => tokenizeText(item, 3));
   const sharedSolutionHints = extractSharedSolutionHints(need.curation_notes);
   const problemPhrases = extractProblemPhrases(need.problem_statement);
   const explicitThemeTokens = uniq([
+    ...submittedKeywords.flatMap((item) => tokenizeText(item, 4)),
+    ...aiKeywords.flatMap((item) => tokenizeText(item, 4)),
     ...ruleThemes.flatMap((item) => tokenizeText(item, 3)),
     ...ruleKeywords,
     ...tokenizeText(need.problem_statement, 4),
@@ -823,13 +847,21 @@ function buildNeedMatchProfile(need) {
     ...problemThemeSignals,
     ...ruleThemes,
     ...categoryThematicAreas,
+    ...submittedKeywords,
     ...aiSignals,
     ...(categoryThematicAreas.length ? [] : problemPhrases.slice(0, 8)),
   ]);
   const categoryTokens = thematicAreas.flatMap((item) => tokenizeText(item, 3));
-  const primaryTerms = uniq([...categoryTokens, ...serviceTokens, ...problemTokens.slice(0, 8), ...notesTokens.slice(0, 4)]);
+  const primaryTerms = uniq([
+    ...submittedKeywords,
+    ...categoryTokens,
+    ...serviceTokens,
+    ...problemTokens.slice(0, 10),
+    ...notesTokens.slice(0, 4),
+  ]);
   const phrases = uniq(
-    thematicAreas
+    priorityKeywordPhrases
+      .concat(thematicAreas)
       .filter((item) => item.includes(" "))
       .concat(
         normalizeText(need.problem_statement)
@@ -865,6 +897,7 @@ function buildNeedMatchProfile(need) {
     problemTokens,
     notesTokens,
     geographyTokens,
+    priorityKeywordPhrases,
     phrases,
     primaryTerms,
     explicitThemeTokens,
@@ -1411,6 +1444,27 @@ function scoreOfferingMatch(need, profile, offering) {
     score += 60;
     reasons.push("Already shared with seeker");
   }
+
+  profile.priorityKeywordPhrases.forEach((phrase) => {
+    if (
+      tags.some((tag) => tag.includes(phrase)) ||
+      name.includes(phrase) ||
+      solutionName.includes(phrase) ||
+      primaryApplication.includes(phrase) ||
+      primaryValuechain.includes(phrase) ||
+      applications.some((item) => item.includes(phrase)) ||
+      valuechains.some((item) => item.includes(phrase))
+    ) {
+      thematicMatched = true;
+      primaryThematicMatched = true;
+      score += 20;
+      reasons.push(`Keyword:${phrase}`);
+    } else if (about.includes(phrase) || aiOfferingTheme.includes(phrase) || aiOfferingApplication.includes(phrase) || aiOfferingKeywords.some((item) => item.includes(phrase))) {
+      thematicMatched = true;
+      score += 10;
+      reasons.push(`Keyword:${phrase}`);
+    }
+  });
 
   profile.problemThemeSignals.forEach((phrase) => {
     if (
@@ -2740,12 +2794,12 @@ function getSubmissionReviewFieldConfig(submissionType, payload = {}) {
       { key: "contact_person", label: "Contact Person" },
       { key: "seeker_email", label: "Email" },
       { key: "seeker_phone", label: "Phone" },
-      { key: "offering_category", label: "Offering Category" },
-      { key: "offering_type", label: "Offering Type" },
+      { key: "offering_category", label: "Need Category" },
+      { key: "offering_type", label: "Need Type" },
       { key: "thematic_area", label: "Thematic Area" },
       { key: "deployment_locations", label: "Place of Deployment", multiline: true, list: true, wide: true },
-      { key: "keywords", label: "Keywords for Solution Matching", multiline: true, list: true, wide: true },
-      { key: "problem_statement", label: "Problem Statement", multiline: true, wide: true },
+      { key: "keywords", label: "Keywords for Need Statement", multiline: true, list: true, wide: true },
+      { key: "problem_statement", label: "Need Statement", multiline: true, wide: true },
     ];
   }
   const category = normalizeText(payload?.offering_category) || "Service offerings";

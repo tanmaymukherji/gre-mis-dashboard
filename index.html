@@ -497,70 +497,88 @@
                 <h3>Need Solution</h3>
               </div>
             </div>
-            <form id="needSubmissionForm" class="form-grid">
-              <label>
-                <span>Approved GRE Supplier</span>
-                <select id="needTraderSelect" name="existing_trader_id" required></select>
-              </label>
-              <label>
-                <span>Organisation Name</span>
-                <input name="organization_name" id="needOrgName" required />
-              </label>
-              <label>
-                <span>Contact Person</span>
-                <input name="contact_person" required />
-              </label>
-              <label>
-                <span>Email</span>
-                <input name="seeker_email" type="email" required />
-              </label>
-              <label>
-                <span>Phone</span>
-                <input name="seeker_phone" />
-              </label>
-              <label>
-                <span>Offering Category</span>
-                <select id="needOfferingCategory" name="offering_category">
-                  <option value="Service offerings">Service</option>
-                  <option value="Product offerings">Product</option>
-                  <option value="Knowledge offerings">Knowledge</option>
-                </select>
-              </label>
-              <label>
-                <span>Offering Type</span>
-                <select id="needOfferingType" name="offering_type"></select>
-              </label>
-              <label>
-                <span>Thematic Area</span>
-                <input name="thematic_area" placeholder="Dairy, Solar, Soap, Wild Mango" />
-              </label>
-              <label class="wide">
-                <span>Problem Statement</span>
-                <textarea name="problem_statement" rows="6" required></textarea>
-              </label>
-              <div class="wide choice-block">
-                <span class="field-label">Place of Deployment</span>
-                <div class="tag-entry-row geography-entry-row">
-                  <input id="needDeploymentEntry" list="needDeploymentOptions" placeholder="Search village, block, city, district, state, or country" />
-                  <button type="button" id="addNeedDeploymentBtn" class="btn btn-secondary btn-compact">Add Location</button>
+            <form id="needSubmissionForm" class="form-grid solution-form-grid">
+              <section class="form-section wide">
+                <div class="form-section-head">
+                  <p class="eyebrow">Need Solution</p>
+                  <h4>Account and Contact</h4>
                 </div>
-                <input type="hidden" name="deployment_locations" id="needDeploymentLocations" />
-                <div id="needDeploymentChips" class="tag-cloud tag-chip-editor"></div>
-                <datalist id="needDeploymentOptions"></datalist>
-              </div>
-              <div class="wide choice-block">
-                <span class="field-label">Keywords for Solution Matching</span>
-                <div class="tag-entry-row">
-                  <input id="needTagEntry" list="needTagOptions" placeholder="Type a keyword and press Enter" />
-                  <button type="button" id="addNeedTagBtn" class="btn btn-secondary btn-compact">Add Tag</button>
-                  <button type="button" id="generateNeedTagsBtn" class="btn btn-secondary btn-compact">AI Generate Tags</button>
+                <div class="form-grid">
+                  <label class="wide">
+                    <span>GRE Account</span>
+                    <select id="needTraderSelect" name="existing_trader_id" required></select>
+                  </label>
+                  <label>
+                    <span>Organisation Name</span>
+                    <input name="organization_name" id="needOrgName" required />
+                  </label>
+                  <label>
+                    <span>Contact Person</span>
+                    <input name="contact_person" required />
+                  </label>
+                  <label>
+                    <span>Email</span>
+                    <input name="seeker_email" type="email" required />
+                  </label>
+                  <label>
+                    <span>Phone</span>
+                    <input name="seeker_phone" />
+                  </label>
                 </div>
-                <input type="hidden" name="keywords" id="needTagsInput" />
-                <div id="needTagChips" class="tag-cloud tag-chip-editor"></div>
-                <datalist id="needTagOptions"></datalist>
-              </div>
+              </section>
+
+              <section class="form-section wide">
+                <div class="form-section-head">
+                  <p class="eyebrow">Need Detail</p>
+                  <h4>Classification and Matching Inputs</h4>
+                </div>
+                <div class="form-grid">
+                  <label>
+                    <span>Need Category</span>
+                    <select id="needOfferingCategory" name="offering_category">
+                      <option value="Service offerings">Service</option>
+                      <option value="Product offerings">Product</option>
+                      <option value="Knowledge offerings">Knowledge</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Need Type</span>
+                    <select id="needOfferingType" name="offering_type"></select>
+                  </label>
+                  <label class="wide">
+                    <span>Thematic Area</span>
+                    <input name="thematic_area" placeholder="Dairy, Solar, Soap, Wild Mango" />
+                  </label>
+                  <label class="wide">
+                    <span>Need Statement</span>
+                    <textarea name="problem_statement" rows="6" required></textarea>
+                  </label>
+                  <div class="wide choice-block">
+                    <span class="field-label">Place of Deployment</span>
+                    <div class="tag-entry-row geography-entry-row">
+                      <input id="needDeploymentEntry" list="needDeploymentOptions" placeholder="Search village, block, city, district, state, or country" />
+                      <button type="button" id="addNeedDeploymentBtn" class="btn btn-secondary btn-compact">Add Location</button>
+                    </div>
+                    <input type="hidden" name="deployment_locations" id="needDeploymentLocations" />
+                    <div id="needDeploymentChips" class="tag-cloud tag-chip-editor"></div>
+                    <datalist id="needDeploymentOptions"></datalist>
+                  </div>
+                  <div class="wide choice-block">
+                    <span class="field-label">Keywords for Need Statement</span>
+                    <div class="tag-entry-row">
+                      <input id="needTagEntry" list="needTagOptions" placeholder="Type a keyword and press Enter" />
+                      <button type="button" id="addNeedTagBtn" class="btn btn-secondary btn-compact">Add Keywords</button>
+                      <button type="button" id="generateNeedTagsBtn" class="btn btn-secondary btn-compact">AI Assisted Keyword</button>
+                    </div>
+                    <input type="hidden" name="keywords" id="needTagsInput" />
+                    <div id="needTagChips" class="tag-cloud tag-chip-editor"></div>
+                    <datalist id="needTagOptions"></datalist>
+                  </div>
+                </div>
+              </section>
+
               <div class="wide intake-actions">
-                <button type="submit" class="btn btn-primary">Submit Need to Admin Review</button>
+                <button type="submit" class="btn btn-primary">Need Solution</button>
                 <button type="button" id="shareNeedFormBtn" class="btn btn-secondary">Share Page Link</button>
               </div>
               <p id="needSubmissionStatus" class="helper-text wide"></p>
