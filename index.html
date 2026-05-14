@@ -494,7 +494,7 @@
             <div class="panel-head">
               <div>
                 <p class="eyebrow">Request Solution</p>
-                <h3>Add Need to GRE Review Queue</h3>
+                <h3>Need Solution</h3>
               </div>
             </div>
             <form id="needSubmissionForm" class="form-grid">
@@ -519,46 +519,46 @@
                 <input name="seeker_phone" />
               </label>
               <label>
-                <span>State</span>
-                <input name="state" required />
-              </label>
-              <label>
-                <span>District</span>
-                <input name="district" />
-              </label>
-              <label>
-                <span>Need Kind</span>
-                <select name="need_kind">
-                  <option value="service">Service</option>
-                  <option value="product">Product</option>
-                  <option value="knowledge">Knowledge</option>
-                  <option value="finance">Finance</option>
+                <span>Offering Category</span>
+                <select id="needOfferingCategory" name="offering_category">
+                  <option value="Service offerings">Service</option>
+                  <option value="Product offerings">Product</option>
+                  <option value="Knowledge offerings">Knowledge</option>
                 </select>
               </label>
               <label>
-                <span>Service Type</span>
-                <input name="service_kind" placeholder="Training, Consulting, Mentoring" />
+                <span>Offering Type</span>
+                <select id="needOfferingType" name="offering_type"></select>
               </label>
               <label>
                 <span>Thematic Area</span>
                 <input name="thematic_area" placeholder="Dairy, Solar, Soap, Wild Mango" />
               </label>
-              <label>
-                <span>Application Area</span>
-                <input name="application_area" placeholder="Milching cows, Solar street lights, Goatery" />
-              </label>
-              <label class="wide">
-                <span>Initial Categories / Curated Need</span>
-                <input name="curated_need" placeholder="Capacity building, Training, Consulting" />
-              </label>
-              <label class="wide">
-                <span>6M Signals</span>
-                <input name="six_m_signals" placeholder="Manpower, Method, Machine, Material, Market, Money" />
-              </label>
               <label class="wide">
                 <span>Problem Statement</span>
                 <textarea name="problem_statement" rows="6" required></textarea>
               </label>
+              <div class="wide choice-block">
+                <span class="field-label">Place of Deployment</span>
+                <div class="tag-entry-row geography-entry-row">
+                  <input id="needDeploymentEntry" list="needDeploymentOptions" placeholder="Search village, block, city, district, state, or country" />
+                  <button type="button" id="addNeedDeploymentBtn" class="btn btn-secondary btn-compact">Add Location</button>
+                </div>
+                <input type="hidden" name="deployment_locations" id="needDeploymentLocations" />
+                <div id="needDeploymentChips" class="tag-cloud tag-chip-editor"></div>
+                <datalist id="needDeploymentOptions"></datalist>
+              </div>
+              <div class="wide choice-block">
+                <span class="field-label">Keywords for Solution Matching</span>
+                <div class="tag-entry-row">
+                  <input id="needTagEntry" list="needTagOptions" placeholder="Type a keyword and press Enter" />
+                  <button type="button" id="addNeedTagBtn" class="btn btn-secondary btn-compact">Add Tag</button>
+                  <button type="button" id="generateNeedTagsBtn" class="btn btn-secondary btn-compact">AI Generate Tags</button>
+                </div>
+                <input type="hidden" name="keywords" id="needTagsInput" />
+                <div id="needTagChips" class="tag-cloud tag-chip-editor"></div>
+                <datalist id="needTagOptions"></datalist>
+              </div>
               <div class="wide intake-actions">
                 <button type="submit" class="btn btn-primary">Submit Need to Admin Review</button>
                 <button type="button" id="shareNeedFormBtn" class="btn btn-secondary">Share Page Link</button>

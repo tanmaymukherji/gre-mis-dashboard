@@ -4253,6 +4253,77 @@ Facilitator / Contact Notes: ${normalized.trainer_details_text || normalized.con
   };
 }
 
+async function suggestNeedTags(payload: Record<string, unknown>) {
+  const normalized = {
+    organization_name: requireString(payload.organization_name),
+    offering_category: requireString(payload.offering_category),
+    offering_type: requireString(payload.offering_type),
+    thematic_area: requireString(payload.thematic_area),
+    problem_statement: requireString(payload.problem_statement),
+    deployment_locations: asStringArray(payload.deployment_locations),
+  };
+  const rules = classifyNeedByRules({
+    organization_name: normalized.organization_name,
+    curated_need: [normalized.thematic_area].filter(Boolean),
+    curation_notes: "",
+    problem_statement: [
+      normalized.offering_category,
+      normalized.offering_type,
+      normalized.thematic_area,
+      normalized.problem_statement,
+      normalized.deployment_locations.join(" "),
+    ].filter(Boolean).join(" | "),
+  });
+
+  try {
+    const ai = await callAiJson(defaultAiProvider || "openrouter", `You are helping classify a rural economy need for solution matching.
+
+Return valid JSON only in this shape:
+{
+  "tags": ["", ""]
+}
+
+Rules:
+- give 6 to 12 keywords
+- prefer domain, sub-domain, deployment intent, offering type, and beneficiary terms
+- avoid generic filler like "need", "solution", "support"
+- keep tags short
+
+Organisation: ${normalized.organization_name}
+Offering Category: ${normalized.offering_category}
+Offering Type: ${normalized.offering_type}
+Broad Need Group: ${normalized.thematic_area}
+Place of Deployment: ${normalized.deployment_locations.join("; ")}
+Problem Statement: ${normalized.problem_statement}`);
+    const tags = uniqueStrings(asStringArray(ai.tags)).slice(0, 12);
+    if (tags.length) {
+      return {
+        ok: true,
+        tags,
+        message: "AI keywords added. You can remove any keyword before submitting.",
+      };
+    }
+  } catch {}
+
+  const tags = uniqueStrings([
+    normalized.thematic_area,
+    ...rules.thematicHints,
+    ...rules.serviceHints,
+    ...rules.keywords,
+    ...tokenizeLooseText([
+      normalized.offering_category,
+      normalized.offering_type,
+      normalized.thematic_area,
+      normalized.problem_statement,
+    ].filter(Boolean).join(" "), 4),
+  ]).slice(0, 12);
+  return {
+    ok: true,
+    tags,
+    message: "AI was unavailable, so a rule-based keyword draft was added instead.",
+  };
+}
+
 async function submitFormSubmission(
   submissionType: string,
   payload: Record<string, unknown>,
@@ -4356,7 +4427,9 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
 
   if (submission.submission_type === "need") {
     const nextNeedId = `FORM-${Date.now()}`;
-    const curatedNeed = asStringArray(payload.curated_need || payload.categories);
+    const deploymentLocations = uniqueStrings(asStringArray(payload.deployment_locations));
+    const submittedKeywords = uniqueStrings(asStringArray(payload.keywords));
+    const curatedNeed = uniqueStrings([requireString(payload.thematic_area)].filter(Boolean));
     const row = {
       id: nextNeedId,
       organization_name: requireString(payload.organization_name || submission.organization_name),
@@ -4369,6 +4442,15 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       status: "New",
       internal_status: "Need solution providers",
       curated_need: curatedNeed,
+      deployment_locations: deploymentLocations,
+      submitted_keywords: submittedKeywords,
+      submitted_thematic_area: requireString(payload.thematic_area) || null,
+      submitted_offering_category: requireString(payload.offering_category) || null,
+      submitted_offering_type: requireString(payload.offering_type) || null,
+      ai_thematic_area: requireString(payload.thematic_area) || null,
+      ai_need_kind: requireString(payload.need_kind) || null,
+      ai_service_kind: requireString(payload.service_kind) || null,
+      ai_keywords: submittedKeywords,
       approval_status: "approved",
       source_kind: "shared_form_submission",
       next_action: "Allocate curator and sync to GRE",
@@ -5830,6 +5912,12 @@ Deno.serve(async (req) => {
 
     if (action === "suggestSolutionTags") {
       return jsonResponse(await suggestSolutionTags(
+        (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
+      ));
+    }
+
+    if (action === "suggestNeedTags") {
+      return jsonResponse(await suggestNeedTags(
         (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
       ));
     }

@@ -41,6 +41,8 @@ const state = {
   localSolutionReviewId: "",
   solutionTags: [],
   solutionGeographies: [],
+  needTags: [],
+  needDeploymentLocations: [],
   adminUserRoleTab: "admin",
   localSolutionFilters: {
     search: "",
@@ -1877,6 +1879,10 @@ class GreMisStore {
     return this.callAdmin("suggestSolutionTags", { payload }, false);
   }
 
+  async suggestNeedTags(payload) {
+    return this.callAdmin("suggestNeedTags", { payload }, false);
+  }
+
   async searchLgdGeographies(query) {
     const client = this.getClient();
     const search = normalizeText(query);
@@ -2457,11 +2463,24 @@ function updateSolutionOfferingForm() {
   knowledgeFields.forEach((field) => { field.disabled = category !== "Knowledge offerings"; });
 }
 
+function updateNeedOfferingForm() {
+  const categorySelect = byId("needOfferingCategory");
+  if (!categorySelect) return;
+  const category = categorySelect.value || "Service offerings";
+  setSelectOptions("needOfferingType", OFFERING_TYPE_OPTIONS[category] || [], true);
+}
+
 function renderSolutionReferenceInputs() {
   const master = state.data.offeringMaster || buildOfferingMasterData([]);
   setCheckboxGroupOptions("solutionLanguagesGroup", "languages", master.languages);
   setDatalistOptions("solutionTagOptions", master.tags);
   updateSolutionOfferingForm();
+}
+
+function renderNeedReferenceInputs() {
+  const master = state.data.offeringMaster || buildOfferingMasterData([]);
+  setDatalistOptions("needTagOptions", master.tags);
+  updateNeedOfferingForm();
 }
 
 function getPrimaryApplicationOptions(primaryValuechain) {
@@ -2574,6 +2593,25 @@ function renderSolutionGeographyChips() {
     : `<span class="helper-text">No locations added yet.</span>`;
 }
 
+function renderNeedDeploymentChips() {
+  const target = byId("needDeploymentChips");
+  const hidden = byId("needDeploymentLocations");
+  if (!target || !hidden) return;
+  hidden.value = state.needDeploymentLocations.join("; ");
+  target.innerHTML = state.needDeploymentLocations.length
+    ? state.needDeploymentLocations
+        .map(
+          (location) => `
+            <span class="tag-chip">
+              ${esc(location)}
+              <button type="button" class="tag-chip-remove" data-remove-need-deployment="${escAttr(location)}" aria-label="Remove ${escAttr(location)}">&times;</button>
+            </span>
+          `,
+        )
+        .join("")
+    : `<span class="helper-text">No deployment locations added yet.</span>`;
+}
+
 function addSolutionGeography(rawValue) {
   const location = normalizeText(rawValue);
   if (!location) return false;
@@ -2582,9 +2620,22 @@ function addSolutionGeography(rawValue) {
   return true;
 }
 
+function addNeedDeploymentLocation(rawValue) {
+  const location = normalizeText(rawValue);
+  if (!location) return false;
+  if (!state.needDeploymentLocations.includes(location)) state.needDeploymentLocations.push(location);
+  renderNeedDeploymentChips();
+  return true;
+}
+
 function removeSolutionGeography(location) {
   state.solutionGeographies = state.solutionGeographies.filter((item) => item !== location);
   renderSolutionGeographyChips();
+}
+
+function removeNeedDeploymentLocation(location) {
+  state.needDeploymentLocations = state.needDeploymentLocations.filter((item) => item !== location);
+  renderNeedDeploymentChips();
 }
 
 function renderSolutionTagChips() {
@@ -2606,6 +2657,25 @@ function renderSolutionTagChips() {
     : `<span class="helper-text">No tags added yet.</span>`;
 }
 
+function renderNeedTagChips() {
+  const target = byId("needTagChips");
+  const hidden = byId("needTagsInput");
+  if (!target || !hidden) return;
+  hidden.value = state.needTags.join(", ");
+  target.innerHTML = state.needTags.length
+    ? state.needTags
+        .map(
+          (tag) => `
+            <span class="tag-chip">
+              ${esc(tag)}
+              <button type="button" class="tag-chip-remove" data-remove-need-tag="${escAttr(tag)}" aria-label="Remove ${escAttr(tag)}">&times;</button>
+            </span>
+          `,
+        )
+        .join("")
+    : `<span class="helper-text">No keywords added yet.</span>`;
+}
+
 function addSolutionTag(rawValue) {
   const tag = normalizeText(rawValue);
   if (!tag) return false;
@@ -2614,9 +2684,22 @@ function addSolutionTag(rawValue) {
   return true;
 }
 
+function addNeedTag(rawValue) {
+  const tag = normalizeText(rawValue);
+  if (!tag) return false;
+  if (!state.needTags.includes(tag)) state.needTags.push(tag);
+  renderNeedTagChips();
+  return true;
+}
+
 function removeSolutionTag(tag) {
   state.solutionTags = state.solutionTags.filter((item) => item !== tag);
   renderSolutionTagChips();
+}
+
+function removeNeedTag(tag) {
+  state.needTags = state.needTags.filter((item) => item !== tag);
+  renderNeedTagChips();
 }
 
 function deriveLocalSolutionTags(draft) {
@@ -2657,14 +2740,11 @@ function getSubmissionReviewFieldConfig(submissionType, payload = {}) {
       { key: "contact_person", label: "Contact Person" },
       { key: "seeker_email", label: "Email" },
       { key: "seeker_phone", label: "Phone" },
-      { key: "state", label: "State" },
-      { key: "district", label: "District" },
-      { key: "need_kind", label: "Need Kind" },
-      { key: "service_kind", label: "Service Type" },
+      { key: "offering_category", label: "Offering Category" },
+      { key: "offering_type", label: "Offering Type" },
       { key: "thematic_area", label: "Thematic Area" },
-      { key: "application_area", label: "Application Area" },
-      { key: "curated_need", label: "Curated Need / Categories", multiline: true, list: true },
-      { key: "six_m_signals", label: "6M Signals", multiline: true, list: true },
+      { key: "deployment_locations", label: "Place of Deployment", multiline: true, list: true, wide: true },
+      { key: "keywords", label: "Keywords for Solution Matching", multiline: true, list: true, wide: true },
       { key: "problem_statement", label: "Problem Statement", multiline: true, wide: true },
     ];
   }
@@ -2952,10 +3032,15 @@ function renderSubmissionViews() {
   fillSupplierSelect("solutionTraderSelect", "solutionOrgName");
   fillSupplierSelect("needTraderSelect", "needOrgName");
   renderSolutionReferenceInputs();
+  renderNeedReferenceInputs();
   state.solutionTags = [];
   state.solutionGeographies = [];
+  state.needTags = [];
+  state.needDeploymentLocations = [];
   renderSolutionTagChips();
   renderSolutionGeographyChips();
+  renderNeedTagChips();
+  renderNeedDeploymentChips();
   renderSharePanel("solutionSharePanel", "solution");
   renderSharePanel("needSharePanel", "need");
   populateSubmissionDefaults(byId("solutionSubmissionForm"));
@@ -2967,7 +3052,7 @@ function renderSubmissionViews() {
     solutionTitle.textContent = isSharedFormMode() ? "Share a Solution for GRE Review" : "Add Solution to Admin Review Queue";
   }
   if (needTitle) {
-    needTitle.textContent = isSharedFormMode() ? "Share a Need with GRE" : "Add Need to GRE Review Queue";
+    needTitle.textContent = isSharedFormMode() ? "Share a Need with GRE" : "Need Solution";
   }
 }
 
@@ -4414,14 +4499,36 @@ async function collectSubmissionPayload(form, submissionType = "need") {
       openMissingOrgDialog(entries.organization_name || "");
       throw new Error("Please select an approved GRE supplier before submitting.");
     }
+    const deploymentLocations = normalizeSemicolonSeparatedValue(entries.deployment_locations);
+    const thematicArea = normalizeText(entries.thematic_area);
+    const offeringCategory = normalizeText(entries.offering_category) || "Service offerings";
+    const offeringType = normalizeText(entries.offering_type);
+    const stateFromDeployment = deploymentLocations.length
+      ? deploymentLocations
+          .map((entry) => entry.split(",").map((item) => normalizeText(item)).filter(Boolean))
+          .map((parts) => parts.length >= 2 ? parts[parts.length - 2] : "")
+          .find(Boolean)
+      : "";
+    const districtFromDeployment = deploymentLocations.length
+      ? deploymentLocations
+          .map((entry) => entry.split(",").map((item) => normalizeText(item)).filter(Boolean))
+          .map((parts) => parts.length >= 3 ? parts[parts.length - 3] : parts[0] || "")
+          .find(Boolean)
+      : "";
     return {
       ...entries,
       existing_trader_id: trader.trader_id,
       existing_trader_name: trader.organisation_name || trader.trader_name || entries.organization_name || "",
       organization_name: entries.organization_name || trader.organisation_name || trader.trader_name || "",
+      offering_category: offeringCategory,
+      offering_type: offeringType,
+      need_kind: offeringCategory.replace(/\s+offerings$/i, "").toLowerCase(),
+      service_kind: offeringCategory === "Service offerings" ? offeringType : "",
+      thematic_area: thematicArea,
       keywords: parseArray(entries.keywords),
-      six_m_signals: parseArray(entries.six_m_signals),
-      curated_need: parseArray(entries.curated_need),
+      deployment_locations: deploymentLocations,
+      state: stateFromDeployment || "",
+      district: districtFromDeployment || "",
     };
   }
 
@@ -4717,7 +4824,12 @@ function bindStaticEvents() {
         ? await store.submitSignedInForm("need", payload)
         : await store.submitSharedForm("need", payload);
     event.target.reset();
+    state.needTags = [];
+    state.needDeploymentLocations = [];
+    renderNeedTagChips();
+    renderNeedDeploymentChips();
     fillSupplierSelect("needTraderSelect", "needOrgName");
+    renderNeedReferenceInputs();
     if (status) status.textContent = result.message || "Need submission sent to admin review.";
     if (isAdminUser()) await refreshAll();
     toast("Need submission queued for admin review.");
@@ -4736,6 +4848,7 @@ function bindStaticEvents() {
     }));
 
   byId("solutionOfferingCategory")?.addEventListener("change", () => updateSolutionOfferingForm());
+  byId("needOfferingCategory")?.addEventListener("change", () => updateNeedOfferingForm());
   byId("solutionPrimaryValuechain")?.addEventListener("change", () => updateSolutionApplicationOptions());
   byId("solutionSecondaryValuechain")?.addEventListener("change", () => updateSolutionApplicationOptions());
   byId("solutionGeographyEntry")?.addEventListener("input", safeAsync(async (event) => {
@@ -4795,6 +4908,60 @@ function bindStaticEvents() {
       setDatalistOptions("solutionGeographyOptions", []);
     }
   });
+  byId("needDeploymentEntry")?.addEventListener("input", safeAsync(async (event) => {
+    const suggestions = await store.searchLgdGeographies(event.target.value);
+    setDatalistOptions("needDeploymentOptions", suggestions);
+  }));
+  byId("addNeedDeploymentBtn")?.addEventListener("click", () => {
+    const input = byId("needDeploymentEntry");
+    if (!input) return;
+    if (addNeedDeploymentLocation(input.value)) {
+      input.value = "";
+      setDatalistOptions("needDeploymentOptions", []);
+    }
+  });
+  byId("needDeploymentEntry")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const input = event.target;
+    if (addNeedDeploymentLocation(input.value)) {
+      input.value = "";
+      setDatalistOptions("needDeploymentOptions", []);
+    }
+  });
+  byId("addNeedTagBtn")?.addEventListener("click", () => {
+    const input = byId("needTagEntry");
+    if (!input) return;
+    if (addNeedTag(input.value)) input.value = "";
+  });
+  byId("generateNeedTagsBtn")?.addEventListener("click", safeAsync(async () => {
+    const status = byId("needSubmissionStatus");
+    const form = byId("needSubmissionForm");
+    if (!form) return;
+    if (status) status.textContent = "Generating AI keywords from the current need draft...";
+    const draft = {
+      organization_name: normalizeText(form.querySelector('[name="organization_name"]')?.value || ""),
+      offering_category: normalizeText(form.querySelector('[name="offering_category"]')?.value || ""),
+      offering_type: normalizeText(form.querySelector('[name="offering_type"]')?.value || ""),
+      thematic_area: normalizeText(form.querySelector('[name="thematic_area"]')?.value || ""),
+      problem_statement: normalizeText(form.querySelector('[name="problem_statement"]')?.value || ""),
+      deployment_locations: [...state.needDeploymentLocations],
+      keywords: [...state.needTags],
+    };
+    if (!draft.problem_statement) {
+      throw new Error("Please add the problem statement before generating tags.");
+    }
+    const result = await store.suggestNeedTags(draft);
+    const generatedTags = parseArray(result.tags);
+    generatedTags.forEach((tag) => addNeedTag(tag));
+    if (status) status.textContent = result.message || "AI keywords added. You can remove any keyword before submitting.";
+  }));
+  byId("needTagEntry")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== ",") return;
+    event.preventDefault();
+    const input = event.target;
+    if (addNeedTag(input.value)) input.value = "";
+  });
     document.querySelectorAll('input[name="solution_audience"]').forEach((input) => {
       input.addEventListener("change", () => {
         if ((byId("solutionOfferingCategory")?.value || "Service offerings") === "Product offerings") {
@@ -4812,6 +4979,16 @@ function bindStaticEvents() {
     const removeGeoButton = event.target.closest("[data-remove-solution-geo]");
     if (removeGeoButton) {
       removeSolutionGeography(removeGeoButton.dataset.removeSolutionGeo);
+      return;
+    }
+    const removeNeedTagButton = event.target.closest("[data-remove-need-tag]");
+    if (removeNeedTagButton) {
+      removeNeedTag(removeNeedTagButton.dataset.removeNeedTag);
+      return;
+    }
+    const removeNeedDeploymentButton = event.target.closest("[data-remove-need-deployment]");
+    if (removeNeedDeploymentButton) {
+      removeNeedDeploymentLocation(removeNeedDeploymentButton.dataset.removeNeedDeployment);
       return;
     }
     const button = event.target.closest("[data-copy-share-url]");

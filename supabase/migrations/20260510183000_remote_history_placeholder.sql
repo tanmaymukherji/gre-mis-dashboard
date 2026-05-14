@@ -1,0 +1,1 @@
+-- Remote history placeholder to align local Supabase migration state.
