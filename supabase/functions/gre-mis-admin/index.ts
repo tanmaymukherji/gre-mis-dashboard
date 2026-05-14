@@ -3281,7 +3281,35 @@ async function adminLogout(token: string) {
   return { ok: true };
 }
 
+function isGreNeedsExtendedColumnError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return [
+    "deployment_locations",
+    "submitted_keywords",
+    "submitted_thematic_area",
+    "submitted_offering_category",
+    "submitted_offering_type",
+  ].some((column) => message.includes(`'${column}'`) || message.includes(`"${column}"`));
+}
+
 async function getAdminSnapshot() {
+  const localNeedsQuery = async () => {
+    const extended = await adminClient
+      .from("gre_mis_needs")
+      .select("id, organization_name, contact_person, seeker_email, seeker_phone, problem_statement, status, internal_status, deployment_locations, submitted_keywords, submitted_thematic_area, submitted_offering_category, submitted_offering_type, ai_thematic_area, requested_on, updated_at, source_kind, approval_status")
+      .eq("source_kind", "shared_form_submission")
+      .order("updated_at", { ascending: false })
+      .limit(500);
+    if (!extended.error) return extended;
+    if (!isGreNeedsExtendedColumnError(extended.error)) return extended;
+    return adminClient
+      .from("gre_mis_needs")
+      .select("id, organization_name, contact_person, seeker_email, seeker_phone, problem_statement, status, internal_status, ai_thematic_area, requested_on, updated_at, source_kind, approval_status")
+      .eq("source_kind", "shared_form_submission")
+      .order("updated_at", { ascending: false })
+      .limit(500);
+  };
+
   const [pendingNeeds, pendingUpdates, aiReviewNeeds, users, pendingFormSubmissions, localSolutions, localNeeds] = await Promise.allSettled([
     adminClient
       .from("gre_mis_needs")
@@ -3353,12 +3381,7 @@ async function getAdminSnapshot() {
       .eq("publish_status", "MIS Published")
       .order("updated_at", { ascending: false })
       .limit(500),
-    adminClient
-      .from("gre_mis_needs")
-      .select("id, organization_name, contact_person, seeker_email, seeker_phone, problem_statement, status, internal_status, deployment_locations, submitted_keywords, submitted_thematic_area, submitted_offering_category, submitted_offering_type, ai_thematic_area, requested_on, updated_at, source_kind, approval_status")
-      .eq("source_kind", "shared_form_submission")
-      .order("updated_at", { ascending: false })
-      .limit(500),
+    localNeedsQuery(),
   ]);
 
   const pendingNeedsResult = pendingNeeds.status === "fulfilled" && !pendingNeeds.value.error ? pendingNeeds.value.data || [] : [];
@@ -4610,7 +4633,7 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
     const deploymentLocations = uniqueStrings(asStringArray(payload.deployment_locations));
     const submittedKeywords = uniqueStrings(asStringArray(payload.keywords));
     const curatedNeed = uniqueStrings([requireString(payload.thematic_area)].filter(Boolean));
-    const row = {
+    const baseRow = {
       id: nextNeedId,
       organization_name: requireString(payload.organization_name || submission.organization_name),
       contact_person: requireString(payload.contact_person),
@@ -4622,6 +4645,14 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       status: "New",
       internal_status: "Need solution providers",
       curated_need: curatedNeed,
+      approval_status: "approved",
+      source_kind: "shared_form_submission",
+      next_action: "Allocate curator and continue curation",
+      requested_on: new Date().toISOString(),
+      last_status_change_at: new Date().toISOString(),
+    };
+    const extendedRow = {
+      ...baseRow,
       deployment_locations: deploymentLocations,
       submitted_keywords: submittedKeywords,
       submitted_thematic_area: requireString(payload.thematic_area) || null,
@@ -4631,14 +4662,20 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       ai_need_kind: requireString(payload.need_kind) || null,
       ai_service_kind: requireString(payload.service_kind) || null,
       ai_keywords: submittedKeywords,
-      approval_status: "approved",
-      source_kind: "shared_form_submission",
-      next_action: "Allocate curator and continue curation",
-      requested_on: new Date().toISOString(),
-      last_status_change_at: new Date().toISOString(),
     };
-    const { error: insertError } = await adminClient.from("gre_mis_needs").insert(row);
-    if (insertError) throw new Error(insertError.message);
+    const { error: insertError } = await adminClient.from("gre_mis_needs").insert(extendedRow);
+    if (insertError) {
+      if (!isGreNeedsExtendedColumnError(insertError)) throw new Error(insertError.message);
+      const legacyRow = {
+        ...baseRow,
+        ai_thematic_area: requireString(payload.thematic_area) || null,
+        ai_need_kind: requireString(payload.need_kind) || null,
+        ai_service_kind: requireString(payload.service_kind) || null,
+        ai_keywords: submittedKeywords,
+      };
+      const { error: legacyInsertError } = await adminClient.from("gre_mis_needs").insert(legacyRow);
+      if (legacyInsertError) throw new Error(legacyInsertError.message);
+    }
 
     const { error: approveError } = await adminClient
       .from("gre_mis_form_submissions")
@@ -4740,12 +4777,20 @@ async function updateLocalNeed(needId: string, payload: Record<string, unknown>)
       .find(Boolean)
     : "";
 
-  const patch = {
+  const basePatch = {
     organization_name: requireString(payload.organization_name || existing.organization_name),
     contact_person: requireString(payload.contact_person || existing.contact_person),
     seeker_email: requireString(payload.seeker_email || existing.seeker_email).toLowerCase(),
     seeker_phone: requireString(payload.seeker_phone || existing.seeker_phone),
     problem_statement: requireString(payload.problem_statement || existing.problem_statement),
+    curated_need: uniqueStrings([submittedThematicArea].filter(Boolean)),
+    state: stateFromDeployment || requireString(existing.state),
+    district: districtFromDeployment || requireString(existing.district),
+    updated_at: new Date().toISOString(),
+  };
+
+  const patch = {
+    ...basePatch,
     deployment_locations: deploymentLocations,
     submitted_keywords: submittedKeywords,
     submitted_thematic_area: submittedThematicArea || null,
@@ -4755,17 +4800,27 @@ async function updateLocalNeed(needId: string, payload: Record<string, unknown>)
     ai_need_kind: submittedOfferingCategory.replace(/\s+offerings$/i, "").toLowerCase() || null,
     ai_service_kind: submittedOfferingCategory === "Service offerings" ? submittedOfferingType || null : null,
     ai_keywords: submittedKeywords,
-    curated_need: uniqueStrings([submittedThematicArea].filter(Boolean)),
-    state: stateFromDeployment || requireString(existing.state),
-    district: districtFromDeployment || requireString(existing.district),
-    updated_at: new Date().toISOString(),
   };
 
   const { error: updateError } = await adminClient
     .from("gre_mis_needs")
     .update(patch)
     .eq("id", needId);
-  if (updateError) throw new Error(updateError.message);
+  if (updateError) {
+    if (!isGreNeedsExtendedColumnError(updateError)) throw new Error(updateError.message);
+    const legacyPatch = {
+      ...basePatch,
+      ai_thematic_area: submittedThematicArea || null,
+      ai_need_kind: submittedOfferingCategory.replace(/\s+offerings$/i, "").toLowerCase() || null,
+      ai_service_kind: submittedOfferingCategory === "Service offerings" ? submittedOfferingType || null : null,
+      ai_keywords: submittedKeywords,
+    };
+    const { error: legacyUpdateError } = await adminClient
+      .from("gre_mis_needs")
+      .update(legacyPatch)
+      .eq("id", needId);
+    if (legacyUpdateError) throw new Error(legacyUpdateError.message);
+  }
 
   const { error: submissionUpdateError } = await adminClient
     .from("gre_mis_form_submissions")
