@@ -3282,7 +3282,13 @@ async function adminLogout(token: string) {
 }
 
 function isGreNeedsExtendedColumnError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error || "");
+  const message = [
+    error instanceof Error ? error.message : "",
+    typeof error === "object" && error ? requireString((error as Record<string, unknown>).message) : "",
+    typeof error === "object" && error ? requireString((error as Record<string, unknown>).details) : "",
+    typeof error === "object" && error ? requireString((error as Record<string, unknown>).hint) : "",
+    String(error || ""),
+  ].join(" ");
   return [
     "deployment_locations",
     "submitted_keywords",
