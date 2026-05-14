@@ -4553,6 +4553,9 @@ async function submitFormSubmission(
     org_exists_on_gre: Boolean(trader),
     payload,
     share_context: shareContext || null,
+    approval_status: "pending_admin",
+    gre_sync_status: "pending_admin_review",
+    gre_sync_message: "Submission is waiting for admin review.",
   };
 
   const { data, error } = await adminClient
