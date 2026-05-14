@@ -149,6 +149,65 @@ function tokenizeLooseText(value: unknown, minimumLength = 4) {
   );
 }
 
+function normalizeNeedTag(tag: unknown) {
+  return requireString(tag)
+    .toLowerCase()
+    .replace(/[_/]+/g, " ")
+    .replace(/\bstreet\s+lights?\b/g, "street lighting")
+    .replace(/\bdecentralised\b/g, "decentralized")
+    .replace(/\blow[\s-]+cost\b/g, "low cost")
+    .replace(/\bvillage[\s-]+level\b/g, "village level")
+    .replace(/\blast[\s-]+mile\b/g, "last mile")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isWeakNeedTag(tag: unknown) {
+  const normalized = normalizeNeedTag(tag);
+  if (!normalized || normalized.length < 3) return true;
+  if (needTagStopwords.has(normalized)) return true;
+  const parts = normalized.split(" ").filter(Boolean);
+  if (!parts.length) return true;
+  if (parts.every((part) => needTagStopwords.has(part) || /^\d+$/.test(part))) return true;
+  if (parts.length === 1 && parts[0].length < 5 && !["solar", "rural", "laser"].includes(parts[0])) return true;
+  return false;
+}
+
+function extractNeedPriorityPhrases(value: unknown) {
+  const text = requireString(value).toLowerCase();
+  return uniqueStrings(
+    needPriorityPhraseSignals
+      .filter((signal) => signal.patterns.some((pattern) => text.includes(pattern)))
+      .map((signal) => signal.label),
+  );
+}
+
+function extractNeedWindowPhrases(value: unknown) {
+  const text = requireString(value)
+    .toLowerCase()
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ");
+  const phrases: string[] = [];
+  const windowPatterns = [
+    /seeking\s+([^.;:]+)/g,
+    /looking for\s+([^.;:]+)/g,
+    /solutions should be\s+([^.;:]+)/g,
+    /we need\s+([^.;:]+)/g,
+    /required to be\s+([^.;:]+)/g,
+  ];
+  for (const pattern of windowPatterns) {
+    for (const match of text.matchAll(pattern)) {
+      const fragment = requireString(match[1]);
+      if (!fragment) continue;
+      for (const piece of fragment.split(/,| and /g)) {
+        const normalized = normalizeNeedTag(piece);
+        if (!isWeakNeedTag(normalized) && normalized.split(" ").length <= 4) phrases.push(normalized);
+      }
+    }
+  }
+  return uniqueStrings(phrases);
+}
+
 const genericThematicTerms = new Set([
   "business",
   "business consultation",
@@ -195,6 +254,79 @@ const domainStopwords = new Set([
   "consultation",
   "mentoring",
 ]);
+
+const needTagStopwords = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "been",
+  "being",
+  "by",
+  "can",
+  "could",
+  "demands",
+  "different",
+  "for",
+  "from",
+  "functional",
+  "government",
+  "have",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "need",
+  "needs",
+  "of",
+  "offerings",
+  "our",
+  "over",
+  "raised",
+  "scheme",
+  "schemes",
+  "service",
+  "services",
+  "should",
+  "solution",
+  "solutions",
+  "support",
+  "that",
+  "the",
+  "their",
+  "there",
+  "these",
+  "this",
+  "to",
+  "transfer",
+  "under",
+  "we",
+  "while",
+  "with",
+]);
+
+const needPriorityPhraseSignals = [
+  { label: "street lighting", patterns: ["street lighting", "street lights", "street light", "streetlight", "streetlights"] },
+  { label: "rural street lighting", patterns: ["rural street lighting", "rural street lights", "rural street light"] },
+  { label: "solar street lighting", patterns: ["solar street lighting", "solar street lights", "solar street light"] },
+  { label: "community lighting", patterns: ["community lighting", "lighting solutions for the community"] },
+  { label: "decentralized", patterns: ["decentralized", "decentralised"] },
+  { label: "low cost", patterns: ["low cost", "low-cost", "cost effective", "cost-effective"] },
+  { label: "affordable", patterns: ["affordable"] },
+  { label: "maintainable", patterns: ["maintainable", "easy to maintain", "easy maintenance"] },
+  { label: "village level", patterns: ["village level", "village-level"] },
+  { label: "scalable", patterns: ["scalable", "scale across", "scale-up"] },
+  { label: "small habitations", patterns: ["small habitations", "small settlements", "small villages"] },
+  { label: "remote settlements", patterns: ["remote settlements", "remote settlement", "remote habitations", "remote villages"] },
+  { label: "last mile delivery", patterns: ["last-mile delivery", "last mile delivery"] },
+  { label: "public lighting", patterns: ["public lighting", "community street lighting"] },
+  { label: "off-grid lighting", patterns: ["off-grid lighting", "off grid lighting"] },
+  { label: "community infrastructure", patterns: ["community infrastructure", "shared infrastructure"] },
+];
 
 const ruleThemeSignals = [
   { label: "dairy", patterns: ["dairy", "milk", "milching", "cow", "cows", "livestock", "fodder"] },
@@ -2313,7 +2445,11 @@ function classifyNeedByRules(need: Record<string, unknown>) {
     needKind = "service";
   }
   const serviceKind = needKind === "service" || needKind === "mixed" ? serviceHints[0] || "" : "";
-  const domainTokens = tokenizeLooseText(text, 4).filter((token) => !domainStopwords.has(token)).slice(0, 18);
+  const domainTokens = uniqueStrings([
+    ...extractNeedPriorityPhrases(text),
+    ...extractNeedWindowPhrases(text),
+    ...tokenizeLooseText(text, 5).filter((token) => !domainStopwords.has(token) && !needTagStopwords.has(token)),
+  ]).slice(0, 18);
 
   return {
     thematicHints,
@@ -2321,7 +2457,7 @@ function classifyNeedByRules(need: Record<string, unknown>) {
     sixMSignals: rule6M,
     needKind,
     serviceKind,
-    keywords: uniqueStrings([...thematicHints, ...domainTokens]).slice(0, 18),
+    keywords: uniqueStrings([...thematicHints, ...domainTokens]).filter((entry) => !isWeakNeedTag(entry)).slice(0, 18),
   };
 }
 
@@ -2396,6 +2532,32 @@ function classifyOfferingByRules(
       ...tokenizeLooseText(text, 4).filter((token) => !domainStopwords.has(token)),
     ]).slice(0, 18),
   };
+}
+
+function buildNeedTagDraft(input: {
+  thematicArea?: unknown;
+  problemStatement?: unknown;
+  rules: ReturnType<typeof classifyNeedByRules>;
+}) {
+  const problemStatement = requireString(input.problemStatement);
+  const phrases = uniqueStrings([
+    ...extractNeedPriorityPhrases(problemStatement),
+    ...extractNeedWindowPhrases(problemStatement),
+  ]);
+  const scopedTokens = tokenizeLooseText(problemStatement, 5)
+    .filter((token) => !needTagStopwords.has(token) && !domainStopwords.has(token))
+    .filter((token) => !/^\d+$/.test(token))
+    .slice(0, 8);
+  return uniqueStrings([
+    normalizeNeedTag(input.thematicArea),
+    ...phrases,
+    ...input.rules.thematicHints.map((entry) => normalizeNeedTag(entry)),
+    ...input.rules.serviceHints.map((entry) => normalizeNeedTag(entry)),
+    ...input.rules.keywords.map((entry) => normalizeNeedTag(entry)),
+    ...scopedTokens.map((entry) => normalizeNeedTag(entry)),
+  ])
+    .filter((entry) => !isWeakNeedTag(entry))
+    .slice(0, 12);
 }
 
 function validateAiEnrichment(
@@ -4284,10 +4446,18 @@ Return valid JSON only in this shape:
 }
 
 Rules:
-- give 6 to 12 keywords
-- prefer domain, sub-domain, deployment intent, offering type, and beneficiary terms
-- avoid generic filler like "need", "solution", "support"
-- keep tags short
+- give 8 to 12 tags
+- prefer exact phrases from the problem statement when they express solution intent
+- prioritize:
+  1. core problem domain
+  2. deployment context
+  3. desired solution attributes
+  4. beneficiary or operating context
+- preserve strong multi-word phrases such as "street lighting", "low cost", "last mile delivery", "village level", "small habitations", "remote settlements"
+- avoid generic filler, grammar fragments, or intro-statistics like "over", "demands", "raised", "service", "offerings", "have been"
+- do not include broad labels like "solution" or "support" unless part of a meaningful phrase
+- keep each tag to 1 to 4 words
+- return plain tags only, not sentences
 
 Organisation: ${normalized.organization_name}
 Offering Category: ${normalized.offering_category}
@@ -4295,7 +4465,13 @@ Offering Type: ${normalized.offering_type}
 Broad Need Group: ${normalized.thematic_area}
 Place of Deployment: ${normalized.deployment_locations.join("; ")}
 Problem Statement: ${normalized.problem_statement}`);
-    const tags = uniqueStrings(asStringArray(ai.tags)).slice(0, 12);
+    const aiTags = asStringArray(ai.tags)
+      .map((entry) => normalizeNeedTag(entry))
+      .filter((entry) => !isWeakNeedTag(entry));
+    const tags = uniqueStrings([
+      ...aiTags,
+      ...extractNeedPriorityPhrases(normalized.problem_statement).filter((entry) => !aiTags.includes(entry)),
+    ]).slice(0, 12);
     if (tags.length) {
       return {
         ok: true,
@@ -4305,18 +4481,11 @@ Problem Statement: ${normalized.problem_statement}`);
     }
   } catch {}
 
-  const tags = uniqueStrings([
-    normalized.thematic_area,
-    ...rules.thematicHints,
-    ...rules.serviceHints,
-    ...rules.keywords,
-    ...tokenizeLooseText([
-      normalized.offering_category,
-      normalized.offering_type,
-      normalized.thematic_area,
-      normalized.problem_statement,
-    ].filter(Boolean).join(" "), 4),
-  ]).slice(0, 12);
+  const tags = buildNeedTagDraft({
+    thematicArea: normalized.thematic_area,
+    problemStatement: normalized.problem_statement,
+    rules,
+  });
   return {
     ok: true,
     tags,
