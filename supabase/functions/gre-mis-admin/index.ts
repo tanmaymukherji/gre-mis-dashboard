@@ -3303,7 +3303,7 @@ async function getAdminSnapshot() {
     const extended = await adminClient
       .from("gre_mis_needs")
       .select("id, organization_name, contact_person, seeker_email, seeker_phone, problem_statement, status, internal_status, deployment_locations, submitted_keywords, submitted_thematic_area, submitted_offering_category, submitted_offering_type, ai_thematic_area, requested_on, updated_at, source_kind, approval_status")
-      .eq("source_kind", "shared_form_submission")
+      .eq("approval_status", "approved")
       .order("updated_at", { ascending: false })
       .limit(500);
     if (!extended.error) return extended;
@@ -3311,7 +3311,7 @@ async function getAdminSnapshot() {
     return adminClient
       .from("gre_mis_needs")
       .select("id, organization_name, contact_person, seeker_email, seeker_phone, problem_statement, status, internal_status, ai_thematic_area, requested_on, updated_at, source_kind, approval_status")
-      .eq("source_kind", "shared_form_submission")
+      .eq("approval_status", "approved")
       .order("updated_at", { ascending: false })
       .limit(500);
   };
@@ -3409,7 +3409,11 @@ async function getAdminSnapshot() {
     users: reconciledUsers,
     pendingFormSubmissions: pendingFormSubmissionsResult,
     localSolutions: localSolutionsResult,
-    localNeeds: localNeedsResult.filter((row) => requireString((row as Record<string, unknown>).approval_status) === "approved"),
+    localNeeds: localNeedsResult.filter((row) => {
+      const record = row as Record<string, unknown>;
+      return requireString(record.approval_status) === "approved"
+        && (requireString(record.source_kind) === "shared_form_submission" || requireString(record.id).startsWith("FORM-"));
+    }),
   };
 }
 
