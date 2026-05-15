@@ -4403,8 +4403,9 @@ async function suggestSolutionTags(payload: Record<string, unknown>) {
     solution_name: normalized.offering_name,
     about_solution_text: normalized.about_offering_text,
   });
+  let aiFallbackReason = "";
   try {
-    const ai = await callAiJson(defaultAiProvider || "openrouter", `You are helping classify a rural economy solution offering for search discovery.
+    const ai = await callAiJson("gemini", `You are helping classify a rural economy solution offering for search discovery.
 
 Return valid JSON only in this shape:
 {
@@ -4431,7 +4432,10 @@ Facilitator / Contact Notes: ${normalized.trainer_details_text || normalized.con
         message: "AI tags added. You can remove any tag before submitting.",
       };
     }
-  } catch {}
+    aiFallbackReason = "AI returned no usable tags.";
+  } catch (error) {
+    aiFallbackReason = error instanceof Error ? error.message : String(error);
+  }
 
   const tags = uniqueStrings([
     ...rules.thematicHints,
@@ -4447,7 +4451,7 @@ Facilitator / Contact Notes: ${normalized.trainer_details_text || normalized.con
   return {
     ok: true,
     tags,
-    message: "AI was unavailable, so a rule-based tag draft was added instead.",
+    message: `AI fallback used: ${aiFallbackReason || "No usable AI response."} A rule-based tag draft was added instead.`,
   };
 }
 
@@ -4473,8 +4477,9 @@ async function suggestNeedTags(payload: Record<string, unknown>) {
     ].filter(Boolean).join(" | "),
   });
 
+  let aiFallbackReason = "";
   try {
-    const ai = await callAiJson(defaultAiProvider || "openrouter", `You are helping classify a rural economy need for solution matching.
+    const ai = await callAiJson("gemini", `You are helping classify a rural economy need for solution matching.
 
 Return valid JSON only in this shape:
 {
@@ -4515,7 +4520,10 @@ Problem Statement: ${normalized.problem_statement}`);
         message: "AI keywords added. You can remove any keyword before submitting.",
       };
     }
-  } catch {}
+    aiFallbackReason = "AI returned no usable keywords.";
+  } catch (error) {
+    aiFallbackReason = error instanceof Error ? error.message : String(error);
+  }
 
   const tags = buildNeedTagDraft({
     thematicArea: normalized.thematic_area,
@@ -4525,7 +4533,7 @@ Problem Statement: ${normalized.problem_statement}`);
   return {
     ok: true,
     tags,
-    message: "AI was unavailable, so a rule-based keyword draft was added instead.",
+    message: `AI fallback used: ${aiFallbackReason || "No usable AI response."} A rule-based keyword draft was added instead.`,
   };
 }
 
@@ -5302,7 +5310,7 @@ async function generateSuggestedQuestionsForNeed(
 ) {
   const { data: need, error } = await adminClient
     .from("gre_mis_needs")
-    .select("id, approval_status, organization_name, state, district, problem_statement, curation_notes, curated_need, ai_thematic_area, ai_need_kind, ai_service_kind, submitted_thematic_area, submitted_offering_category, submitted_offering_type, submitted_keywords")
+    .select("*")
     .eq("id", needId)
     .single();
   if (error || !need) throw new Error(error?.message || "Need not found.");
@@ -5330,9 +5338,9 @@ ${JSON.stringify({
     organization_name: need.organization_name,
     state: need.state,
     district: need.district,
-    thematic_area: need.submitted_thematic_area || need.ai_thematic_area,
-    need_category: need.submitted_offering_category || need.ai_need_kind,
-    need_type: need.submitted_offering_type || need.ai_service_kind,
+    thematic_area: requireString((need as Record<string, unknown>).submitted_thematic_area) || need.ai_thematic_area,
+    need_category: requireString((need as Record<string, unknown>).submitted_offering_category) || need.ai_need_kind,
+    need_type: requireString((need as Record<string, unknown>).submitted_offering_type) || need.ai_service_kind,
     keywords: asStringArray(need.submitted_keywords),
     curated_need: asStringArray(need.curated_need),
     problem_statement: need.problem_statement,
