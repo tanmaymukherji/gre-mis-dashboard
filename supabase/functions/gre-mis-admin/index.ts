@@ -3315,7 +3315,7 @@ async function getAdminSnapshot() {
       .limit(500);
   };
 
-  const [pendingNeeds, pendingUpdates, aiReviewNeeds, users, pendingFormSubmissions, localSolutions, localNeeds] = await Promise.allSettled([
+  const [pendingNeeds, pendingUpdates, aiReviewNeeds, users, pendingFormSubmissions, approvedNeedSubmissions, localSolutions, localNeeds] = await Promise.allSettled([
     adminClient
       .from("gre_mis_needs")
       .select("id, organization_name, state, district, status, internal_status, requested_on, curator_id, problem_statement, source_kind")
@@ -3343,6 +3343,14 @@ async function getAdminSnapshot() {
       .select("*")
       .or("approval_status.eq.pending_admin,approval_status.is.null")
       .order("created_at", { ascending: false }),
+    adminClient
+      .from("gre_mis_form_submissions")
+      .select("id, target_need_id, organization_name, contact_name, contact_email, contact_phone, payload")
+      .eq("submission_type", "need")
+      .eq("approval_status", "approved")
+      .not("target_need_id", "is", null)
+      .order("reviewed_at", { ascending: false })
+      .limit(500),
     adminClient
       .from("offerings")
       .select(`
@@ -3394,8 +3402,45 @@ async function getAdminSnapshot() {
   const aiReviewNeedsResult = aiReviewNeeds.status === "fulfilled" && !aiReviewNeeds.value.error ? aiReviewNeeds.value.data || [] : [];
   const usersResult = users.status === "fulfilled" && !users.value.error ? users.value.data || [] : [];
   const pendingFormSubmissionsResult = pendingFormSubmissions.status === "fulfilled" && !pendingFormSubmissions.value.error ? pendingFormSubmissions.value.data || [] : [];
+  const approvedNeedSubmissionsResult = approvedNeedSubmissions.status === "fulfilled" && !approvedNeedSubmissions.value.error ? approvedNeedSubmissions.value.data || [] : [];
   const localSolutionsResult = localSolutions.status === "fulfilled" && !localSolutions.value.error ? localSolutions.value.data || [] : [];
   const localNeedsResult = localNeeds.status === "fulfilled" && !localNeeds.value.error ? localNeeds.value.data || [] : [];
+  const approvedNeedSubmissionMap = new Map(
+    approvedNeedSubmissionsResult
+      .map((row) => {
+        const record = row as Record<string, unknown>;
+        const targetNeedId = requireString(record.target_need_id);
+        if (!targetNeedId) return null;
+        return [targetNeedId, record] as const;
+      })
+      .filter(Boolean) as readonly (readonly [string, Record<string, unknown>])[],
+  );
+  const hydratedLocalNeeds = localNeedsResult.map((row) => {
+    const needRecord = { ...(row as Record<string, unknown>) };
+    const linkedSubmission = approvedNeedSubmissionMap.get(requireString(needRecord.id));
+    const payload = linkedSubmission?.payload && typeof linkedSubmission.payload === "object"
+      ? linkedSubmission.payload as Record<string, unknown>
+      : {};
+    if (!requireString(needRecord.contact_person)) needRecord.contact_person = requireString(linkedSubmission?.contact_name || payload.contact_person);
+    if (!requireString(needRecord.seeker_email)) needRecord.seeker_email = requireString(linkedSubmission?.contact_email || payload.seeker_email).toLowerCase();
+    if (!requireString(needRecord.seeker_phone)) needRecord.seeker_phone = requireString(linkedSubmission?.contact_phone || payload.seeker_phone);
+    if (!Array.isArray(needRecord.deployment_locations) || !needRecord.deployment_locations.length) {
+      needRecord.deployment_locations = uniqueStrings(asStringArray(payload.deployment_locations));
+    }
+    if (!Array.isArray(needRecord.submitted_keywords) || !needRecord.submitted_keywords.length) {
+      needRecord.submitted_keywords = uniqueStrings(asStringArray(payload.keywords));
+    }
+    if (!requireString(needRecord.submitted_thematic_area)) {
+      needRecord.submitted_thematic_area = requireString(payload.thematic_area) || null;
+    }
+    if (!requireString(needRecord.submitted_offering_category)) {
+      needRecord.submitted_offering_category = requireString(payload.offering_category) || null;
+    }
+    if (!requireString(needRecord.submitted_offering_type)) {
+      needRecord.submitted_offering_type = requireString(payload.offering_type) || null;
+    }
+    return needRecord;
+  });
   const greProfiles = await fetchGreTenantUsers(true);
   const usersWithGreSeed = await ensureMissingGreDirectoryUsers(usersResult as Record<string, unknown>[], greProfiles);
   const reconciledUsers = await reconcileGreUserMappings(usersWithGreSeed);
@@ -3411,7 +3456,7 @@ async function getAdminSnapshot() {
     users: reconciledUsers,
     pendingFormSubmissions: pendingFormSubmissionsResult,
     localSolutions: localSolutionsResult,
-    localNeeds: localNeedsResult.filter((row) => {
+    localNeeds: hydratedLocalNeeds.filter((row) => {
       const record = row as Record<string, unknown>;
       return requireString(record.approval_status) === "approved"
         && (requireString(record.source_kind) === "shared_form_submission" || requireString(record.id).startsWith("FORM-"));

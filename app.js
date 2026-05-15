@@ -594,6 +594,33 @@ function getEffectiveNeedKeywords(need) {
   ]);
 }
 
+function getEffectiveNeedDeploymentLocations(need) {
+  const direct = uniq([
+    ...parseArray(need?.deployment_locations),
+    ...parseArray(need?.submitted_deployment_locations),
+  ]);
+  if (direct.length) return direct;
+  const district = normalizeText(need?.district);
+  const stateName = normalizeText(need?.state);
+  if (district && stateName) return [`${district}, ${stateName}`];
+  if (stateName) return [stateName];
+  return [];
+}
+
+function getEffectiveSubmittedNeedCategory(need) {
+  const direct = normalizeText(need?.submitted_offering_category);
+  if (direct) return direct;
+  const kind = getEffectiveNeedKind(need).toLowerCase();
+  if (kind === "service") return "Service offerings";
+  if (kind === "product") return "Product offerings";
+  if (kind === "knowledge") return "Knowledge offerings";
+  return "Service offerings";
+}
+
+function getEffectiveSubmittedNeedType(need) {
+  return normalizeText(need?.submitted_offering_type || need?.submitted_need_type || getEffectiveNeedServiceKind(need));
+}
+
 function getEffectiveNeed6MSignals(need) {
   return uniq([
     ...parseArray(need?.override_6m_signals),
@@ -3704,6 +3731,7 @@ function renderWorkbench() {
   const currentStatusLabel = normalizeText(need.status) || "Not set";
   const currentInternalStatusLabel = normalizeText(need.internal_status) || "Not set";
   const currentNextActionLabel = normalizeText(need.next_action) || "Not set";
+  const currentCurationNotes = normalizeText(need.curation_notes);
   const curatorOptions = [`<option value="">Unassigned</option>`, ...state.data.curators.map((item) => `<option value="${esc(item.id)}" ${item.id === need.curator_id ? "selected" : ""}>${esc(item.display_name)}</option>`)].join("");
   const canEdit = canEditNeedCuration(need);
   const isCurator = isCuratorUser();
@@ -3763,7 +3791,7 @@ function renderWorkbench() {
           </label>
           <label class="wide">
             <span>Curation Notes</span>
-            <textarea name="proposed_curation_notes" rows="4" placeholder="Describe what changed and why."></textarea>
+            <textarea name="proposed_curation_notes" rows="4" placeholder="Describe what changed and why.">${esc(currentCurationNotes)}</textarea>
           </label>
           <label>
             <span>Broadcast Needed</span>
@@ -3946,6 +3974,36 @@ Rules:
 `.trim();
 }
 
+function buildPuterNeedKeywordPrompt(draft) {
+  return `
+You are helping an admin prepare strong solution-matching keywords for a rural-economy need.
+Return only valid JSON.
+
+Need draft:
+${JSON.stringify({
+  organization_name: draft.organization_name,
+  offering_category: draft.offering_category,
+  offering_type: draft.offering_type,
+  thematic_area: draft.thematic_area,
+  deployment_locations: draft.deployment_locations,
+  problem_statement: draft.problem_statement,
+}, null, 2)}
+
+Return:
+{
+  "tags": ["", "", ""]
+}
+
+Rules:
+- return 8 to 12 keywords
+- preserve meaningful multi-word phrases
+- prioritize the actual need, deployment context, constraints, and desired solution qualities
+- avoid filler words, generic verbs, or introductory statistics
+- each keyword should be 1 to 4 words
+- do not include numbering
+`.trim();
+}
+
 function normalizeNeedReviewSuggestion(payload) {
   return {
     thematic_area: normalizeText(payload?.thematic_area),
@@ -3985,6 +4043,19 @@ async function runPuterSuggestedQuestions(needId) {
   const result = await store.saveNeedSuggestedQuestions(needId, questions, "puter");
   await refreshAll();
   return result;
+}
+
+async function runPuterNeedKeywordAssist(draft) {
+  const text = await runPuterChat(buildPuterNeedKeywordPrompt(draft));
+  const parsed = parseJsonObject(text);
+  const tags = parseArray(parsed?.tags)
+    .map((item) => normalizeText(item).toLowerCase())
+    .filter((item) => item.length >= 3)
+    .slice(0, 12);
+  if (!tags.length) {
+    throw new Error("Puter did not return usable keywords.");
+  }
+  return uniq(tags);
 }
 
 function renderAdminQueue() {
@@ -4425,7 +4496,7 @@ function getLocalNeedById(needId) {
 function getLocalNeedCategories() {
   return uniq(
     ensureList(state.data.localNeeds)
-      .map((item) => normalizeText(item.submitted_offering_category || item.ai_need_kind || ""))
+      .map((item) => normalizeText(getEffectiveSubmittedNeedCategory(item)))
       .filter(Boolean),
   ).sort((a, b) => a.localeCompare(b));
 }
@@ -4434,14 +4505,14 @@ function getFilteredLocalNeeds() {
   const search = normalizeText(state.localNeedFilters.search).toLowerCase();
   const category = normalizeText(state.localNeedFilters.category);
   return ensureList(state.data.localNeeds).filter((item) => {
-    const itemCategory = normalizeText(item.submitted_offering_category || item.ai_need_kind || "");
+    const itemCategory = normalizeText(getEffectiveSubmittedNeedCategory(item));
     const haystack = [
       normalizeText(item.organization_name),
       normalizeText(item.contact_person),
       normalizeText(item.problem_statement),
       normalizeText(item.submitted_thematic_area),
-      ...parseArray(item.submitted_keywords),
-      ...parseArray(item.deployment_locations),
+      ...getEffectiveNeedKeywords(item),
+      ...getEffectiveNeedDeploymentLocations(item),
     ].join(" ").toLowerCase();
     const categoryMatch = category === "all" || itemCategory === category;
     const searchMatch = !search || haystack.includes(search);
@@ -4477,11 +4548,11 @@ function openLocalNeedReviewDialog(needId) {
   setValue("contact_person", need.contact_person || "");
   setValue("seeker_email", need.seeker_email || "");
   setValue("seeker_phone", need.seeker_phone || "");
-  setValue("submitted_offering_category", need.submitted_offering_category || "Service offerings");
-  setValue("submitted_offering_type", need.submitted_offering_type || "");
+  setValue("submitted_offering_category", getEffectiveSubmittedNeedCategory(need));
+  setValue("submitted_offering_type", getEffectiveSubmittedNeedType(need));
   setValue("submitted_thematic_area", need.submitted_thematic_area || need.ai_thematic_area || "");
-  setValue("deployment_locations", parseArray(need.deployment_locations).join("; "));
-  setValue("submitted_keywords", parseArray(need.submitted_keywords).join(", "));
+  setValue("deployment_locations", getEffectiveNeedDeploymentLocations(need).join("; "));
+  setValue("submitted_keywords", getEffectiveNeedKeywords(need).join(", "));
   setValue("problem_statement", need.problem_statement || "");
   byId("localNeedReviewStatus").textContent = "";
   dialog.showModal();
@@ -4507,15 +4578,15 @@ function renderLocalNeedManagement() {
     ? `<div class="local-solutions-grid">${rows.map((item) => `
           <article class="approval-card local-solution-card">
             <div class="status-row">
-              <span class="status-pill info">${esc(item.submitted_offering_category || "Need")}</span>
+              <span class="status-pill info">${esc(getEffectiveSubmittedNeedCategory(item) || "Need")}</span>
               <span class="status-pill good">${esc(item.status || "New")}</span>
             </div>
             <h4>${esc(item.organization_name || "Unnamed organisation")}</h4>
             <div class="detail-list">
-              <div><strong>Need Type:</strong> ${esc(item.submitted_offering_type || "Not set")}</div>
+              <div><strong>Need Type:</strong> ${esc(getEffectiveSubmittedNeedType(item) || "Not set")}</div>
               <div><strong>Thematic Area:</strong> ${esc(item.submitted_thematic_area || item.ai_thematic_area || "Not set")}</div>
-              <div><strong>Keywords:</strong> ${esc(parseArray(item.submitted_keywords).join(", ") || "None")}</div>
-              <div><strong>Places:</strong> ${esc(parseArray(item.deployment_locations).join(", ") || "Not set")}</div>
+              <div><strong>Keywords:</strong> ${esc(getEffectiveNeedKeywords(item).join(", ") || "None")}</div>
+              <div><strong>Places:</strong> ${esc(getEffectiveNeedDeploymentLocations(item).join(", ") || "Not set")}</div>
             </div>
             <p class="helper-text">${esc(clipText(item.problem_statement || "", 180) || "No statement available.")}</p>
             <div class="card-actions">
@@ -5668,6 +5739,22 @@ function bindStaticEvents() {
       keywordField.value = parseArray(result.tags).join(", ");
     }
     if (status) status.textContent = result.message || "AI-assisted keywords added to the review draft.";
+  }));
+
+  byId("generateSubmissionNeedKeywordsPuterBtn")?.addEventListener("click", safeAsync(async () => {
+    const status = byId("submissionNeedToolsStatus");
+    const draft = getSubmissionReviewNeedDraft();
+    if (!draft) return;
+    if (!draft.problem_statement) {
+      throw new Error("Please add the need statement before generating keywords.");
+    }
+    if (status) status.textContent = "Generating Puter-assisted keywords from the current need draft...";
+    const tags = await runPuterNeedKeywordAssist(draft);
+    const keywordField = byId("submissionReviewForm")?.querySelector('[data-review-field="keywords"]');
+    if (keywordField) {
+      keywordField.value = tags.join(", ");
+    }
+    if (status) status.textContent = "Puter-assisted keywords added to the review draft.";
   }));
 
   byId("approveSubmissionReviewBtn")?.addEventListener("click", safeAsync(async () => {
