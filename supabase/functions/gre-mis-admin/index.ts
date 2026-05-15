@@ -1388,10 +1388,10 @@ async function attemptDeactivateGreWorkforceUser(greUserId: number) {
   }
 }
 
-async function patchGreJson(path: string, payload: unknown, sessionId?: string) {
+async function sendGreJson(path: string, method: string, payload: unknown, sessionId?: string) {
   const resolvedSessionId = sessionId || await loginToGre();
   const response = await fetch(`${greLoginBaseUrl}${path}`, {
-    method: "PATCH",
+    method,
     headers: {
       "x-sessionid": resolvedSessionId,
       "Content-Type": "application/json",
@@ -1401,11 +1401,40 @@ async function patchGreJson(path: string, payload: unknown, sessionId?: string) 
     },
     body: JSON.stringify(payload),
   });
-  const data = await response.json().catch(() => null);
+  const text = await response.text().catch(() => "");
+  let data: Record<string, unknown> | null = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+  }
   if (!response.ok) {
-    throw new Error(data?.error?.message || data?.message || `GRE patch failed for ${path}.`);
+    throw new Error(
+      requireString(data?.error?.message || data?.errorMessage || data?.message || data?.successMessage) ||
+      `GRE ${method} failed for ${path}.`,
+    );
   }
   return data;
+}
+
+async function patchGreJson(path: string, payload: unknown, sessionId?: string) {
+  return await sendGreJson(path, "PATCH", payload, sessionId);
+}
+
+async function updateGreRequestJson(path: string, payload: unknown, sessionId?: string) {
+  try {
+    return await sendGreJson(path, "PATCH", payload, sessionId);
+  } catch (patchError) {
+    const patchMessage = patchError instanceof Error ? patchError.message : String(patchError);
+    try {
+      return await sendGreJson(path, "PUT", payload, sessionId);
+    } catch (putError) {
+      const putMessage = putError instanceof Error ? putError.message : String(putError);
+      throw new Error(`GRE request update failed. PATCH: ${patchMessage} PUT: ${putMessage}`);
+    }
+  }
 }
 
 async function getGreRefData(classCode: string) {
@@ -2304,7 +2333,7 @@ async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
   if (Number.isInteger(requestRow.proposed_invited_providers_count)) unsupportedFields.push("invited_providers_count");
 
   payload.curationList = [primaryCuration, ...curationList.slice(1)];
-  await patchGreJson("/commons-request-management-service/api/v1/request", payload, sessionId);
+  await updateGreRequestJson("/commons-request-management-service/api/v1/request", payload, sessionId);
   return { ok: true, unsupportedFields };
 }
 
@@ -6110,7 +6139,7 @@ async function assignCurator(needId: string, curatorId: string | null, actorEmai
     }
     payload.curationList = [primaryCuration, ...curationList.slice(1)];
     try {
-      await patchGreJson("/commons-request-management-service/api/v1/request", payload, sessionId);
+      await updateGreRequestJson("/commons-request-management-service/api/v1/request", payload, sessionId);
     } catch (syncError) {
       await adminClient.from("gre_mis_need_updates").insert({
         need_id: needId,
