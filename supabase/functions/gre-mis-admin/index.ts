@@ -2618,91 +2618,116 @@ function validateAiEnrichment(
   };
 }
 
-async function callAiJson(providerInput: string, prompt: string) {
-  const provider = (providerInput || defaultAiProvider || "openrouter").toLowerCase();
-  const configuredProviders = [
+function getConfiguredAiProviders() {
+  return [
     geminiApiKey ? "gemini" : "",
     openRouterApiKey ? "openrouter" : "",
     deepSeekApiKey ? "deepseek" : "",
     openAiApiKey ? "openai" : "",
   ].filter(Boolean);
-  const tryProvider = async (resolvedProvider: string) => {
-    if (resolvedProvider === "gemini") {
-      if (!geminiApiKey) throw new Error("GEMINI_API_KEY is not configured.");
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${defaultGeminiModel}:generateContent?key=${geminiApiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json" },
-        }),
-      });
-      const data = await response.json().catch(() => null);
-      const text = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("") || "";
-      if (!response.ok || !text) throw new Error(data?.error?.message || "Gemini enrichment failed.");
-      return JSON.parse(text);
-    }
+}
 
-    if (resolvedProvider === "deepseek") {
-      if (!deepSeekApiKey) throw new Error("DEEPSEEK_API_KEY is not configured.");
-      const response = await fetch("https://api.deepseek.com/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${deepSeekApiKey}`,
-        },
-        body: JSON.stringify({
-          model: defaultDeepSeekModel,
-          response_format: { type: "json_object" },
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-      const data = await response.json().catch(() => null);
-      const text = data?.choices?.[0]?.message?.content || "";
-      if (!response.ok || !text) throw new Error(data?.error?.message || "DeepSeek enrichment failed.");
-      return JSON.parse(text);
-    }
+async function callAiJsonForProvider(resolvedProvider: string, prompt: string) {
+  if (resolvedProvider === "gemini") {
+    if (!geminiApiKey) throw new Error("GEMINI_API_KEY is not configured.");
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${defaultGeminiModel}:generateContent?key=${geminiApiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json" },
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    const text = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("") || "";
+    if (!response.ok || !text) throw new Error(data?.error?.message || "Gemini enrichment failed.");
+    return JSON.parse(text);
+  }
 
-    if (resolvedProvider === "openai") {
-      if (!openAiApiKey) throw new Error("OPENAI_API_KEY is not configured.");
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openAiApiKey}`,
-        },
-        body: JSON.stringify({
-          model: defaultOpenAiModel,
-          response_format: { type: "json_object" },
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-      const data = await response.json().catch(() => null);
-      const text = data?.choices?.[0]?.message?.content || "";
-      if (!response.ok || !text) throw new Error(data?.error?.message || "OpenAI enrichment failed.");
-      return JSON.parse(text);
-    }
-
-    if (!openRouterApiKey) throw new Error("OPENROUTER_API_KEY is not configured.");
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  if (resolvedProvider === "deepseek") {
+    if (!deepSeekApiKey) throw new Error("DEEPSEEK_API_KEY is not configured.");
+    const response = await fetch("https://api.deepseek.com/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${openRouterApiKey}`,
-        "HTTP-Referer": "https://greenruraleconomy.in",
-        "X-Title": "GRE MIS Dashboard",
+        Authorization: `Bearer ${deepSeekApiKey}`,
       },
       body: JSON.stringify({
-        model: defaultOpenRouterModel,
+        model: defaultDeepSeekModel,
         response_format: { type: "json_object" },
         messages: [{ role: "user", content: prompt }],
       }),
     });
     const data = await response.json().catch(() => null);
     const text = data?.choices?.[0]?.message?.content || "";
-    if (!response.ok || !text) throw new Error(data?.error?.message || "OpenRouter enrichment failed.");
+    if (!response.ok || !text) throw new Error(data?.error?.message || "DeepSeek enrichment failed.");
     return JSON.parse(text);
-  };
+  }
+
+  if (resolvedProvider === "openai") {
+    if (!openAiApiKey) throw new Error("OPENAI_API_KEY is not configured.");
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${openAiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: defaultOpenAiModel,
+        response_format: { type: "json_object" },
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    const text = data?.choices?.[0]?.message?.content || "";
+    if (!response.ok || !text) throw new Error(data?.error?.message || "OpenAI enrichment failed.");
+    return JSON.parse(text);
+  }
+
+  if (!openRouterApiKey) throw new Error("OPENROUTER_API_KEY is not configured.");
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openRouterApiKey}`,
+      "HTTP-Referer": "https://greenruraleconomy.in",
+      "X-Title": "GRE MIS Dashboard",
+    },
+    body: JSON.stringify({
+      model: defaultOpenRouterModel,
+      response_format: { type: "json_object" },
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  const data = await response.json().catch(() => null);
+  const text = data?.choices?.[0]?.message?.content || "";
+  if (!response.ok || !text) throw new Error(data?.error?.message || "OpenRouter enrichment failed.");
+  return JSON.parse(text);
+}
+
+async function callAiJsonWithOrder(order: string[], prompt: string) {
+  const configuredProviders = getConfiguredAiProviders();
+  const fallbackOrder = [
+    ...order.map((item) => item.toLowerCase()).filter((candidate) => configuredProviders.includes(candidate)),
+    ...configuredProviders.filter((candidate) => !order.map((item) => item.toLowerCase()).includes(candidate)),
+  ];
+  if (!fallbackOrder.length) {
+    throw new Error("No AI provider is configured. Falling back to rule-based enrichment.");
+  }
+
+  let lastError: unknown = null;
+  for (const candidate of fallbackOrder) {
+    try {
+      return await callAiJsonForProvider(candidate, prompt);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("No AI provider could complete the request.");
+}
+
+async function callAiJson(providerInput: string, prompt: string) {
+  const provider = (providerInput || defaultAiProvider || "openrouter").toLowerCase();
 
   const requestedOrder = provider === "gemini"
     ? ["gemini", "openai", "openrouter", "deepseek"]
@@ -2711,25 +2736,7 @@ async function callAiJson(providerInput: string, prompt: string) {
       : provider === "openai"
         ? ["openai", "gemini", "openrouter", "deepseek"]
         : ["openrouter", "gemini", "deepseek", "openai"];
-  const fallbackOrder = [
-    ...requestedOrder.filter((candidate) => configuredProviders.includes(candidate)),
-    ...configuredProviders.filter((candidate) => !requestedOrder.includes(candidate)),
-  ];
-
-  if (!fallbackOrder.length) {
-    throw new Error("No AI provider is configured. Falling back to rule-based enrichment.");
-  }
-
-  let lastError: unknown = null;
-  for (const candidate of fallbackOrder) {
-    try {
-      return await tryProvider(candidate);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error("No AI provider could enrich the need.");
+  return await callAiJsonWithOrder(requestedOrder, prompt);
 }
 
 async function enrichNeedIntelligence(need: Record<string, unknown>, provider: string) {
@@ -5304,6 +5311,71 @@ function mergeSuggestedQuestionSection(existingNotes: string, suggestedSection: 
   return [cleanSuggested, cleanExisting].filter(Boolean).join("\n\n").trim();
 }
 
+function buildRuleBasedSuggestedQuestions(need: Record<string, unknown>) {
+  const thematicArea = requireString((need as Record<string, unknown>).submitted_thematic_area) || requireString(need.ai_thematic_area) || "this need";
+  const needType = requireString((need as Record<string, unknown>).submitted_offering_type) || requireString(need.ai_service_kind) || "support";
+  const deployment = asStringArray((need as Record<string, unknown>).deployment_locations).join(", ") || [requireString(need.district), requireString(need.state)].filter(Boolean).join(", ") || "the target location";
+  return uniqueStrings([
+    `Which exact locations in ${deployment} should we prioritize first, and how many sites or habitations are involved?`,
+    `What is the current pain point with ${thematicArea}, and what outcome would make this need feel solved for the community?`,
+    `What affordability range or budget constraint should we keep in mind before we shortlist ${needType} options?`,
+    `Who will operate and maintain the solution locally, and what village-level capacity already exists for upkeep?`,
+    `What scale do you want to reach in the next 3 to 12 months, and what constraints could slow adoption across smaller settlements?`,
+  ]).slice(0, 5);
+}
+
+async function saveSuggestedQuestionsForNeed(
+  needId: string,
+  questionsInput: unknown,
+  actorEmail: string,
+  sourceLabel: string,
+) {
+  const { data: need, error } = await adminClient
+    .from("gre_mis_needs")
+    .select("*")
+    .eq("id", needId)
+    .single();
+  if (error || !need) throw new Error(error?.message || "Need not found.");
+  if (requireString(need.approval_status) === "pending_admin") {
+    throw new Error("Suggested questions can be saved only for approved needs.");
+  }
+
+  const questions = uniqueStrings(asStringArray(questionsInput))
+    .map((question) => requireString(question).replace(/^\d+[\).\s-]*/, "").trim())
+    .filter((question) => question.length >= 12)
+    .slice(0, 5);
+  if (!questions.length) {
+    throw new Error("No valid suggested questions were provided.");
+  }
+
+  const suggestedSection = buildSuggestedQuestionSection(questions);
+  const mergedNotes = mergeSuggestedQuestionSection(requireString(need.curation_notes), suggestedSection);
+  const { error: updateError } = await adminClient
+    .from("gre_mis_needs")
+    .update({
+      curation_notes: mergedNotes,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", needId);
+  if (updateError) throw new Error(updateError.message);
+
+  await adminClient.from("gre_mis_need_updates").insert({
+    need_id: needId,
+    update_type: "suggested_questions_generated",
+    note: `Suggested curator questions generated by ${sourceLabel} flow for ${actorEmail}.`,
+    created_by_email: actorEmail,
+  });
+
+  return {
+    ok: true,
+    questions,
+    curationNotes: mergedNotes,
+    message: sourceLabel === "puter"
+      ? "Suggested questions from Puter were added to the curation notes."
+      : "Suggested questions were added to the curation notes.",
+  };
+}
+
 async function generateSuggestedQuestionsForNeed(
   needId: string,
   actorEmail: string,
@@ -5347,38 +5419,33 @@ ${JSON.stringify({
   }, null, 2)}
 `;
 
-  const ai = await callAiJson("gemini", prompt);
-  const questions = uniqueStrings(asStringArray(ai.questions))
-    .map((question) => requireString(question).replace(/^\d+[\).\s-]*/, "").trim())
-    .filter((question) => question.length >= 12)
-    .slice(0, 5);
-  if (questions.length < 5) {
-    throw new Error("AI did not return enough suggested questions.");
+  let questions: string[] = [];
+  let generationMode = "ai";
+  try {
+    const ai = await callAiJsonWithOrder(["gemini", "openai"], prompt);
+    questions = uniqueStrings(asStringArray(ai.questions))
+      .map((question) => requireString(question).replace(/^\d+[\).\s-]*/, "").trim())
+      .filter((question) => question.length >= 12)
+      .slice(0, 5);
+    if (questions.length < 5) {
+      throw new Error("AI did not return enough suggested questions.");
+    }
+  } catch {
+    questions = buildRuleBasedSuggestedQuestions(need);
+    generationMode = "rules";
   }
 
-  const suggestedSection = buildSuggestedQuestionSection(questions);
-  const mergedNotes = mergeSuggestedQuestionSection(requireString(need.curation_notes), suggestedSection);
-  const { error: updateError } = await adminClient
-    .from("gre_mis_needs")
-    .update({
-      curation_notes: mergedNotes,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", needId);
-  if (updateError) throw new Error(updateError.message);
-
-  await adminClient.from("gre_mis_need_updates").insert({
-    need_id: needId,
-    update_type: "suggested_questions_generated",
-    note: `Suggested curator questions generated by AI for ${actorEmail}.`,
-    created_by_email: actorEmail,
-  });
-
-  return {
-    ok: true,
+  const saved = await saveSuggestedQuestionsForNeed(
+    needId,
     questions,
-    curationNotes: mergedNotes,
-    message: "Suggested questions were added to the curation notes.",
+    actorEmail,
+    generationMode,
+  );
+  return {
+    ...saved,
+    message: generationMode === "ai"
+      ? "Suggested questions were added to the curation notes."
+      : "Suggested questions were added using the fallback question generator.",
   };
 }
 
@@ -6605,6 +6672,15 @@ Deno.serve(async (req) => {
 
       if (action === "generateNeedSuggestedQuestions") {
         return jsonResponse(await generateSuggestedQuestionsForNeed(requireString(payload.needId), adminActorEmail));
+      }
+
+      if (action === "saveNeedSuggestedQuestions") {
+        return jsonResponse(await saveSuggestedQuestionsForNeed(
+          requireString(payload.needId),
+          payload.questions,
+          adminActorEmail,
+          requireString(payload.sourceLabel) || "manual",
+        ));
       }
 
       if (action === "applyNeedOverride") {

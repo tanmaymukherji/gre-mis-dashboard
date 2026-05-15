@@ -1957,6 +1957,10 @@ class GreMisStore {
     return this.callAdmin("generateNeedSuggestedQuestions", { needId }, true);
   }
 
+  async saveNeedSuggestedQuestions(needId, questions, sourceLabel = "puter") {
+    return this.callAdmin("saveNeedSuggestedQuestions", { needId, questions, sourceLabel }, true);
+  }
+
   async searchLgdGeographies(query) {
     const client = this.getClient();
     const search = normalizeText(query);
@@ -3520,7 +3524,7 @@ function renderNeedDetail() {
 
         <div class="selected-need-actions">
          ${isLoggedIn() ? `<button type="button" id="openWorkbenchBtn" class="btn btn-primary">Open Action Workbench</button>` : ""}
-         ${isAdminUser() ? `<button type="button" class="btn btn-secondary" data-action="generate-suggested-questions" data-need-id="${esc(need.id)}">Generate Suggested Questions</button>` : ""}
+         ${isAdminUser() ? `<button type="button" class="btn btn-secondary" data-action="generate-suggested-questions" data-need-id="${esc(need.id)}">Generate Suggested Questions</button><button type="button" class="btn btn-secondary" data-action="generate-suggested-questions-puter" data-need-id="${esc(need.id)}">Use Puter for Questions</button>` : ""}
         </div>
       </div>
     `;
@@ -3909,6 +3913,39 @@ JSON schema:
 }`.trim();
 }
 
+function buildPuterSuggestedQuestionsPrompt(need) {
+  return `
+You are preparing a curator for a rural need-assessment call.
+Return only valid JSON.
+
+Need record:
+${JSON.stringify({
+  id: need.id,
+  organization_name: need.organization_name,
+  state: need.state,
+  district: need.district,
+  thematic_area: need.submitted_thematic_area || need.ai_thematic_area,
+  need_category: need.submitted_offering_category || need.ai_need_kind,
+  need_type: need.submitted_offering_type || need.ai_service_kind,
+  keywords: parseArray(need.submitted_keywords),
+  problem_statement: need.problem_statement,
+  curation_notes: need.curation_notes,
+}, null, 2)}
+
+Return:
+{
+  "questions": ["", "", "", "", ""]
+}
+
+Rules:
+- return exactly 5 probing questions
+- make them practical for a curator call
+- prioritize deployment context, pain point, budget, maintenance, and scale/adoption
+- each question should be concise
+- do not include numbering in the JSON
+`.trim();
+}
+
 function normalizeNeedReviewSuggestion(payload) {
   return {
     thematic_area: normalizeText(payload?.thematic_area),
@@ -3934,6 +3971,20 @@ async function runPuterNeedReview(needId) {
   state.puterRecommendations[needId] = suggestion;
   renderAdminQueue();
   return suggestion;
+}
+
+async function runPuterSuggestedQuestions(needId) {
+  const need = state.data.needs.find((item) => item.id === needId) || state.data.localNeeds.find((item) => item.id === needId) || state.data.aiReviewNeeds.find((item) => item.id === needId);
+  if (!need) throw new Error("Need not found for Puter question generation.");
+  const text = await runPuterChat(buildPuterSuggestedQuestionsPrompt(need));
+  const parsed = parseJsonObject(text);
+  const questions = parseArray(parsed?.questions).map((item) => normalizeText(item)).filter((item) => item.length >= 12).slice(0, 5);
+  if (!questions.length) {
+    throw new Error("Puter did not return usable suggested questions.");
+  }
+  const result = await store.saveNeedSuggestedQuestions(needId, questions, "puter");
+  await refreshAll();
+  return result;
 }
 
 function renderAdminQueue() {
@@ -4069,11 +4120,12 @@ function renderAdminQueue() {
                       <p class="helper-text">${esc(recommendation.summary || "")}</p>
                       <div class="card-actions">
                         <button class="btn btn-secondary" data-action="generate-suggested-questions" data-need-id="${esc(need.id)}">Generate Questions</button>
+                        <button class="btn btn-secondary" data-action="generate-suggested-questions-puter" data-need-id="${esc(need.id)}">Use Puter</button>
                         <button class="btn btn-primary" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="all">Accept All</button>
                       </div>
                     </div>
                   `
-                  : `<div class="card-actions"><button class="btn btn-secondary" data-action="run-puter-need-review" data-need-id="${esc(need.id)}">Puter Suggest Review</button><button class="btn btn-secondary" data-action="generate-suggested-questions" data-need-id="${esc(need.id)}">Generate Questions</button></div>`;
+                  : `<div class="card-actions"><button class="btn btn-secondary" data-action="run-puter-need-review" data-need-id="${esc(need.id)}">Puter Suggest Review</button><button class="btn btn-secondary" data-action="generate-suggested-questions" data-need-id="${esc(need.id)}">Generate Questions</button><button class="btn btn-secondary" data-action="generate-suggested-questions-puter" data-need-id="${esc(need.id)}">Use Puter</button></div>`;
               return `
                 <article class="approval-card">
                   <div class="status-row">
@@ -4468,6 +4520,7 @@ function renderLocalNeedManagement() {
             <p class="helper-text">${esc(clipText(item.problem_statement || "", 180) || "No statement available.")}</p>
             <div class="card-actions">
               <button class="btn btn-secondary" type="button" data-action="generate-suggested-questions" data-need-id="${esc(item.id)}">Generate Questions</button>
+              <button class="btn btn-secondary" type="button" data-action="generate-suggested-questions-puter" data-need-id="${esc(item.id)}">Use Puter</button>
               <button class="btn btn-secondary" type="button" data-action="edit-local-need" data-need-id="${esc(item.id)}">Edit</button>
               <button class="btn btn-danger" type="button" data-action="delete-local-need" data-need-id="${esc(item.id)}">Delete</button>
             </div>
@@ -5538,6 +5591,14 @@ function bindStaticEvents() {
       })();
       return;
     }
+    const puterQuestionButton = event.target.closest('[data-action="generate-suggested-questions-puter"]');
+    if (puterQuestionButton) {
+      safeAsync(async () => {
+        const result = await runPuterSuggestedQuestions(puterQuestionButton.dataset.needId);
+        toast(result.message || "Suggested questions from Puter were added to curation notes.");
+      })();
+      return;
+    }
     const button = event.target.closest("#openWorkbenchBtn");
     if (!button) return;
     workbenchDialog?.showModal();
@@ -5683,6 +5744,10 @@ function bindStaticEvents() {
         const result = await store.generateNeedSuggestedQuestions(button.dataset.needId);
         await refreshAll();
         toast(result.message || "Suggested questions added to curation notes.");
+      }
+      if (button.dataset.action === "generate-suggested-questions-puter") {
+        const result = await runPuterSuggestedQuestions(button.dataset.needId);
+        toast(result.message || "Suggested questions from Puter were added to curation notes.");
       }
       if (button.dataset.action === "accept-need-override") {
         const needId = button.dataset.needId;
