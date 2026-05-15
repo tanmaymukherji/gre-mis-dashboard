@@ -2284,7 +2284,8 @@ async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
 
   const payload = structuredClone(greRequest);
   const curationList = Array.isArray(payload.curationList) ? payload.curationList : [];
-  const primaryCuration = curationList[0] || {
+  const selectedCurationIndex = selectGreCurationIndex(curationList, requestRow);
+  const primaryCuration = curationList[selectedCurationIndex] || {
     requestId: Number(needId),
     curatorUserId: null,
     curatorUserName: null,
@@ -2332,7 +2333,9 @@ async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
   if (Number.isInteger(requestRow.proposed_solutions_shared_count)) unsupportedFields.push("solutions_shared_count");
   if (Number.isInteger(requestRow.proposed_invited_providers_count)) unsupportedFields.push("invited_providers_count");
 
-  payload.curationList = [primaryCuration, ...curationList.slice(1)];
+  const nextCurationList = [...curationList];
+  nextCurationList[selectedCurationIndex] = primaryCuration;
+  payload.curationList = nextCurationList;
   await updateGreRequestJson("/commons-request-management-service/api/v1/request", payload, sessionId);
   const { data: verifiedRequest } = await fetchGreJson(
     `/commons-request-management-service/api/v1/request?id=${encodeURIComponent(needId)}`,
@@ -2340,8 +2343,8 @@ async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
   );
   const verifiedPayload = (verifiedRequest && typeof verifiedRequest === "object") ? verifiedRequest as Record<string, unknown> : {};
   const verifiedCurationList = Array.isArray(verifiedPayload.curationList) ? verifiedPayload.curationList : [];
-  const verifiedPrimaryCuration = (verifiedCurationList[0] && typeof verifiedCurationList[0] === "object")
-    ? verifiedCurationList[0] as Record<string, unknown>
+  const verifiedPrimaryCuration = (verifiedCurationList[selectedCurationIndex] && typeof verifiedCurationList[selectedCurationIndex] === "object")
+    ? verifiedCurationList[selectedCurationIndex] as Record<string, unknown>
     : {};
 
   if (requestRow.proposed_status) {
@@ -2380,6 +2383,20 @@ async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
     }
   }
   return { ok: true, unsupportedFields };
+}
+
+function selectGreCurationIndex(curationList: unknown[], requestRow: Record<string, unknown>) {
+  if (!Array.isArray(curationList) || !curationList.length) return 0;
+  const wantsNotes = Boolean(requireString(requestRow.proposed_curation_notes));
+  const wantsDate = Boolean(requireString(requestRow.proposed_curation_call_date));
+  if (wantsNotes || wantsDate) {
+    const withExistingDetail = curationList.findIndex((entry) => {
+      const row = (entry && typeof entry === "object") ? entry as Record<string, unknown> : {};
+      return Boolean(requireString(row.callDetails) || requireString(row.callDate));
+    });
+    if (withExistingDetail >= 0) return withExistingDetail;
+  }
+  return 0;
 }
 
 function stableRowSignature(value: unknown) {
@@ -6433,6 +6450,19 @@ async function debugGreNeedSync(needId: string) {
         callDetails: primaryCuration.callDetails ?? null,
         demandBroadcastNeed: primaryCuration.demandBroadcastNeed ?? null,
       },
+      curationListSummary: curationList.map((entry, index) => {
+        const row = (entry && typeof entry === "object") ? entry as Record<string, unknown> : {};
+        return {
+          index,
+          id: row.id ?? row.curationId ?? null,
+          curatorUserId: row.curatorUserId ?? null,
+          curatorUserName: row.curatorUserName ?? null,
+          callDate: row.callDate ?? null,
+          hasCallDetails: Boolean(requireString(row.callDetails)),
+          demandBroadcastNeed: row.demandBroadcastNeed ?? null,
+          updatedAt: row.updatedAt ?? row.lastUpdatedAt ?? null,
+        };
+      }),
     },
     sessionActive: Boolean(sessionId),
   };
