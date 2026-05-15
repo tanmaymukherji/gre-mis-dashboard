@@ -551,11 +551,11 @@ type GreUserResolution = {
   profile?: Record<string, unknown> | null;
 };
 
-async function fetchGreJson(path: string) {
-  const sessionId = await loginToGre();
+async function fetchGreJson(path: string, sessionId?: string) {
+  const resolvedSessionId = sessionId || await loginToGre();
   const response = await fetch(`${greLoginBaseUrl}${path}`, {
     headers: {
-      "x-sessionid": sessionId,
+      "x-sessionid": resolvedSessionId,
       Accept: "application/json, text/plain, */*",
       Origin: greSiteOrigin,
       Referer: `${greSiteOrigin}/`,
@@ -565,7 +565,7 @@ async function fetchGreJson(path: string) {
   if (!response.ok) {
     throw new Error(data?.error?.message || data?.message || `GRE request failed for ${path}.`);
   }
-  return { sessionId, data };
+  return { sessionId: resolvedSessionId, data };
 }
 
 async function requestGreGatewayJson(
@@ -2334,6 +2334,51 @@ async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
 
   payload.curationList = [primaryCuration, ...curationList.slice(1)];
   await updateGreRequestJson("/commons-request-management-service/api/v1/request", payload, sessionId);
+  const { data: verifiedRequest } = await fetchGreJson(
+    `/commons-request-management-service/api/v1/request?id=${encodeURIComponent(needId)}`,
+    sessionId,
+  );
+  const verifiedPayload = (verifiedRequest && typeof verifiedRequest === "object") ? verifiedRequest as Record<string, unknown> : {};
+  const verifiedCurationList = Array.isArray(verifiedPayload.curationList) ? verifiedPayload.curationList : [];
+  const verifiedPrimaryCuration = (verifiedCurationList[0] && typeof verifiedCurationList[0] === "object")
+    ? verifiedCurationList[0] as Record<string, unknown>
+    : {};
+
+  if (requestRow.proposed_status) {
+    const nextCode = requireString(((verifiedPayload.status || {}) as Record<string, unknown>).code);
+    const expectedCode = requireString((payload.status || {}).code);
+    if (expectedCode && nextCode !== expectedCode) {
+      throw new Error(`GRE verification failed for status. Expected ${expectedCode}, found ${nextCode || "blank"}.`);
+    }
+  }
+  if (requestRow.proposed_internal_status) {
+    const nextCode = requireString(((verifiedPayload.internalStatus || {}) as Record<string, unknown>).code);
+    const expectedCode = requireString((payload.internalStatus || {}).code);
+    if (expectedCode && nextCode !== expectedCode) {
+      throw new Error(`GRE verification failed for internal status. Expected ${expectedCode}, found ${nextCode || "blank"}.`);
+    }
+  }
+  if (requestRow.proposed_curation_notes) {
+    const verifiedNotes = requireString(verifiedPrimaryCuration.callDetails);
+    const expectedNotes = requireString(primaryCuration.callDetails);
+    if (expectedNotes && verifiedNotes !== expectedNotes) {
+      throw new Error("GRE verification failed for curation notes.");
+    }
+  }
+  if (requestRow.proposed_curation_call_date) {
+    const verifiedDate = requireString(verifiedPrimaryCuration.callDate);
+    const expectedDate = requireString(primaryCuration.callDate);
+    if (expectedDate && verifiedDate !== expectedDate) {
+      throw new Error(`GRE verification failed for curation call date. Expected ${expectedDate}, found ${verifiedDate || "blank"}.`);
+    }
+  }
+  if (typeof requestRow.proposed_demand_broadcast_needed === "boolean") {
+    const nextCode = requireString((((verifiedPrimaryCuration.demandBroadcastNeed || {}) as Record<string, unknown>).code));
+    const expectedCode = requireString((((primaryCuration.demandBroadcastNeed || {}) as Record<string, unknown>).code));
+    if (expectedCode && nextCode !== expectedCode) {
+      throw new Error(`GRE verification failed for demand broadcast flag. Expected ${expectedCode}, found ${nextCode || "blank"}.`);
+    }
+  }
   return { ok: true, unsupportedFields };
 }
 
@@ -6324,6 +6369,41 @@ async function directCuratorUpdate(payload: Record<string, unknown>, userCtx: { 
   };
 }
 
+async function debugGreNeedSync(needId: string) {
+  const normalizedNeedId = requireString(needId);
+  if (!normalizedNeedId) throw new Error("Need ID is required.");
+  const { data: misNeed, error: misError } = await adminClient
+    .from("gre_mis_needs")
+    .select("id, organization_name, status, internal_status, next_action, curation_notes, curation_call_date, demand_broadcast_needed, updated_at, source_kind")
+    .eq("id", normalizedNeedId)
+    .maybeSingle();
+  if (misError) throw new Error(misError.message);
+  const { sessionId, data: greRequest } = await fetchGreJson(`/commons-request-management-service/api/v1/request?id=${encodeURIComponent(normalizedNeedId)}`);
+  const payload = (greRequest && typeof greRequest === "object") ? greRequest as Record<string, unknown> : {};
+  const curationList = Array.isArray(payload.curationList) ? payload.curationList : [];
+  const primaryCuration = (curationList[0] && typeof curationList[0] === "object") ? curationList[0] as Record<string, unknown> : {};
+  return {
+    ok: true,
+    needId: normalizedNeedId,
+    mis: misNeed || null,
+    gre: {
+      id: requireString(payload.id || payload.requestId),
+      status: payload.status || null,
+      internalStatus: payload.internalStatus || null,
+      nextAction: payload.nextAction || null,
+      curationListCount: curationList.length,
+      primaryCuration: {
+        curatorUserId: primaryCuration.curatorUserId ?? null,
+        curatorUserName: primaryCuration.curatorUserName ?? null,
+        callDate: primaryCuration.callDate ?? null,
+        callDetails: primaryCuration.callDetails ?? null,
+        demandBroadcastNeed: primaryCuration.demandBroadcastNeed ?? null,
+      },
+    },
+    sessionActive: Boolean(sessionId),
+  };
+}
+
 async function reviewUpdateRequest(requestId: string, decision: string, reviewNotes: string, actorEmail: string) {
   const { data: requestRow, error: requestError } = await adminClient
     .from("gre_mis_update_requests")
@@ -6678,6 +6758,10 @@ Deno.serve(async (req) => {
 
     if (action === "reviewUpdateRequest") {
       return jsonResponse(await reviewUpdateRequest(requireString(payload.requestId), requireString(payload.decision), requireString(payload.reviewNotes), adminActorEmail));
+    }
+
+    if (action === "debugGreNeedSync") {
+      return jsonResponse(await debugGreNeedSync(requireString(payload.needId)));
     }
 
     if (action === "reviewFormSubmission") {
