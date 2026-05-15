@@ -6174,10 +6174,26 @@ async function assignCurator(needId: string, curatorId: string | null, actorEmai
     if (curatorId) {
       const { data: curatorRow } = await adminClient
         .from("gre_mis_curators")
-        .select("display_name")
+        .select("display_name, user_id")
         .eq("id", curatorId)
         .maybeSingle();
-      primaryCuration.curatorUserName = curatorRow?.display_name || primaryCuration.curatorUserName || null;
+      let greCuratorUserId: number | null = null;
+      let greCuratorName = curatorRow?.display_name || primaryCuration.curatorUserName || null;
+      const mappedUserId = requireString(curatorRow?.user_id);
+      if (mappedUserId) {
+        const { data: mappedUser } = await adminClient
+          .from("gre_mis_users")
+          .select("full_name, first_name, gre_user_id")
+          .eq("id", mappedUserId)
+          .maybeSingle();
+        greCuratorUserId = parseNumber(mappedUser?.gre_user_id, 0) || null;
+        greCuratorName =
+          requireString(mappedUser?.full_name) ||
+          requireString(mappedUser?.first_name) ||
+          greCuratorName;
+      }
+      primaryCuration.curatorUserId = greCuratorUserId;
+      primaryCuration.curatorUserName = greCuratorName || null;
     } else {
       primaryCuration.curatorUserName = null;
       primaryCuration.curatorUserId = null;
@@ -6185,6 +6201,24 @@ async function assignCurator(needId: string, curatorId: string | null, actorEmai
     payload.curationList = [primaryCuration, ...curationList.slice(1)];
     try {
       await updateGreRequestJson("/commons-request-management-service/api/v1/request", payload, sessionId);
+      const { data: verifiedRequest } = await fetchGreJson(
+        `/commons-request-management-service/api/v1/request?id=${encodeURIComponent(needId)}`,
+        sessionId,
+      );
+      const verifiedPayload = (verifiedRequest && typeof verifiedRequest === "object") ? verifiedRequest as Record<string, unknown> : {};
+      const verifiedCurationList = Array.isArray(verifiedPayload.curationList) ? verifiedPayload.curationList : [];
+      const verifiedPrimaryCuration = (verifiedCurationList[0] && typeof verifiedCurationList[0] === "object")
+        ? verifiedCurationList[0] as Record<string, unknown>
+        : {};
+      const expectedCuratorId = parseNumber(primaryCuration.curatorUserId, 0) || null;
+      const actualCuratorId = parseNumber(verifiedPrimaryCuration.curatorUserId, 0) || null;
+      const expectedCuratorName = requireString(primaryCuration.curatorUserName);
+      const actualCuratorName = requireString(verifiedPrimaryCuration.curatorUserName);
+      if (curatorId && ((expectedCuratorId && actualCuratorId !== expectedCuratorId) || (expectedCuratorName && actualCuratorName !== expectedCuratorName))) {
+        throw new Error(
+          `GRE curator verification failed. Expected ${expectedCuratorName || expectedCuratorId || "assigned curator"}, found ${actualCuratorName || actualCuratorId || "blank"}.`,
+        );
+      }
     } catch (syncError) {
       await adminClient.from("gre_mis_need_updates").insert({
         need_id: needId,
