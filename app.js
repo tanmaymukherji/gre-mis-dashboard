@@ -5694,6 +5694,7 @@ function bindStaticEvents() {
       });
       event.target.reset();
       await refreshAll();
+      workbenchDialog?.close();
       toast("Curation update saved and synced to GRE.");
       return;
     }
