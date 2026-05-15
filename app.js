@@ -1953,6 +1953,10 @@ class GreMisStore {
     return this.callAdmin("suggestNeedTags", { payload }, false);
   }
 
+  async generateNeedSuggestedQuestions(needId) {
+    return this.callAdmin("generateNeedSuggestedQuestions", { needId }, true);
+  }
+
   async searchLgdGeographies(query) {
     const client = this.getClient();
     const search = normalizeText(query);
@@ -2984,6 +2988,20 @@ function fillSubmissionReviewTraderSelect(selectedId = "") {
   select.innerHTML = buildSupplierOptionsHtml(selectedId);
 }
 
+function getSubmissionReviewNeedDraft() {
+  const form = byId("submissionReviewForm");
+  if (!form) return null;
+  return {
+    organization_name: normalizeText(form.querySelector('[name="organization_name"]')?.value || ""),
+    offering_category: normalizeText(form.querySelector('[data-review-field="offering_category"]')?.value || ""),
+    offering_type: normalizeText(form.querySelector('[data-review-field="offering_type"]')?.value || ""),
+    thematic_area: normalizeText(form.querySelector('[data-review-field="thematic_area"]')?.value || ""),
+    problem_statement: normalizeText(form.querySelector('[data-review-field="problem_statement"]')?.value || ""),
+    deployment_locations: parseLooseListInput(form.querySelector('[data-review-field="deployment_locations"]')?.value || ""),
+    keywords: parseLooseListInput(form.querySelector('[data-review-field="keywords"]')?.value || ""),
+  };
+}
+
 async function buildSubmissionReviewPatch() {
   const form = byId("submissionReviewForm");
   if (!form) throw new Error("Submission review form is unavailable.");
@@ -3059,6 +3077,10 @@ function openSubmissionReviewDialog(submissionId) {
   fillSubmissionReviewTraderSelect(submission.existing_trader_id || payload.existing_trader_id || "");
   renderSubmissionReviewFields(submission.submission_type, payload);
   renderSubmissionReviewAttachments(submission.submission_type, payload);
+  const needTools = byId("submissionReviewNeedTools");
+  const needToolsStatus = byId("submissionNeedToolsStatus");
+  if (needTools) needTools.classList.toggle("hidden", submission.submission_type !== "need");
+  if (needToolsStatus) needToolsStatus.textContent = "";
   meta.innerHTML = `
     <div><strong>Submission Type:</strong> ${esc(submission.submission_type)}</div>
     <div><strong>Source:</strong> ${esc(submission.source_mode || "shared_link")}</div>
@@ -3390,7 +3412,11 @@ function renderNeedDetail() {
 
   const curator = getCuratorById(need.curator_id);
   const solutionLinks = extractUrls(need.curation_notes);
-  const noteText = normalizeText(stripUrls(need.curation_notes)).replace(/\bnull\b/gi, "").replace(/\s+/g, " ").trim();
+  const noteText = String(stripUrls(need.curation_notes || ""))
+    .replace(/\r/g, "")
+    .replace(/\bnull\b/gi, "")
+    .trim();
+  const noteHtml = noteText ? esc(noteText).replace(/\n/g, "<br>") : "";
   const canInspectCuration = canSeeCurationDetails();
   const summaryBadges = [
     { label: need.status, tone: badgeTone(need.status) },
@@ -3470,10 +3496,10 @@ function renderNeedDetail() {
         </article>
       </div>
 
-      ${canInspectCuration
-        ? `<article class="detail-card detail-stack-card">
-            <h4>Curation Notes</h4>
-            ${noteText ? `<p class="detail-note">${esc(noteText)}</p>` : `<p class="detail-note">No curation notes have been recorded yet.</p>`}
+        ${canInspectCuration
+          ? `<article class="detail-card detail-stack-card">
+             <h4>Curation Notes</h4>
+             ${noteText ? `<p class="detail-note">${noteHtml}</p>` : `<p class="detail-note">No curation notes have been recorded yet.</p>`}
             ${
               solutionLinks.length
                 ? `<div class="detail-links">
@@ -3490,13 +3516,14 @@ function renderNeedDetail() {
                 : ""
             }
           </article>`
-        : ""}
+          : ""}
 
-      <div class="selected-need-actions">
-        ${isLoggedIn() ? `<button type="button" id="openWorkbenchBtn" class="btn btn-primary">Open Action Workbench</button>` : ""}
+        <div class="selected-need-actions">
+         ${isLoggedIn() ? `<button type="button" id="openWorkbenchBtn" class="btn btn-primary">Open Action Workbench</button>` : ""}
+         ${isAdminUser() ? `<button type="button" class="btn btn-secondary" data-action="generate-suggested-questions" data-need-id="${esc(need.id)}">Generate Suggested Questions</button>` : ""}
+        </div>
       </div>
-    </div>
-  `;
+    `;
 }
 
 function buildMatchDetailHtml(match) {
@@ -3977,11 +4004,11 @@ function renderAdminQueue() {
               const summaryText = isNeed
                 ? normalizeText(payload.problem_statement || "")
                 : normalizeText(payload.about_offering_text || payload.about_solution_text || payload.solution_name || payload.offering_name || "");
-              const categoryLine = isNeed
-                ? [payload.need_kind, payload.service_kind, payload.thematic_area, payload.application_area].filter(Boolean).join(" / ")
-                : [
-                    payload.offering_category,
-                    payload.offering_type,
+                const categoryLine = isNeed
+                  ? [payload.offering_category, payload.offering_type, payload.thematic_area].filter(Boolean).join(" / ")
+                  : [
+                      payload.offering_category,
+                      payload.offering_type,
                     payload.primary_valuechain,
                     payload.primary_application,
                   ].filter(Boolean).join(" / ");
@@ -4038,14 +4065,15 @@ function renderAdminQueue() {
                       <div><strong>Need Kind:</strong> ${esc(recommendation.need_kind || "Not set")}${recommendation.service_kind ? ` / ${esc(recommendation.service_kind)}` : ""} <button class="btn btn-secondary btn-mini" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="need_kind">Accept</button></div>
                       <div><strong>6M:</strong> ${esc(recommendation.six_m_signals.join(", ") || "None")} <button class="btn btn-secondary btn-mini" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="six_m_signals">Accept</button></div>
                       <div><strong>Keywords:</strong> ${esc(recommendation.keywords.join(", ") || "None")} <button class="btn btn-secondary btn-mini" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="keywords">Accept</button></div>
+                      </div>
+                      <p class="helper-text">${esc(recommendation.summary || "")}</p>
+                      <div class="card-actions">
+                        <button class="btn btn-secondary" data-action="generate-suggested-questions" data-need-id="${esc(need.id)}">Generate Questions</button>
+                        <button class="btn btn-primary" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="all">Accept All</button>
+                      </div>
                     </div>
-                    <p class="helper-text">${esc(recommendation.summary || "")}</p>
-                    <div class="card-actions">
-                      <button class="btn btn-primary" data-action="accept-need-override" data-need-id="${esc(need.id)}" data-override-field="all">Accept All</button>
-                    </div>
-                  </div>
-                `
-                : `<div class="card-actions"><button class="btn btn-secondary" data-action="run-puter-need-review" data-need-id="${esc(need.id)}">Puter Suggest Review</button></div>`;
+                  `
+                  : `<div class="card-actions"><button class="btn btn-secondary" data-action="run-puter-need-review" data-need-id="${esc(need.id)}">Puter Suggest Review</button><button class="btn btn-secondary" data-action="generate-suggested-questions" data-need-id="${esc(need.id)}">Generate Questions</button></div>`;
               return `
                 <article class="approval-card">
                   <div class="status-row">
@@ -4439,6 +4467,7 @@ function renderLocalNeedManagement() {
             </div>
             <p class="helper-text">${esc(clipText(item.problem_statement || "", 180) || "No statement available.")}</p>
             <div class="card-actions">
+              <button class="btn btn-secondary" type="button" data-action="generate-suggested-questions" data-need-id="${esc(item.id)}">Generate Questions</button>
               <button class="btn btn-secondary" type="button" data-action="edit-local-need" data-need-id="${esc(item.id)}">Edit</button>
               <button class="btn btn-danger" type="button" data-action="delete-local-need" data-need-id="${esc(item.id)}">Delete</button>
             </div>
@@ -4710,7 +4739,7 @@ async function collectSubmissionPayload(form, submissionType = "need") {
       need_kind: offeringCategory.replace(/\s+offerings$/i, "").toLowerCase(),
       service_kind: offeringCategory === "Service offerings" ? offeringType : "",
       thematic_area: thematicArea,
-      keywords: parseArray(entries.keywords),
+      keywords: [],
       deployment_locations: deploymentLocations,
       state: stateFromDeployment || "",
       district: districtFromDeployment || "",
@@ -5500,6 +5529,15 @@ function bindStaticEvents() {
   }));
 
   byId("needDetail")?.addEventListener("click", (event) => {
+    const questionButton = event.target.closest('[data-action="generate-suggested-questions"]');
+    if (questionButton) {
+      safeAsync(async () => {
+        const result = await store.generateNeedSuggestedQuestions(questionButton.dataset.needId);
+        await refreshAll();
+        toast(result.message || "Suggested questions added to curation notes.");
+      })();
+      return;
+    }
     const button = event.target.closest("#openWorkbenchBtn");
     if (!button) return;
     workbenchDialog?.showModal();
@@ -5551,8 +5589,24 @@ function bindStaticEvents() {
     const result = await store.updateFormSubmission(patch.submissionId, patch.update);
     await refreshAll();
     openSubmissionReviewDialog(patch.submissionId);
-    if (status) status.textContent = result.message || "Submission changes saved.";
-    toast(result.message || "Submission changes saved.");
+      if (status) status.textContent = result.message || "Submission changes saved.";
+      toast(result.message || "Submission changes saved.");
+    }));
+
+  byId("generateSubmissionNeedKeywordsBtn")?.addEventListener("click", safeAsync(async () => {
+    const status = byId("submissionNeedToolsStatus");
+    const draft = getSubmissionReviewNeedDraft();
+    if (!draft) return;
+    if (!draft.problem_statement) {
+      throw new Error("Please add the need statement before generating keywords.");
+    }
+    if (status) status.textContent = "Generating AI-assisted keywords from the current need draft...";
+    const result = await store.suggestNeedTags(draft);
+    const keywordField = byId("submissionReviewForm")?.querySelector('[data-review-field="keywords"]');
+    if (keywordField) {
+      keywordField.value = parseArray(result.tags).join(", ");
+    }
+    if (status) status.textContent = result.message || "AI-assisted keywords added to the review draft.";
   }));
 
   byId("approveSubmissionReviewBtn")?.addEventListener("click", safeAsync(async () => {
@@ -5618,17 +5672,22 @@ function bindStaticEvents() {
       await refreshAll();
       toast("Form submission rejected.");
     }
-    if (button.dataset.action === "run-puter-need-review") {
-      const status = byId("puterStatus");
-      if (status) status.textContent = `Running Puter review for Need ${button.dataset.needId}...`;
-      await runPuterNeedReview(button.dataset.needId);
-      if (status) status.textContent = `Puter recommendation ready for Need ${button.dataset.needId}.`;
-      toast("Puter recommendation prepared.");
-    }
-    if (button.dataset.action === "accept-need-override") {
-      const needId = button.dataset.needId;
-      const field = button.dataset.overrideField;
-      const patch = buildNeedOverridePatch(needId, field);
+      if (button.dataset.action === "run-puter-need-review") {
+        const status = byId("puterStatus");
+        if (status) status.textContent = `Running Puter review for Need ${button.dataset.needId}...`;
+        await runPuterNeedReview(button.dataset.needId);
+        if (status) status.textContent = `Puter recommendation ready for Need ${button.dataset.needId}.`;
+        toast("Puter recommendation prepared.");
+      }
+      if (button.dataset.action === "generate-suggested-questions") {
+        const result = await store.generateNeedSuggestedQuestions(button.dataset.needId);
+        await refreshAll();
+        toast(result.message || "Suggested questions added to curation notes.");
+      }
+      if (button.dataset.action === "accept-need-override") {
+        const needId = button.dataset.needId;
+        const field = button.dataset.overrideField;
+        const patch = buildNeedOverridePatch(needId, field);
       const recommendation = getNeedRecommendation(needId);
       await store.applyNeedOverride(needId, patch, recommendation?.conflict_reason || "", field === "all");
       await refreshAll();

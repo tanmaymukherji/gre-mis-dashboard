@@ -563,17 +563,6 @@
                     <div id="needDeploymentChips" class="tag-cloud tag-chip-editor"></div>
                     <datalist id="needDeploymentOptions"></datalist>
                   </div>
-                  <div class="wide choice-block">
-                    <span class="field-label">Keywords for Need Statement</span>
-                    <div class="tag-entry-row">
-                      <input id="needTagEntry" list="needTagOptions" placeholder="Type a keyword and press Enter" />
-                      <button type="button" id="addNeedTagBtn" class="btn btn-secondary btn-compact">Add Keywords</button>
-                      <button type="button" id="generateNeedTagsBtn" class="btn btn-secondary btn-compact">AI Assisted Keyword</button>
-                    </div>
-                    <input type="hidden" name="keywords" id="needTagsInput" />
-                    <div id="needTagChips" class="tag-cloud tag-chip-editor"></div>
-                    <datalist id="needTagOptions"></datalist>
-                  </div>
                 </div>
               </section>
 
@@ -929,15 +918,19 @@
           <textarea name="admin_review_notes" rows="3" placeholder="Optional notes for the submission record"></textarea>
         </label>
       </div>
-      <section class="panel panel-soft">
-        <div class="panel-head panel-head-tight">
-          <div>
-            <p class="eyebrow">Editable Fields</p>
-            <h4 id="submissionStructuredTitle">Submission Details</h4>
+        <section class="panel panel-soft">
+          <div class="panel-head panel-head-tight">
+            <div>
+              <p class="eyebrow">Editable Fields</p>
+              <h4 id="submissionStructuredTitle">Submission Details</h4>
+            </div>
           </div>
-        </div>
-        <div id="submissionReviewFields" class="form-grid"></div>
-      </section>
+          <div id="submissionReviewNeedTools" class="card-actions hidden">
+            <button type="button" id="generateSubmissionNeedKeywordsBtn" class="btn btn-secondary">AI Assisted Keyword</button>
+            <span id="submissionNeedToolsStatus" class="helper-text"></span>
+          </div>
+          <div id="submissionReviewFields" class="form-grid"></div>
+        </section>
       <section id="submissionReviewAttachmentsSection" class="panel panel-soft">
         <div class="panel-head panel-head-tight">
           <div>
@@ -1081,6 +1074,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260511d"></script>
-</body>
-</html>
+    <script type="module" src="./app.js?v=20260515a"></script>
+  </body>
+  </html>

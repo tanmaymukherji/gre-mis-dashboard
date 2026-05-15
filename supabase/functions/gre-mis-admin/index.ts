@@ -2705,11 +2705,11 @@ async function callAiJson(providerInput: string, prompt: string) {
   };
 
   const requestedOrder = provider === "gemini"
-    ? ["gemini", "openrouter", "deepseek", "openai"]
+    ? ["gemini", "openai", "openrouter", "deepseek"]
     : provider === "deepseek"
       ? ["deepseek", "openrouter", "gemini", "openai"]
       : provider === "openai"
-        ? ["openai", "openrouter", "gemini", "deepseek"]
+        ? ["openai", "gemini", "openrouter", "deepseek"]
         : ["openrouter", "gemini", "deepseek", "openai"];
   const fallbackOrder = [
     ...requestedOrder.filter((candidate) => configuredProviders.includes(candidate)),
@@ -3300,19 +3300,11 @@ function isGreNeedsExtendedColumnError(error: unknown) {
 
 async function getAdminSnapshot() {
   const localNeedsQuery = async () => {
-    const extended = await adminClient
-      .from("gre_mis_needs")
-      .select("id, organization_name, contact_person, seeker_email, seeker_phone, problem_statement, status, internal_status, deployment_locations, submitted_keywords, submitted_thematic_area, submitted_offering_category, submitted_offering_type, ai_thematic_area, requested_on, updated_at, source_kind, approval_status")
-      .eq("approval_status", "approved")
-      .order("updated_at", { ascending: false })
-      .limit(500);
-    if (!extended.error) return extended;
-    if (!isGreNeedsExtendedColumnError(extended.error)) return extended;
     return adminClient
       .from("gre_mis_needs")
-      .select("id, organization_name, contact_person, seeker_email, seeker_phone, problem_statement, status, internal_status, ai_thematic_area, requested_on, updated_at, source_kind, approval_status")
+      .select("*")
       .eq("approval_status", "approved")
-      .order("updated_at", { ascending: false })
+      .order("requested_on", { ascending: false })
       .limit(500);
   };
 
@@ -3329,7 +3321,7 @@ async function getAdminSnapshot() {
       .order("created_at", { ascending: false }),
     adminClient
       .from("gre_mis_needs")
-      .select("id, organization_name, state, district, problem_statement, curation_notes, curated_need, ai_thematic_area, ai_application_area, ai_need_kind, ai_service_kind, ai_keywords, ai_6m_signals, ai_validation_status, ai_validation_flags, ai_confidence, ai_enrichment_status, ai_engine, ai_enriched_at, rule_thematic_hints, rule_6m_signals, override_thematic_area, override_application_area, override_need_kind, override_service_kind, override_keywords, override_6m_signals, override_summary, override_source, override_conflict_note, override_updated_at")
+      .select("id, organization_name, state, district, problem_statement, curation_notes, curated_need, ai_thematic_area, ai_application_area, ai_need_kind, ai_service_kind, ai_keywords, ai_6m_signals, ai_validation_status, ai_validation_flags, ai_confidence, ai_enrichment_status, ai_engine, ai_enriched_at, rule_thematic_hints, rule_6m_signals, override_thematic_area, override_application_area, override_need_kind, override_service_kind, override_keywords, override_6m_signals, override_summary, override_source, override_conflict_note, override_updated_at, source_kind")
       .eq("approval_status", "approved")
       .or("ai_validation_status.is.null,ai_validation_status.eq.flagged,ai_enrichment_status.is.null")
       .order("updated_at", { ascending: false })
@@ -3405,7 +3397,10 @@ async function getAdminSnapshot() {
     ok: true,
     pendingNeeds: pendingNeedsResult,
     pendingUpdates: pendingUpdatesResult,
-    aiReviewNeeds: aiReviewNeedsResult,
+    aiReviewNeeds: aiReviewNeedsResult.filter((row) => {
+      const record = row as Record<string, unknown>;
+      return requireString(record.source_kind) !== "shared_form_submission" && !requireString(record.id).startsWith("FORM-");
+    }),
     users: reconciledUsers,
     pendingFormSubmissions: pendingFormSubmissionsResult,
     localSolutions: localSolutionsResult,
@@ -4643,6 +4638,11 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
     const deploymentLocations = uniqueStrings(asStringArray(payload.deployment_locations));
     const submittedKeywords = uniqueStrings(asStringArray(payload.keywords));
     const curatedNeed = uniqueStrings([requireString(payload.thematic_area)].filter(Boolean));
+    const submittedOfferingCategory = requireString(payload.offering_category);
+    const submittedOfferingType = requireString(payload.offering_type);
+    const normalizedNeedKind = submittedOfferingCategory.replace(/\s+offerings$/i, "").toLowerCase();
+    const normalizedServiceKind = submittedOfferingCategory === "Service offerings" ? submittedOfferingType || null : null;
+    const validationReady = Boolean(curatedNeed.length || submittedKeywords.length);
     const baseRow = {
       id: nextNeedId,
       organization_name: requireString(payload.organization_name || submission.organization_name),
@@ -4660,30 +4660,29 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       next_action: "Allocate curator and continue curation",
       requested_on: new Date().toISOString(),
       last_status_change_at: new Date().toISOString(),
+      ai_thematic_area: requireString(payload.thematic_area) || null,
+      ai_need_kind: normalizedNeedKind || null,
+      ai_service_kind: normalizedServiceKind,
+      ai_keywords: submittedKeywords,
+      ai_engine: "local_form",
+      ai_enriched_at: new Date().toISOString(),
+      ai_enrichment_status: validationReady ? "ready" : "ready_flagged",
+      ai_validation_status: validationReady ? "ready" : "flagged",
+      ai_validation_flags: validationReady ? [] : ["needs_review"],
+      ai_confidence: validationReady ? 82 : 46,
     };
     const extendedRow = {
       ...baseRow,
       deployment_locations: deploymentLocations,
       submitted_keywords: submittedKeywords,
       submitted_thematic_area: requireString(payload.thematic_area) || null,
-      submitted_offering_category: requireString(payload.offering_category) || null,
-      submitted_offering_type: requireString(payload.offering_type) || null,
-      ai_thematic_area: requireString(payload.thematic_area) || null,
-      ai_need_kind: requireString(payload.need_kind) || null,
-      ai_service_kind: requireString(payload.service_kind) || null,
-      ai_keywords: submittedKeywords,
+      submitted_offering_category: submittedOfferingCategory || null,
+      submitted_offering_type: submittedOfferingType || null,
     };
     const { error: insertError } = await adminClient.from("gre_mis_needs").insert(extendedRow);
     if (insertError) {
       if (!isGreNeedsExtendedColumnError(insertError)) throw new Error(insertError.message);
-      const legacyRow = {
-        ...baseRow,
-        ai_thematic_area: requireString(payload.thematic_area) || null,
-        ai_need_kind: requireString(payload.need_kind) || null,
-        ai_service_kind: requireString(payload.service_kind) || null,
-        ai_keywords: submittedKeywords,
-      };
-      const { error: legacyInsertError } = await adminClient.from("gre_mis_needs").insert(legacyRow);
+      const { error: legacyInsertError } = await adminClient.from("gre_mis_needs").insert(baseRow);
       if (legacyInsertError) throw new Error(legacyInsertError.message);
     }
 
@@ -4701,10 +4700,19 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       })
       .eq("id", submissionId);
     if (approveError) throw new Error(approveError.message);
+    let questionsMessage = "";
+    try {
+      const questionResult = await generateSuggestedQuestionsForNeed(nextNeedId, actorEmail);
+      questionsMessage = questionResult?.questions?.length
+        ? ` Suggested questions to seeker were also prepared automatically.`
+        : "";
+    } catch (questionError) {
+      questionsMessage = ` Suggested questions could not be prepared automatically: ${questionError instanceof Error ? questionError.message : String(questionError)}.`;
+    }
     return {
       ok: true,
       targetNeedId: nextNeedId,
-      message: `Need was saved to local Supabase successfully as ${nextNeedId}.`,
+      message: `Need was saved to local Supabase successfully as ${nextNeedId}.${questionsMessage}`.trim(),
     };
   }
 
@@ -4798,6 +4806,7 @@ async function updateLocalNeed(needId: string, payload: Record<string, unknown>)
     district: districtFromDeployment || requireString(existing.district),
     updated_at: new Date().toISOString(),
   };
+  const validationReady = Boolean(submittedThematicArea || submittedKeywords.length);
 
   const patch = {
     ...basePatch,
@@ -4810,6 +4819,12 @@ async function updateLocalNeed(needId: string, payload: Record<string, unknown>)
     ai_need_kind: submittedOfferingCategory.replace(/\s+offerings$/i, "").toLowerCase() || null,
     ai_service_kind: submittedOfferingCategory === "Service offerings" ? submittedOfferingType || null : null,
     ai_keywords: submittedKeywords,
+    ai_engine: "local_form",
+    ai_enriched_at: new Date().toISOString(),
+    ai_enrichment_status: validationReady ? "ready" : "ready_flagged",
+    ai_validation_status: validationReady ? "ready" : "flagged",
+    ai_validation_flags: validationReady ? [] : ["needs_review"],
+    ai_confidence: validationReady ? 82 : 46,
   };
 
   const { error: updateError } = await adminClient
@@ -4824,6 +4839,12 @@ async function updateLocalNeed(needId: string, payload: Record<string, unknown>)
       ai_need_kind: submittedOfferingCategory.replace(/\s+offerings$/i, "").toLowerCase() || null,
       ai_service_kind: submittedOfferingCategory === "Service offerings" ? submittedOfferingType || null : null,
       ai_keywords: submittedKeywords,
+      ai_engine: "local_form",
+      ai_enriched_at: new Date().toISOString(),
+      ai_enrichment_status: validationReady ? "ready" : "ready_flagged",
+      ai_validation_status: validationReady ? "ready" : "flagged",
+      ai_validation_flags: validationReady ? [] : ["needs_review"],
+      ai_confidence: validationReady ? 82 : 46,
     };
     const { error: legacyUpdateError } = await adminClient
       .from("gre_mis_needs")
@@ -5250,6 +5271,107 @@ function buildNeedNotes(curationCallDetails: string, solutionsShared: string) {
     .filter(Boolean)
     .join("\n\n")
     .trim();
+}
+
+const suggestedQuestionsHeading = "Suggested Questions to Seeker";
+
+function buildSuggestedQuestionSection(questions: string[]) {
+  const rows = questions
+    .map((question) => requireString(question).replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((question, index) => `${index + 1}. ${question}`);
+  if (!rows.length) return "";
+  return `${suggestedQuestionsHeading}\n${rows.join("\n")}`.trim();
+}
+
+function mergeSuggestedQuestionSection(existingNotes: string, suggestedSection: string) {
+  const cleanExisting = requireString(existingNotes).replace(/\r/g, "").trim();
+  const cleanSuggested = requireString(suggestedSection).trim();
+  if (!cleanSuggested) return cleanExisting;
+  const pattern = new RegExp(`${suggestedQuestionsHeading}[\\s\\S]*?(?=\\n\\n[^\\n]|$)`, "i");
+  if (pattern.test(cleanExisting)) {
+    return cleanExisting.replace(pattern, cleanSuggested).trim();
+  }
+  return [cleanSuggested, cleanExisting].filter(Boolean).join("\n\n").trim();
+}
+
+async function generateSuggestedQuestionsForNeed(
+  needId: string,
+  actorEmail: string,
+) {
+  const { data: need, error } = await adminClient
+    .from("gre_mis_needs")
+    .select("id, approval_status, organization_name, state, district, problem_statement, curation_notes, curated_need, ai_thematic_area, ai_need_kind, ai_service_kind, submitted_thematic_area, submitted_offering_category, submitted_offering_type, submitted_keywords")
+    .eq("id", needId)
+    .single();
+  if (error || !need) throw new Error(error?.message || "Need not found.");
+  if (requireString(need.approval_status) === "pending_admin") {
+    throw new Error("Suggested questions can be generated only for approved needs.");
+  }
+
+  const prompt = `You are preparing a curator for a need-assessment call with a rural organisation seeker.
+
+Return valid JSON only in this shape:
+{
+  "questions": ["", "", "", "", ""]
+}
+
+Rules:
+- return exactly 5 probing questions
+- each question should help clarify the need fast and improve solution matching
+- prioritize: deployment context, current pain point, budget/affordability, maintenance/operations, scale and adoption constraints
+- keep each question concise and practical
+- avoid repeating the need statement back
+- do not include numbering in the JSON
+
+Need record:
+${JSON.stringify({
+    organization_name: need.organization_name,
+    state: need.state,
+    district: need.district,
+    thematic_area: need.submitted_thematic_area || need.ai_thematic_area,
+    need_category: need.submitted_offering_category || need.ai_need_kind,
+    need_type: need.submitted_offering_type || need.ai_service_kind,
+    keywords: asStringArray(need.submitted_keywords),
+    curated_need: asStringArray(need.curated_need),
+    problem_statement: need.problem_statement,
+  }, null, 2)}
+`;
+
+  const ai = await callAiJson("gemini", prompt);
+  const questions = uniqueStrings(asStringArray(ai.questions))
+    .map((question) => requireString(question).replace(/^\d+[\).\s-]*/, "").trim())
+    .filter((question) => question.length >= 12)
+    .slice(0, 5);
+  if (questions.length < 5) {
+    throw new Error("AI did not return enough suggested questions.");
+  }
+
+  const suggestedSection = buildSuggestedQuestionSection(questions);
+  const mergedNotes = mergeSuggestedQuestionSection(requireString(need.curation_notes), suggestedSection);
+  const { error: updateError } = await adminClient
+    .from("gre_mis_needs")
+    .update({
+      curation_notes: mergedNotes,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", needId);
+  if (updateError) throw new Error(updateError.message);
+
+  await adminClient.from("gre_mis_need_updates").insert({
+    need_id: needId,
+    update_type: "suggested_questions_generated",
+    note: `Suggested curator questions generated by AI for ${actorEmail}.`,
+    created_by_email: actorEmail,
+  });
+
+  return {
+    ok: true,
+    questions,
+    curationNotes: mergedNotes,
+    message: "Suggested questions were added to the curation notes.",
+  };
 }
 
 function parseGreInboundWorkbookRows(buffer: ArrayBuffer) {
@@ -6471,6 +6593,10 @@ Deno.serve(async (req) => {
 
       if (action === "refreshNeedIntelligence") {
         return jsonResponse(await refreshNeedIntelligence(adminActorEmail, requireString(payload.aiProvider) || defaultAiProvider));
+      }
+
+      if (action === "generateNeedSuggestedQuestions") {
+        return jsonResponse(await generateSuggestedQuestionsForNeed(requireString(payload.needId), adminActorEmail));
       }
 
       if (action === "applyNeedOverride") {
