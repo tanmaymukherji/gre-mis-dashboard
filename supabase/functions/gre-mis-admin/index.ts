@@ -6255,6 +6255,8 @@ async function directCuratorUpdate(payload: Record<string, unknown>, userCtx: { 
   const needId = requireString(payload.needId);
   if (!needId) throw new Error("Need ID is required.");
   const actorEmail = requireString(userCtx.user.email).toLowerCase();
+  const actorRole = requireString(userCtx.user.role).toLowerCase();
+  const isAdminActor = actorRole === "admin";
 
   const { data: need, error: needError } = await adminClient
     .from("gre_mis_needs")
@@ -6267,7 +6269,7 @@ async function directCuratorUpdate(payload: Record<string, unknown>, userCtx: { 
   const curatorRow = Array.isArray(need.gre_mis_curators) ? need.gre_mis_curators[0] : need.gre_mis_curators;
   const assignedUserId = requireString(curatorRow?.user_id);
   const assignedEmail = requireString(curatorRow?.email).toLowerCase();
-  if (assignedUserId !== requireString(userCtx.user.id) && assignedEmail !== actorEmail) {
+  if (!isAdminActor && assignedUserId !== requireString(userCtx.user.id) && assignedEmail !== actorEmail) {
     throw new Error("You can edit curation only for needs assigned to you.");
   }
 
