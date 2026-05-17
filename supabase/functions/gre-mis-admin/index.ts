@@ -3198,59 +3198,29 @@ async function sendEmail({
   cc,
   subject,
   body,
-  htmlBody,
   mailbox = "default",
 }: {
   to: string;
   cc?: string;
   subject: string;
   body: string;
-  htmlBody?: string;
   mailbox?: GmailMailbox;
 }) {
   const config = getGmailMailboxConfig(mailbox);
   const accessToken = await getGmailAccessToken(mailbox);
-  const rawMessage = htmlBody
-    ? (() => {
-        const boundary = `gre-mis-${crypto.randomUUID()}`;
-        return [
-          `From: ${config.senderEmail}`,
-          `To: ${to}`,
-          cc ? `Cc: ${cc}` : "",
-          `Subject: ${subject}`,
-          "MIME-Version: 1.0",
-          `Content-Type: multipart/alternative; boundary="${boundary}"`,
-          "",
-          `--${boundary}`,
-          "Content-Type: text/plain; charset=UTF-8",
-          "Content-Transfer-Encoding: 7bit",
-          "",
-          body,
-          "",
-          `--${boundary}`,
-          "Content-Type: text/html; charset=UTF-8",
-          "Content-Transfer-Encoding: 7bit",
-          "",
-          htmlBody,
-          "",
-          `--${boundary}--`,
-        ]
-          .filter(Boolean)
-          .join("\r\n");
-      })()
-    : [
-        `From: ${config.senderEmail}`,
-        `To: ${to}`,
-        cc ? `Cc: ${cc}` : "",
-        `Subject: ${subject}`,
-        "MIME-Version: 1.0",
-        "Content-Type: text/plain; charset=UTF-8",
-        "Content-Transfer-Encoding: 7bit",
-        "",
-        body,
-      ]
-        .filter(Boolean)
-        .join("\r\n");
+  const rawMessage = [
+    `From: ${config.senderEmail}`,
+    `To: ${to}`,
+    cc ? `Cc: ${cc}` : "",
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: 7bit",
+    "",
+    body,
+  ]
+    .filter(Boolean)
+    .join("\r\n");
 
   const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
     method: "POST",
@@ -3338,28 +3308,11 @@ async function sendNeedSubmissionConfirmationEmail(payload: Record<string, unkno
     "Regards,",
     "Team GRE",
   ].join("\n");
-  const htmlBody = `
-    <div style="font-family: Arial, Helvetica, sans-serif; color: #21352a; line-height: 1.7; font-size: 15px;">
-      <p>Hello ${escapeHtml(seekerName)},</p>
-      <p style="text-align: justify;">
-        We have received your help request at our end and will shortly review it. Once we are able to understand the need we will setup a call with you to fine tune the requirements and suggest possible solution providers for your need. In case we are unable to find one in our current network, we will also broadcast these needs to the wider ecosystem, if you so permit. We have noted that you ${broadcastLine} given us the permission to Broadcast this need to the wider ecosystem.
-      </p>
-      <p style="text-align: justify;">
-        We thank you for reaching out to us.
-      </p>
-      <p>
-        Regards,<br />
-        Team GRE
-      </p>
-    </div>
-  `.trim();
-
   await sendEmail({
     to: seekerEmail,
     cc,
     subject,
     body,
-    htmlBody,
     mailbox: "help",
   });
 
