@@ -3208,19 +3208,16 @@ async function sendEmail({
 }) {
   const config = getGmailMailboxConfig(mailbox);
   const accessToken = await getGmailAccessToken(mailbox);
-  const rawMessage = [
+  const headers = [
     `From: ${config.senderEmail}`,
     `To: ${to}`,
-    cc ? `Cc: ${cc}` : "",
     `Subject: ${subject}`,
     "MIME-Version: 1.0",
     "Content-Type: text/plain; charset=UTF-8",
     "Content-Transfer-Encoding: 7bit",
-    "",
-    body,
-  ]
-    .filter(Boolean)
-    .join("\r\n");
+  ];
+  if (cc) headers.splice(2, 0, `Cc: ${cc}`);
+  const rawMessage = `${headers.join("\r\n")}\r\n\r\n${body}`;
 
   const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
     method: "POST",
