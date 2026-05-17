@@ -40,6 +40,10 @@ body {
     radial-gradient(circle at bottom right, rgba(46, 106, 60, 0.18), transparent 28%),
     linear-gradient(135deg, rgba(247, 250, 244, 0.98), rgba(233, 241, 230, 0.96));
 }
+
+html[data-shared-form] #authGate {
+  display: none !important;
+}
 .auth-hero {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.78fr);
@@ -1153,6 +1157,11 @@ body.public-need-form-mode .shell {
 body.public-solution-form-mode .shell {
   max-width: 1280px;
   padding-inline: 18px;
+}
+
+body.public-need-form-mode .view-tabs,
+body.public-solution-form-mode .view-tabs {
+  display: none;
 }
 
 body.public-need-form-mode #need-intakeView .intake-grid {

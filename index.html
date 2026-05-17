@@ -8,6 +8,15 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://js.puter.com/v2/"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const sharedForm = params.get("sharedForm") || "";
+      const publicForm = params.get("publicForm") || "";
+      if (sharedForm) document.documentElement.setAttribute("data-shared-form", sharedForm);
+      if (publicForm) document.documentElement.setAttribute("data-public-form", publicForm);
+    }());
+  </script>
   <script src="./config.js?v=20260517b"></script>
   <link rel="stylesheet" href="./styles.css?v=20260517b" />
 </head>
@@ -468,7 +477,7 @@
                 </div>
 
                 <div class="wide intake-actions">
-                  <button type="submit" class="btn btn-primary">Submit Solution to Admin Review</button>
+                  <button type="submit" class="btn btn-primary">Submit Solution for Approval</button>
                   <button type="button" id="shareSolutionFormBtn" class="btn btn-secondary">Share Page Link</button>
                 </div>
                 <p id="solutionSubmissionStatus" class="helper-text wide"></p>
