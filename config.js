@@ -5,4 +5,5 @@ window.APP_CONFIG = {
   MAPPLS_MAP_KEY: "3c6a96a76e4bc764c81f7ef80b4ab227",
   ENABLE_EMAIL_ACTIONS: true,
   BRAND_NAME: "GREEN RURAL ECONOMY",
+  PUBLIC_NEED_FORM_URL: "https://solution.grameee.org/",
 };

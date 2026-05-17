@@ -5,13 +5,17 @@ const FALLBACK_CURATORS = [
   { id: "fallback-4", display_name: "Shaifali Nagar", email: "help@greenruraleconomy.in" },
 ];
 
+const bootstrapQuery = new URLSearchParams(window.location.search);
+const sharedFormQuery = bootstrapQuery.get("sharedForm");
+
 const state = {
   view: "overview",
-  sharedFormMode: new URLSearchParams(window.location.search).get("sharedForm") === "solution"
+  sharedFormMode: sharedFormQuery === "solution"
     ? "solution"
-    : new URLSearchParams(window.location.search).get("sharedForm") === "need"
+    : sharedFormQuery === "need"
       ? "need-intake"
       : "",
+  standaloneNeedFormMode: bootstrapQuery.get("publicForm") === "need",
   selectedNeedId: null,
   queueNeedsScrollIntoView: false,
   overviewPage: 1,
@@ -389,6 +393,10 @@ function isLoggedIn() {
 
 function isSharedFormMode() {
   return state.sharedFormMode === "solution" || state.sharedFormMode === "need-intake";
+}
+
+function isStandaloneNeedFormMode() {
+  return Boolean(state.standaloneNeedFormMode && state.sharedFormMode === "need-intake");
 }
 
 function isAdminUser() {
@@ -2338,6 +2346,10 @@ function openMissingOrgDialog(orgName = "") {
 }
 
 function getShareUrl(mode) {
+  if (mode !== "solution") {
+    const publicNeedFormUrl = normalizeText(window.APP_CONFIG?.PUBLIC_NEED_FORM_URL || "");
+    if (publicNeedFormUrl) return publicNeedFormUrl;
+  }
   const url = new URL(window.location.href);
   url.searchParams.set("sharedForm", mode === "solution" ? "solution" : "need");
   return url.toString();
@@ -4631,6 +4643,7 @@ function renderAuthState() {
   const loggedIn = isLoggedIn();
   const showShell = loggedIn || sharedMode;
   const isAdminDatasetVisible = isAdminUser() && state.view === "admin";
+  document.body.classList.toggle("public-need-form-mode", isStandaloneNeedFormMode());
 
   if (authGate) authGate.classList.toggle("hidden", showShell);
   if (appShell) appShell.classList.toggle("hidden", !showShell);
