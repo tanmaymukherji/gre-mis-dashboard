@@ -3288,23 +3288,41 @@ async function sendNeedSubmissionConfirmationEmail(payload: Record<string, unkno
   const seekerEmail = requireString(payload.seeker_email || payload.seekerEmail).toLowerCase();
   if (!seekerEmail) return { ok: false, reason: "No seeker email provided." };
 
-  const seekerName =
-    requireString(payload.contact_person || payload.contactPerson) ||
-    requireString(payload.submitter_name || payload.submitterName) ||
-    requireString(payload.organization_name || payload.organizationName) ||
-    "Seeker";
+  const seekerName = [
+    payload.contact_person,
+    payload.contactPerson,
+    payload.contact_name,
+    payload.contactName,
+    payload.seeker_name,
+    payload.seekerName,
+    payload.submitter_name,
+    payload.submitterName,
+    payload.organization_name,
+    payload.organizationName,
+  ]
+    .map((value) => requireString(value))
+    .find(Boolean) || "Seeker";
   const allowBroadcast = parseBoolean(payload.demand_broadcast_needed) ?? false;
-  const broadcastLine = allowBroadcast
-    ? "have"
-    : "have not";
+  const broadcastLine = allowBroadcast ? "have" : "have not";
   const cc = ["help@greenruraleconomy.in", "tanmay@greenruraleconomy.in"].join(", ");
   const subject = "We have received your help request on AskGRE";
   const body = [
     `Hello ${seekerName},`,
     "",
-    "We have received your help request at our end and will shortly review it. Once we are able to understand the need we will setup a call with you to fine tune the requirements and suggest possible solution providers for your need. In case we are unable to find one in our current network, we will also broadcast these needs to the wider ecosystem, if you so permit. We have noted that you " + broadcastLine + " given us the permission to Broadcast this need to the wider ecosystem.",
+    "We have received your help request at our end and will shortly review it.",
+    "",
+    "Once we are able to understand the need, we will set up a call with you",
+    "to fine tune the requirements and suggest possible solution providers",
+    "for your need.",
+    "",
+    "In case we are unable to find one in our current network, we will also",
+    "broadcast these needs to the wider ecosystem, if you so permit.",
+    "",
+    `We have noted that you ${broadcastLine} given us permission to broadcast this need`,
+    "to the wider ecosystem.",
     "",
     "We thank you for reaching out to us.",
+    "",
     "Regards,",
     "Team GRE",
   ].join("\n");
