@@ -5205,7 +5205,7 @@ function bindStaticEvents() {
         if (status) status.textContent = result.message || "Solution submission sent to admin review.";
       }
       if (isAdminUser()) await refreshAll();
-      toast("Solution Submitted for Approval");
+      toast(result.message || "Solution Submitted for Approval");
     }));
 
   byId("needSubmissionForm")?.addEventListener("submit", safeAsync(async (event) => {

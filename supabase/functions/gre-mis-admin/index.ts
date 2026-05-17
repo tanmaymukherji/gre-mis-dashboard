@@ -17,6 +17,10 @@ const gmailClientId = Deno.env.get("GMAIL_CLIENT_ID") ?? "";
 const gmailClientSecret = Deno.env.get("GMAIL_CLIENT_SECRET") ?? "";
 const gmailRefreshToken = Deno.env.get("GMAIL_REFRESH_TOKEN") ?? "";
 const gmailSenderEmail = Deno.env.get("GMAIL_SENDER_EMAIL") ?? "help@greenruraleconomy.in";
+const solutionGmailClientId = Deno.env.get("SOLUTION_GMAIL_CLIENT_ID") ?? gmailClientId;
+const solutionGmailClientSecret = Deno.env.get("SOLUTION_GMAIL_CLIENT_SECRET") ?? gmailClientSecret;
+const solutionGmailRefreshToken = Deno.env.get("SOLUTION_GMAIL_REFRESH_TOKEN") ?? "";
+const solutionGmailSenderEmail = Deno.env.get("SOLUTION_GMAIL_SENDER_EMAIL") ?? "solution@greenruraleconomy.in";
 const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY") ?? Deno.env.get("GRE_MIS_OPENROUTER_API_KEY") ?? "";
 const geminiApiKey = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GRE_MIS_GEMINI_API_KEY") ?? "";
 const deepSeekApiKey = Deno.env.get("DEEPSEEK_API_KEY") ?? Deno.env.get("GRE_MIS_DEEPSEEK_API_KEY") ?? "";
@@ -3126,14 +3130,34 @@ function generateToken() {
   return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function getGmailAccessToken() {
+type GmailMailbox = "default" | "solution";
+
+function getGmailMailboxConfig(mailbox: GmailMailbox = "default") {
+  if (mailbox === "solution" && solutionGmailRefreshToken) {
+    return {
+      clientId: solutionGmailClientId,
+      clientSecret: solutionGmailClientSecret,
+      refreshToken: solutionGmailRefreshToken,
+      senderEmail: solutionGmailSenderEmail,
+    };
+  }
+  return {
+    clientId: gmailClientId,
+    clientSecret: gmailClientSecret,
+    refreshToken: gmailRefreshToken,
+    senderEmail: gmailSenderEmail,
+  };
+}
+
+async function getGmailAccessToken(mailbox: GmailMailbox = "default") {
+  const config = getGmailMailboxConfig(mailbox);
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      client_id: gmailClientId,
-      client_secret: gmailClientSecret,
-      refresh_token: gmailRefreshToken,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      refresh_token: config.refreshToken,
       grant_type: "refresh_token",
     }),
   });
@@ -3153,15 +3177,18 @@ async function sendEmail({
   cc,
   subject,
   body,
+  mailbox = "default",
 }: {
   to: string;
   cc?: string;
   subject: string;
   body: string;
+  mailbox?: GmailMailbox;
 }) {
-  const accessToken = await getGmailAccessToken();
+  const config = getGmailMailboxConfig(mailbox);
+  const accessToken = await getGmailAccessToken(mailbox);
   const rawMessage = [
-    `From: ${gmailSenderEmail}`,
+    `From: ${config.senderEmail}`,
     `To: ${to}`,
     cc ? `Cc: ${cc}` : "",
     `Subject: ${subject}`,
@@ -3185,6 +3212,50 @@ async function sendEmail({
     throw new Error(data?.error?.message || "Gmail send failed.");
   }
   return data;
+}
+
+async function sendSolutionSubmissionConfirmationEmail(payload: Record<string, unknown>) {
+  if (!solutionGmailRefreshToken) {
+    throw new Error("Solution mailbox is not configured yet.");
+  }
+  const submitterEmail = requireString(payload.submitter_email || payload.submitterEmail).toLowerCase();
+  if (!submitterEmail) return { ok: false, reason: "No submitter email provided." };
+
+  const solutionProvider =
+    requireString(payload.submitter_name || payload.submitterName) ||
+    requireString(payload.contact_person || payload.contactPerson) ||
+    "Solution Provider";
+  const offeringName = requireString(payload.offering_name || payload.offeringName || payload.solution_name || payload.solutionName) || "your submitted solution";
+  const cc = "tanmay@greenruraleconomy.in";
+  const subject = `AskGRE solution received for ${offeringName}`;
+  const body = [
+    `Hello ${solutionProvider},`,
+    "",
+    `We have received your submitted Solution for ${offeringName}, on the AskGRE platform. This will be validated internally by our team and post validation get uploaded on the platform.`,
+    "",
+    "Thank you for sharing your Solutions with us and the wider ecosystem.",
+    "",
+    "Warm Regards,",
+    "Team GRE",
+  ].join("\n");
+
+  await sendEmail({
+    to: submitterEmail,
+    cc,
+    subject,
+    body,
+    mailbox: "solution",
+  });
+
+  await adminClient.from("gre_mis_email_log").insert({
+    recipient_email: submitterEmail,
+    cc_email: cc,
+    subject,
+    body_preview: body.slice(0, 1000),
+    sent_by_email: solutionGmailSenderEmail,
+  });
+
+  return { ok: true };
 }
 
 async function createUserSession(userId: string) {
@@ -4813,10 +4884,22 @@ async function submitFormSubmission(
     .single();
   if (error) throw new Error(error.message);
 
+  let message = normalizedType === "solution"
+    ? "Solution Submitted for Approval"
+    : "Submission saved for admin review.";
+  if (normalizedType === "solution") {
+    try {
+      await sendSolutionSubmissionConfirmationEmail(payload);
+    } catch (mailError) {
+      const reason = requireString((mailError as { message?: string } | null)?.message) || "Unknown mail error.";
+      message = `Solution Submitted for Approval. Confirmation email could not be sent: ${reason}`;
+    }
+  }
+
   return {
     ok: true,
     id: data.id,
-    message: "Submission saved for admin review.",
+    message,
   };
 }
 
