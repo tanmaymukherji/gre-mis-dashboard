@@ -5323,7 +5323,12 @@ function bindStaticEvents() {
       renderNeedTagChips();
       renderNeedDeploymentChips();
       if (isSharedFormMode()) {
-        event.target.innerHTML = `<button type="button" class="btn btn-primary" id="needSubmissionReloadBtn">Need Help Submitted for Approval</button>`;
+        event.target.innerHTML = `
+          <div class="stack-list">
+            <button type="button" class="btn btn-primary" id="needSubmissionReloadBtn">Need Help Submitted for Approval</button>
+            <p class="helper-text">${esc(result.message || "Need Help Submitted for Approval")}</p>
+          </div>
+        `;
         byId("needSubmissionReloadBtn")?.addEventListener("click", () => window.location.reload());
       } else {
         fillSupplierSelect("needTraderSelect", "needOrgName");

@@ -17,6 +17,10 @@ const gmailClientId = Deno.env.get("GMAIL_CLIENT_ID") ?? "";
 const gmailClientSecret = Deno.env.get("GMAIL_CLIENT_SECRET") ?? "";
 const gmailRefreshToken = Deno.env.get("GMAIL_REFRESH_TOKEN") ?? "";
 const gmailSenderEmail = Deno.env.get("GMAIL_SENDER_EMAIL") ?? "help@greenruraleconomy.in";
+const helpGmailClientId = Deno.env.get("HELP_GMAIL_CLIENT_ID") ?? gmailClientId;
+const helpGmailClientSecret = Deno.env.get("HELP_GMAIL_CLIENT_SECRET") ?? gmailClientSecret;
+const helpGmailRefreshToken = Deno.env.get("HELP_GMAIL_REFRESH_TOKEN") ?? gmailRefreshToken;
+const helpGmailSenderEmail = Deno.env.get("HELP_GMAIL_SENDER_EMAIL") ?? "help@greenruraleconomy.in";
 const solutionGmailClientId = Deno.env.get("SOLUTION_GMAIL_CLIENT_ID") ?? gmailClientId;
 const solutionGmailClientSecret = Deno.env.get("SOLUTION_GMAIL_CLIENT_SECRET") ?? gmailClientSecret;
 const solutionGmailRefreshToken = Deno.env.get("SOLUTION_GMAIL_REFRESH_TOKEN") ?? "";
@@ -3130,9 +3134,17 @@ function generateToken() {
   return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-type GmailMailbox = "default" | "solution";
+type GmailMailbox = "default" | "help" | "solution";
 
 function getGmailMailboxConfig(mailbox: GmailMailbox = "default") {
+  if (mailbox === "help" && helpGmailRefreshToken) {
+    return {
+      clientId: helpGmailClientId,
+      clientSecret: helpGmailClientSecret,
+      refreshToken: helpGmailRefreshToken,
+      senderEmail: helpGmailSenderEmail,
+    };
+  }
   if (mailbox === "solution" && solutionGmailRefreshToken) {
     return {
       clientId: solutionGmailClientId,
@@ -3259,6 +3271,9 @@ async function sendSolutionSubmissionConfirmationEmail(payload: Record<string, u
 }
 
 async function sendNeedSubmissionConfirmationEmail(payload: Record<string, unknown>) {
+  if (!helpGmailRefreshToken && !gmailRefreshToken) {
+    throw new Error("Help mailbox is not configured yet.");
+  }
   const seekerEmail = requireString(payload.seeker_email || payload.seekerEmail).toLowerCase();
   if (!seekerEmail) return { ok: false, reason: "No seeker email provided." };
 
@@ -3287,7 +3302,7 @@ async function sendNeedSubmissionConfirmationEmail(payload: Record<string, unkno
     cc,
     subject,
     body,
-    mailbox: "default",
+    mailbox: "help",
   });
 
   await adminClient.from("gre_mis_email_log").insert({
@@ -3295,7 +3310,7 @@ async function sendNeedSubmissionConfirmationEmail(payload: Record<string, unkno
     cc_email: cc,
     subject,
     body_preview: body.slice(0, 1000),
-    sent_by_email: gmailSenderEmail,
+    sent_by_email: helpGmailRefreshToken ? helpGmailSenderEmail : gmailSenderEmail,
   });
 
   return { ok: true };
