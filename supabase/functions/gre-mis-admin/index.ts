@@ -3210,17 +3210,47 @@ async function sendEmail({
 }) {
   const config = getGmailMailboxConfig(mailbox);
   const accessToken = await getGmailAccessToken(mailbox);
-  const rawMessage = [
-    `From: ${config.senderEmail}`,
-    `To: ${to}`,
-    cc ? `Cc: ${cc}` : "",
-    `Subject: ${subject}`,
-    `Content-Type: ${htmlBody ? "text/html" : "text/plain"}; charset=UTF-8`,
-    "",
-    htmlBody || body,
-  ]
-    .filter(Boolean)
-    .join("\r\n");
+  const rawMessage = htmlBody
+    ? (() => {
+        const boundary = `gre-mis-${crypto.randomUUID()}`;
+        return [
+          `From: ${config.senderEmail}`,
+          `To: ${to}`,
+          cc ? `Cc: ${cc}` : "",
+          `Subject: ${subject}`,
+          "MIME-Version: 1.0",
+          `Content-Type: multipart/alternative; boundary="${boundary}"`,
+          "",
+          `--${boundary}`,
+          "Content-Type: text/plain; charset=UTF-8",
+          "Content-Transfer-Encoding: 7bit",
+          "",
+          body,
+          "",
+          `--${boundary}`,
+          "Content-Type: text/html; charset=UTF-8",
+          "Content-Transfer-Encoding: 7bit",
+          "",
+          htmlBody,
+          "",
+          `--${boundary}--`,
+        ]
+          .filter(Boolean)
+          .join("\r\n");
+      })()
+    : [
+        `From: ${config.senderEmail}`,
+        `To: ${to}`,
+        cc ? `Cc: ${cc}` : "",
+        `Subject: ${subject}`,
+        "MIME-Version: 1.0",
+        "Content-Type: text/plain; charset=UTF-8",
+        "Content-Transfer-Encoding: 7bit",
+        "",
+        body,
+      ]
+        .filter(Boolean)
+        .join("\r\n");
 
   const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
     method: "POST",
