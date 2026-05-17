@@ -88,10 +88,10 @@ function normalizeLanguageLabel(value: unknown) {
   const text = requireString(value);
   if (!text) return "";
   const normalized = text.toLowerCase();
-  if (["eng", "english"].includes(normalized)) return "English";
-  if (["hin", "hindi"].includes(normalized)) return "Hindi";
-  if (["odia", "oriya", "odiya", "od"].includes(normalized)) return "Odia";
-  return text;
+  if (["eng", "english"].includes(normalized)) return "ENGLISH";
+  if (["hin", "hindi"].includes(normalized)) return "HINDI";
+  if (["odia", "oriya", "odiya", "od"].includes(normalized)) return "ODIA";
+  return text.toUpperCase();
 }
 
 function normalizeLanguageArray(value: unknown) {
@@ -4687,9 +4687,39 @@ async function suggestSolutionTags(payload: Record<string, unknown>) {
     solution_name: normalized.offering_name,
     about_solution_text: normalized.about_offering_text,
   });
+  const normalizeSolutionTag = (tag: unknown) =>
+    requireString(tag)
+      .toLowerCase()
+      .replace(/[_/]+/g, " ")
+      .replace(/\blow[\s-]+cost\b/g, "low cost")
+      .replace(/\bdecentralised\b/g, "decentralized")
+      .replace(/\s+/g, " ")
+      .trim();
+  const weakSolutionTags = new Set([
+    "service",
+    "services",
+    "solution",
+    "solutions",
+    "support",
+    "offering",
+    "offerings",
+    "provider",
+    "product",
+    "knowledge",
+    "training",
+  ]);
+  const isWeakSolutionTag = (tag: unknown) => {
+    const normalizedTag = normalizeSolutionTag(tag);
+    if (!normalizedTag || normalizedTag.length < 3) return true;
+    const parts = normalizedTag.split(" ").filter(Boolean);
+    if (!parts.length) return true;
+    if (weakSolutionTags.has(normalizedTag)) return true;
+    if (parts.every((part) => weakSolutionTags.has(part) || /^\d+$/.test(part))) return true;
+    return false;
+  };
   let aiFallbackReason = "";
   try {
-    const ai = await callAiJson("gemini", `You are helping classify a rural economy solution offering for search discovery.
+    const ai = await callAiJsonWithOrder(["gemini", "openai"], `You are helping classify a rural economy solution offering for AskGRE search discovery.
 
 Return valid JSON only in this shape:
 {
@@ -4698,9 +4728,11 @@ Return valid JSON only in this shape:
 
 Rules:
 - give 6 to 12 tags
-- prefer thematic area, offering type, use-case, beneficiary, and commodity terms
-- avoid generic filler like "service", "solution", "support"
-- keep tags short
+- prefer thematic area, use-case, beneficiary, deployment context, technical capability, and commodity or domain terms
+- preserve meaningful multi-word phrases where relevant
+- avoid generic filler like "service", "solution", "support", "offering", "provider", "product"
+- avoid repeating single words from the description as separate tags
+- keep tags short and thematic
 
 Organisation: ${normalized.organization_name}
 Offering Category: ${normalized.offering_category}
@@ -4708,7 +4740,7 @@ Offering Type: ${normalized.offering_type}
 Offering Name: ${normalized.offering_name}
 Offering Description: ${normalized.about_offering_text}
 Facilitator / Contact Notes: ${normalized.trainer_details_text || normalized.contact_details}`);
-    const tags = uniqueStrings(asStringArray(ai.tags)).slice(0, 12);
+    const tags = uniqueStrings(asStringArray(ai.tags).map((entry) => normalizeSolutionTag(entry)).filter((entry) => !isWeakSolutionTag(entry))).slice(0, 12);
     if (tags.length) {
       return {
         ok: true,
@@ -4731,7 +4763,7 @@ Facilitator / Contact Notes: ${normalized.trainer_details_text || normalized.con
       normalized.about_offering_text,
       normalized.organization_name,
     ].filter(Boolean).join(" "), 4),
-  ]).slice(0, 12);
+  ].map((entry) => normalizeSolutionTag(entry)).filter((entry) => !isWeakSolutionTag(entry))).slice(0, 12);
   return {
     ok: true,
     tags,

@@ -118,14 +118,13 @@ const OFFERING_TYPE_OPTIONS = {
 };
 
 const DEFAULT_LANGUAGE_OPTIONS = [
-  "English",
-  "Hindi",
+  "ENGLISH",
+  "HINDI",
   "ASSAMESE",
   "BENGALI",
   "BODO",
   "DOGRI",
   "GUJARATI",
-  "HINDI",
   "KANNADA",
   "KASHMIRI",
   "KONKANI",
@@ -329,7 +328,39 @@ function escAttr(value) {
 }
 
 function toast(message) {
-  window.alert(message);
+  const text = normalizeText(message);
+  if (!text) return;
+  let host = byId("greInlineToastHost");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "greInlineToastHost";
+    host.style.position = "fixed";
+    host.style.right = "24px";
+    host.style.bottom = "24px";
+    host.style.zIndex = "9999";
+    host.style.display = "grid";
+    host.style.gap = "10px";
+    host.style.maxWidth = "420px";
+    document.body.appendChild(host);
+  }
+  const notice = document.createElement("button");
+  notice.type = "button";
+  notice.textContent = text;
+  notice.style.border = "1px solid rgba(32,85,44,0.18)";
+  notice.style.background = "#fffdf7";
+  notice.style.color = "#23402c";
+  notice.style.boxShadow = "0 16px 40px rgba(16, 24, 20, 0.16)";
+  notice.style.borderRadius = "16px";
+  notice.style.padding = "14px 16px";
+  notice.style.textAlign = "left";
+  notice.style.cursor = "pointer";
+  notice.style.font = "inherit";
+  notice.style.lineHeight = "1.45";
+  notice.addEventListener("click", () => notice.remove());
+  host.appendChild(notice);
+  window.setTimeout(() => {
+    if (notice.isConnected) notice.remove();
+  }, 5000);
 }
 
 function setText(id, message = "") {
@@ -372,10 +403,10 @@ function canonicalizeLanguageLabel(value) {
   const text = normalizeText(value);
   if (!text) return "";
   const normalized = text.toLowerCase();
-  if (["eng", "english"].includes(normalized)) return "English";
-  if (["hin", "hindi"].includes(normalized)) return "Hindi";
-  if (["odia", "oriya", "odiya", "od"].includes(normalized)) return "Odia";
-  return text;
+  if (["eng", "english"].includes(normalized)) return "ENGLISH";
+  if (["hin", "hindi"].includes(normalized)) return "HINDI";
+  if (["odia", "oriya", "odiya", "od"].includes(normalized)) return "ODIA";
+  return text.toUpperCase();
 }
 
 function canonicalizeLanguageArray(values) {
@@ -2016,6 +2047,7 @@ class GreMisStore {
     const client = this.getClient();
     const search = normalizeText(query);
     if (!client || search.length < 2) return [];
+    const manualSuggestions = scoreLgdSuggestion("India", search) > 0 ? ["India"] : [];
     const wildcard = `%${search.replace(/[%_]/g, " ").trim()}%`;
     const { data, error } = await client
       .from("lgd_geography_directory")
@@ -2024,9 +2056,9 @@ class GreMisStore {
       .limit(20);
     if (error) {
       console.warn("LGD geography lookup failed", error);
-      return [];
+      return manualSuggestions;
     }
-    return buildRankedLgdSuggestions(ensureList(data), search);
+    return uniq([...manualSuggestions, ...buildRankedLgdSuggestions(ensureList(data), search)]);
   }
 
   async importInboundWorkbook(fileName, rows, aiProvider) {
@@ -4055,6 +4087,38 @@ Rules:
 `.trim();
 }
 
+function buildPuterSolutionTagPrompt(draft) {
+  return `
+You are helping classify a solution offering for AskGRE search discovery.
+Return only valid JSON.
+
+Offering draft:
+${JSON.stringify({
+  organization_name: draft.organization_name,
+  offering_category: draft.offering_category,
+  offering_type: draft.offering_type,
+  offering_name: draft.offering_name,
+  about_offering_text: draft.about_offering_text,
+  trainer_details_text: draft.trainer_details_text,
+  contact_details: draft.contact_details,
+}, null, 2)}
+
+Return:
+{
+  "tags": ["", "", ""]
+}
+
+Rules:
+- return 8 to 12 thematic tags
+- prioritize use-case, thematic area, user segment, deployment context, technical capability, and commodity or domain
+- preserve meaningful multi-word phrases
+- avoid generic words like service, solution, support, offering, provider, training unless part of a more specific phrase
+- avoid repeating individual words from the description as separate tags
+- each tag should be 1 to 4 words
+- do not include numbering
+`.trim();
+}
+
 function normalizeNeedReviewSuggestion(payload) {
   return {
     thematic_area: normalizeText(payload?.thematic_area),
@@ -4105,6 +4169,34 @@ async function runPuterNeedKeywordAssist(draft) {
     .slice(0, 12);
   if (!tags.length) {
     throw new Error("Puter did not return usable keywords.");
+  }
+  return uniq(tags);
+}
+
+async function runPuterSolutionTagAssist(draft) {
+  const text = await runPuterChat(buildPuterSolutionTagPrompt(draft));
+  const parsed = parseJsonObject(text);
+  const tags = parseArray(parsed?.tags)
+    .map((item) => normalizeText(item))
+    .filter((item) => item.length >= 3)
+    .filter((item) => {
+      const lowered = item.toLowerCase();
+      return ![
+        "service",
+        "services",
+        "solution",
+        "solutions",
+        "support",
+        "offering",
+        "offerings",
+        "provider",
+        "product",
+        "knowledge",
+      ].includes(lowered);
+    })
+    .slice(0, 12);
+  if (!tags.length) {
+    throw new Error("Puter did not return usable thematic tags.");
   }
   return uniq(tags);
 }
@@ -5198,14 +5290,17 @@ function bindStaticEvents() {
       renderSolutionTagChips();
       renderSolutionGeographyChips();
       if (isSharedFormMode()) {
-        event.target.innerHTML = `<div class="empty-state">Solution Sent for Approval</div>`;
+        event.target.innerHTML = `<button type="button" class="btn btn-primary" id="solutionSubmissionReloadBtn">Solution Submitted for Approval</button>`;
+        byId("solutionSubmissionReloadBtn")?.addEventListener("click", () => window.location.reload());
       } else {
         fillSupplierSelect("solutionTraderSelect", "solutionOrgName");
         renderSolutionReferenceInputs();
         if (status) status.textContent = result.message || "Solution submission sent to admin review.";
       }
       if (isAdminUser()) await refreshAll();
-      toast(result.message || "Solution Submitted for Approval");
+      if (!isSharedFormMode()) {
+        toast(result.message || "Solution Submitted for Approval");
+      }
     }));
 
   byId("needSubmissionForm")?.addEventListener("submit", safeAsync(async (event) => {
@@ -5264,7 +5359,7 @@ function bindStaticEvents() {
     const status = byId("solutionSubmissionStatus");
     const form = byId("solutionSubmissionForm");
     if (!form) return;
-    if (status) status.textContent = "Generating AI tags from the current offering draft...";
+    if (status) status.textContent = "Generating thematic tags from the current offering draft...";
     const draft = {
       organization_name: normalizeText(form.querySelector('[name="organization_name"]')?.value || ""),
       offering_category: normalizeText(form.querySelector('[name="offering_category"]')?.value || ""),
@@ -5278,12 +5373,20 @@ function bindStaticEvents() {
     if (!draft.offering_name || !draft.about_offering_text) {
       throw new Error("Please add the offering name and description before generating tags.");
     }
-    const result = await store.suggestSolutionTags(draft);
-    const generatedTags = parseArray(result.tags);
+    let generatedTags = [];
+    let message = "";
+    try {
+      generatedTags = await runPuterSolutionTagAssist(draft);
+      message = "Puter-assisted thematic tags added. You can remove any tag before submitting.";
+    } catch (puterError) {
+      const result = await store.suggestSolutionTags(draft);
+      generatedTags = parseArray(result.tags);
+      message = result.message || `Puter fallback used: ${puterError?.message || "Puter was unavailable."}`;
+    }
     const tagsToAdd = generatedTags.length ? generatedTags : deriveLocalSolutionTags(draft);
     tagsToAdd.forEach((tag) => addSolutionTag(tag));
     if (status) status.textContent = generatedTags.length
-      ? result.message || "AI tags added. You can remove any tag before submitting."
+      ? message || "AI tags added. You can remove any tag before submitting."
       : "AI suggestions were unavailable, so local smart tags were added instead.";
   }));
   byId("solutionTagEntry")?.addEventListener("keydown", (event) => {
