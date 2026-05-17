@@ -80,6 +80,15 @@ function requireString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function escapeHtml(value: unknown) {
+  return requireString(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function asStringArray(value: unknown) {
   if (Array.isArray(value)) return value.map((item) => requireString(item)).filter(Boolean);
   if (typeof value === "string") {
@@ -3189,12 +3198,14 @@ async function sendEmail({
   cc,
   subject,
   body,
+  htmlBody,
   mailbox = "default",
 }: {
   to: string;
   cc?: string;
   subject: string;
   body: string;
+  htmlBody?: string;
   mailbox?: GmailMailbox;
 }) {
   const config = getGmailMailboxConfig(mailbox);
@@ -3204,9 +3215,9 @@ async function sendEmail({
     `To: ${to}`,
     cc ? `Cc: ${cc}` : "",
     `Subject: ${subject}`,
-    "Content-Type: text/plain; charset=UTF-8",
+    `Content-Type: ${htmlBody ? "text/html" : "text/plain"}; charset=UTF-8`,
     "",
-    body,
+    htmlBody || body,
   ]
     .filter(Boolean)
     .join("\r\n");
@@ -3280,6 +3291,7 @@ async function sendNeedSubmissionConfirmationEmail(payload: Record<string, unkno
   const seekerName =
     requireString(payload.contact_person || payload.contactPerson) ||
     requireString(payload.submitter_name || payload.submitterName) ||
+    requireString(payload.organization_name || payload.organizationName) ||
     "Seeker";
   const allowBroadcast = parseBoolean(payload.demand_broadcast_needed) ?? false;
   const broadcastLine = allowBroadcast
@@ -3296,12 +3308,28 @@ async function sendNeedSubmissionConfirmationEmail(payload: Record<string, unkno
     "Regards,",
     "Team GRE",
   ].join("\n");
+  const htmlBody = `
+    <div style="font-family: Arial, Helvetica, sans-serif; color: #21352a; line-height: 1.7; font-size: 15px;">
+      <p>Hello ${escapeHtml(seekerName)},</p>
+      <p style="text-align: justify;">
+        We have received your help request at our end and will shortly review it. Once we are able to understand the need we will setup a call with you to fine tune the requirements and suggest possible solution providers for your need. In case we are unable to find one in our current network, we will also broadcast these needs to the wider ecosystem, if you so permit. We have noted that you ${broadcastLine} given us the permission to Broadcast this need to the wider ecosystem.
+      </p>
+      <p style="text-align: justify;">
+        We thank you for reaching out to us.
+      </p>
+      <p>
+        Regards,<br />
+        Team GRE
+      </p>
+    </div>
+  `.trim();
 
   await sendEmail({
     to: seekerEmail,
     cc,
     subject,
     body,
+    htmlBody,
     mailbox: "help",
   });
 
