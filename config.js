@@ -6,4 +6,5 @@ window.APP_CONFIG = {
   ENABLE_EMAIL_ACTIONS: true,
   BRAND_NAME: "GREEN RURAL ECONOMY",
   PUBLIC_SOLUTION_FORM_URL: "https://solution.grameee.org/",
+  PUBLIC_NEED_FORM_URL: "https://help.grameee.org/",
 };

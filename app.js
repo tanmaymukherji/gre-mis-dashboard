@@ -2398,6 +2398,10 @@ function getShareUrl(mode) {
     const publicSolutionFormUrl = normalizeText(window.APP_CONFIG?.PUBLIC_SOLUTION_FORM_URL || "");
     if (publicSolutionFormUrl) return publicSolutionFormUrl;
   }
+  if (mode === "need") {
+    const publicNeedFormUrl = normalizeText(window.APP_CONFIG?.PUBLIC_NEED_FORM_URL || "");
+    if (publicNeedFormUrl) return publicNeedFormUrl;
+  }
   const url = new URL(window.location.href);
   url.searchParams.set("sharedForm", mode === "solution" ? "solution" : "need");
   return url.toString();

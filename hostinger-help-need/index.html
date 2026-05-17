@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Need Solution | Green Rural Economy</title>
+  <meta name="description" content="Share your solution needs on AskGRE for admin review and matching support." />
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f1e6;
+      --panel: #fffdf7;
+      --border: #d8d0bc;
+      --text: #153b2e;
+      --muted: #5e6d63;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background:
+        radial-gradient(circle at top left, rgba(255, 246, 223, 0.95), transparent 32%),
+        linear-gradient(180deg, #f8f5eb 0%, var(--bg) 100%);
+      color: var(--text);
+    }
+
+    .page {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 16px;
+      padding: 18px;
+    }
+
+    .hero {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 20px 24px;
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: center;
+      box-shadow: 0 16px 40px rgba(44, 62, 39, 0.08);
+    }
+
+    .eyebrow {
+      margin: 0 0 6px;
+      font-size: 0.8rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.7rem, 2.8vw, 2.6rem);
+      line-height: 1.1;
+    }
+
+    .lede {
+      margin: 8px 0 0;
+      max-width: 920px;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.5;
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .link-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      border-radius: 999px;
+      padding: 12px 18px;
+      font-weight: 700;
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: #fff;
+      min-height: 46px;
+    }
+
+    .frame-shell {
+      min-height: 0;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(39, 53, 37, 0.09);
+    }
+
+    iframe {
+      width: 100%;
+      height: calc(100vh - 180px);
+      min-height: 780px;
+      border: 0;
+      background: transparent;
+      display: block;
+    }
+
+    @media (max-width: 900px) {
+      .page { padding: 12px; }
+      .hero { padding: 18px; border-radius: 20px; flex-direction: column; align-items: flex-start; }
+      iframe { height: calc(100vh - 220px); min-height: 680px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Green Rural Economy</p>
+        <h1>Need Solution</h1>
+        <p class="lede">Share your needs on the AskGRE Platform. Submitted needs will go through an internal review process and then reflect within the GRE MIS workflow for solution matching and curation support.</p>
+      </div>
+      <div class="hero-actions">
+        <a class="link-btn" href="https://askgre.grameee.org/" target="_blank" rel="noreferrer">Visit AskGRE</a>
+      </div>
+    </section>
+
+    <section class="frame-shell">
+      <iframe
+        title="GRE Need Solution Form"
+        src="https://tanmaymukherji.github.io/gre-mis-dashboard/?sharedForm=need&publicForm=need"
+        loading="eager"
+        referrerpolicy="strict-origin-when-cross-origin"
+      ></iframe>
+    </section>
+  </div>
+</body>
+</html>
