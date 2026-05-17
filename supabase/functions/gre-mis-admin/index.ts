@@ -3301,13 +3301,14 @@ async function sendNeedSubmissionConfirmationEmail(payload: Record<string, unkno
     payload.organizationName,
   ]
     .map((value) => requireString(value))
-    .find(Boolean) || "Seeker";
+    .find(Boolean) || "Solution Seeker";
+  const salutation = `Hello ${seekerName},`;
   const allowBroadcast = parseBoolean(payload.demand_broadcast_needed) ?? false;
   const broadcastLine = allowBroadcast ? "have" : "have not";
   const cc = ["help@greenruraleconomy.in", "tanmay@greenruraleconomy.in"].join(", ");
   const subject = "We have received your help request on AskGRE";
   const body = [
-    `Hello ${seekerName},`,
+    salutation,
     "",
     "We have received your help request at our end and will shortly review it.",
     "",
