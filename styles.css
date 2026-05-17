@@ -1139,7 +1139,18 @@ body.public-need-form-mode {
     linear-gradient(180deg, #f8f6ee 0%, #f3efe2 100%);
 }
 
+body.public-solution-form-mode {
+  background:
+    radial-gradient(circle at top left, rgba(255, 247, 230, 0.9), transparent 34%),
+    linear-gradient(180deg, #f8f6ee 0%, #f3efe2 100%);
+}
+
 body.public-need-form-mode .shell {
+  max-width: 1280px;
+  padding-inline: 18px;
+}
+
+body.public-solution-form-mode .shell {
   max-width: 1280px;
   padding-inline: 18px;
 }
@@ -1150,6 +1161,15 @@ body.public-need-form-mode #need-intakeView .intake-grid {
 
 body.public-need-form-mode #need-intakeView .intake-grid > .panel:last-child,
 body.public-need-form-mode #shareNeedFormBtn {
+  display: none;
+}
+
+body.public-solution-form-mode #solutionView .intake-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.public-solution-form-mode #solutionView .intake-grid > .panel:last-child,
+body.public-solution-form-mode #shareSolutionFormBtn {
   display: none;
 }
 .intake-actions {

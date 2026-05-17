@@ -15,7 +15,7 @@ const state = {
     : sharedFormQuery === "need"
       ? "need-intake"
       : "",
-  standaloneNeedFormMode: bootstrapQuery.get("publicForm") === "need",
+  standalonePublicFormMode: bootstrapQuery.get("publicForm") || "",
   selectedNeedId: null,
   queueNeedsScrollIntoView: false,
   overviewPage: 1,
@@ -395,8 +395,10 @@ function isSharedFormMode() {
   return state.sharedFormMode === "solution" || state.sharedFormMode === "need-intake";
 }
 
-function isStandaloneNeedFormMode() {
-  return Boolean(state.standaloneNeedFormMode && state.sharedFormMode === "need-intake");
+function isStandalonePublicFormMode(mode = "") {
+  if (!state.standalonePublicFormMode) return false;
+  if (!mode) return true;
+  return state.standalonePublicFormMode === mode;
 }
 
 function isAdminUser() {
@@ -2346,9 +2348,9 @@ function openMissingOrgDialog(orgName = "") {
 }
 
 function getShareUrl(mode) {
-  if (mode !== "solution") {
-    const publicNeedFormUrl = normalizeText(window.APP_CONFIG?.PUBLIC_NEED_FORM_URL || "");
-    if (publicNeedFormUrl) return publicNeedFormUrl;
+  if (mode === "solution") {
+    const publicSolutionFormUrl = normalizeText(window.APP_CONFIG?.PUBLIC_SOLUTION_FORM_URL || "");
+    if (publicSolutionFormUrl) return publicSolutionFormUrl;
   }
   const url = new URL(window.location.href);
   url.searchParams.set("sharedForm", mode === "solution" ? "solution" : "need");
@@ -4643,7 +4645,8 @@ function renderAuthState() {
   const loggedIn = isLoggedIn();
   const showShell = loggedIn || sharedMode;
   const isAdminDatasetVisible = isAdminUser() && state.view === "admin";
-  document.body.classList.toggle("public-need-form-mode", isStandaloneNeedFormMode());
+  document.body.classList.toggle("public-need-form-mode", isStandalonePublicFormMode("need"));
+  document.body.classList.toggle("public-solution-form-mode", isStandalonePublicFormMode("solution"));
 
   if (authGate) authGate.classList.toggle("hidden", showShell);
   if (appShell) appShell.classList.toggle("hidden", !showShell);
