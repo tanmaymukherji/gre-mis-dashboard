@@ -191,6 +191,21 @@
 
     const normalizeText = (value) => value === null || value === undefined ? "" : String(value).trim();
     const parseArray = (value) => Array.isArray(value) ? value.filter(Boolean) : typeof value === "string" ? value.split(/[;,|]/).map((item) => item.trim()).filter(Boolean) : [];
+    const parseContactDetailParts = (value) => {
+      const text = normalizeText(value);
+      if (!text) return { text: "", name: "", email: "", phone: "" };
+      const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+      const phoneMatch = text.match(/(?:\+?\d[\d\s().-]{7,}\d)/);
+      const lines = text.split(/\r?\n|[,;|]/).map((item) => normalizeText(item)).filter(Boolean);
+      const firstLine = lines[0] || "";
+      const looksLikeName = firstLine && !/@/.test(firstLine) && !/\d{5,}/.test(firstLine);
+      return {
+        text,
+        name: looksLikeName ? firstLine : "",
+        email: emailMatch ? emailMatch[0] : "",
+        phone: phoneMatch ? phoneMatch[0].trim() : "",
+      };
+    };
 
     function buildRow(label, value, isLink = false) {
       const clean = Array.isArray(value) ? value.join(", ") : normalizeText(value);
@@ -204,6 +219,8 @@
       const heroCopy = normalizeText(match.about_offering_text || match.solution?.about_solution_text || "No description is available for this offering yet.");
       const solutionText = normalizeText(match.solution?.about_solution_text || match.about_offering_text || "No additional solution description is available.");
       const greHref = normalizeText(match.gre_link || "");
+      const contactParts = parseContactDetailParts(match.contact_details);
+      const isProductOffering = /product/i.test(normalizeText(match.offering_group || match.offering_category));
       const offeringRows = [
         buildRow("Offering Category", match.offering_category),
         buildRow("Offering Group", match.offering_group || match.ai_offering_kind),
@@ -218,7 +235,8 @@
         buildRow("Grade or Capacity", match.grade_or_capacity || match.capacity),
         buildRow("Product Cost", match.product_cost || match.cost),
         buildRow("Lead Time", match.lead_time),
-        buildRow("Support Details", match.support_details || match.contact_details),
+        buildRow("Support Details", match.support_details),
+        buildRow("Product Contact Details", match.contact_details),
         buildRow("Product Brochure", match.product_brochure || match.brochure_link || match.document_link, true),
       ].filter(Boolean).join("");
 
@@ -226,10 +244,11 @@
         buildRow("Solution Name", match.solution?.solution_name || offeringName),
         buildRow("Provider", providerName),
         buildRow("Association Status", match.trader?.association_status),
-        buildRow("Email", match.trader?.email),
+        buildRow("Email", isProductOffering ? (contactParts.email || match.trader?.email) : match.trader?.email),
         buildRow("Website", match.trader?.website, true),
-        buildRow("Phone", match.trader?.phone || match.contact_details),
-        buildRow("Point of Contact", match.point_of_contact || match.contact_person),
+        buildRow("Phone", isProductOffering ? (contactParts.phone || match.trader?.mobile || match.trader?.phone) : (match.trader?.mobile || match.trader?.phone || match.contact_details)),
+        buildRow("Point of Contact", isProductOffering ? (contactParts.name || match.trader?.poc_name || match.point_of_contact || match.contact_person) : (match.trader?.poc_name || match.point_of_contact || match.contact_person)),
+        buildRow("Contact Details", isProductOffering ? match.contact_details : ""),
         buildRow("Tagline", match.tagline),
       ].filter(Boolean).join("");
 

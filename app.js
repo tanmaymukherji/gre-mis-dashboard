@@ -118,8 +118,8 @@ const OFFERING_TYPE_OPTIONS = {
 };
 
 const DEFAULT_LANGUAGE_OPTIONS = [
-  "ENG",
-  "HIN",
+  "English",
+  "Hindi",
   "ASSAMESE",
   "BENGALI",
   "BODO",
@@ -366,6 +366,20 @@ function safeAsync(handler) {
 
 function normalizeText(value) {
   return String(value ?? "").trim();
+}
+
+function canonicalizeLanguageLabel(value) {
+  const text = normalizeText(value);
+  if (!text) return "";
+  const normalized = text.toLowerCase();
+  if (["eng", "english"].includes(normalized)) return "English";
+  if (["hin", "hindi"].includes(normalized)) return "Hindi";
+  if (["odia", "oriya", "odiya", "od"].includes(normalized)) return "Odia";
+  return text;
+}
+
+function canonicalizeLanguageArray(values) {
+  return uniq(ensureList(values).map((item) => canonicalizeLanguageLabel(item)).filter(Boolean));
 }
 
 function syncSessionState(user, token = state.userToken) {
@@ -2154,7 +2168,7 @@ class GreMisStore {
 
     const [tradersRes, solutionsRes] = await Promise.all([
       traderIds.length
-        ? client.from("traders").select("trader_id,trader_name,organisation_name,email,website").in("trader_id", traderIds)
+        ? client.from("traders").select("trader_id,trader_name,organisation_name,email,website,mobile,poc_name").in("trader_id", traderIds)
         : Promise.resolve({ data: [], error: null }),
       solutionIds.length
         ? client.from("solutions").select("solution_id,solution_name,about_solution_text").in("solution_id", solutionIds)
@@ -2380,7 +2394,7 @@ function buildOfferingMasterData(rows) {
       ...applications,
     ].filter(Boolean).forEach((item) => lists.applications.add(item));
     parseArray(row.tags).filter(Boolean).forEach((item) => lists.tags.add(item));
-    parseArray(row.languages).filter(Boolean).forEach((item) => lists.languages.add(item));
+    canonicalizeLanguageArray(parseArray(row.languages)).forEach((item) => lists.languages.add(item));
     parseArray(row.geographies).filter(Boolean).forEach((item) => lists.geographies.add(item));
     normalizedRows.push({
       primaryValuechain,
@@ -2537,6 +2551,22 @@ function normalizeMultiTextValue(value) {
       .map((item) => normalizeText(item))
       .filter(Boolean),
   );
+}
+
+function parseContactDetailParts(value) {
+  const text = normalizeText(value);
+  if (!text) return { text: "", name: "", email: "", phone: "" };
+  const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  const phoneMatch = text.match(/(?:\+?\d[\d\s().-]{7,}\d)/);
+  const lines = text.split(/\r?\n|[,;|]/).map((item) => normalizeText(item)).filter(Boolean);
+  const firstLine = lines[0] || "";
+  const looksLikeName = firstLine && !/@/.test(firstLine) && !/\d{5,}/.test(firstLine);
+  return {
+    text,
+    name: looksLikeName ? firstLine : "",
+    email: emailMatch ? emailMatch[0] : "",
+    phone: phoneMatch ? phoneMatch[0].trim() : "",
+  };
 }
 
 function normalizeSemicolonSeparatedValue(value) {
@@ -3574,6 +3604,10 @@ function renderNeedDetail() {
 function buildMatchDetailHtml(match) {
   if (!match) return `<div class="empty-state">Match details are not available.</div>`;
   const fullText = normalizeText(match.about_offering_text || match.solution?.about_solution_text || "No detailed offering summary is available yet.");
+  const contactParts = parseContactDetailParts(match.contact_details);
+  const preferredEmail = contactParts.email || match.trader?.email || "";
+  const preferredPhone = contactParts.phone || match.trader?.mobile || match.trader?.phone || "";
+  const preferredName = contactParts.name || match.trader?.poc_name || "";
   return `
     <section class="need-overview-card">
       <div class="need-overview-head">
@@ -3596,8 +3630,11 @@ function buildMatchDetailHtml(match) {
         <h4>Provider</h4>
         <div class="kv-grid">
           <div><span>Organisation</span><strong>${esc(match.trader?.organisation_name || match.trader?.trader_name || "Not set")}</strong></div>
-          <div><span>Email</span><strong>${esc(match.trader?.email || "Not set")}</strong></div>
+          <div><span>Email</span><strong>${esc(preferredEmail || "Not set")}</strong></div>
+          <div><span>Phone</span><strong>${esc(preferredPhone || "Not set")}</strong></div>
+          <div><span>Point of Contact</span><strong>${esc(preferredName || "Not set")}</strong></div>
           <div><span>Website</span><strong>${esc(match.trader?.website || "Not set")}</strong></div>
+          <div><span>Contact Details</span><strong>${esc(match.contact_details || "Not set")}</strong></div>
           <div><span>GRE Link</span><strong>${match.gre_link ? `<a href="${esc(match.gre_link)}" target="_blank" rel="noreferrer">Open on GRE</a>` : "Not available"}</strong></div>
         </div>
       </article>
@@ -3676,7 +3713,7 @@ async function renderMatches() {
   matchesEl.innerHTML = matches.length
     ? visibleMatches
         .map((match) => {
-          const email = match.trader?.email || "";
+          const email = parseContactDetailParts(match.contact_details).email || match.trader?.email || "";
           const matchSummary = normalizeText(match.about_offering_text || match.solution?.about_solution_text || "");
           const truncatedSummary = matchSummary.slice(0, 280);
           const hasMore = matchSummary.length > 280;
@@ -4447,7 +4484,7 @@ function openLocalSolutionReviewDialog(offeringId) {
   setValue("trainer_email", solution.trainer_email || "");
   setValue("trainer_phone", solution.trainer_phone || "");
   setValue("trainer_details_text", solution.trainer_details_text || "");
-  setValue("languages", parseArray(solution.languages).join(", "));
+  setValue("languages", canonicalizeLanguageArray(parseArray(solution.languages)).join(", "));
   setValue("geographies", parseArray(solution.geographies).join("; "));
   setValue("service_cost", solution.service_cost || "");
   setValue("product_cost", solution.product_cost || "");
@@ -4893,7 +4930,7 @@ async function collectSubmissionPayload(form, submissionType = "need") {
   const offeringCategory = normalizeText(entries.offering_category) || "Service offerings";
   const offeringGroup = offeringCategory.replace(/\s+offerings$/i, "").trim() || "Service";
   const defaultAudience = ["Individuals", "Groups", "SHGs", "Organisations"];
-  const serviceLanguages = normalizeMultiTextValue(entries.languages);
+  const serviceLanguages = canonicalizeLanguageArray(normalizeMultiTextValue(entries.languages));
   const tags = uniq([
     ...parseLooseListInput(entries.tags),
     ...normalizeMultiTextValue(entries.keywords),
@@ -5451,7 +5488,7 @@ function bindStaticEvents() {
       trainer_email: form.get("trainer_email"),
       trainer_phone: form.get("trainer_phone"),
       trainer_details_text: form.get("trainer_details_text"),
-      languages: parseCommaList(form.get("languages")),
+      languages: canonicalizeLanguageArray(parseCommaList(form.get("languages"))),
       geographies: parseDelimitedList(form.get("geographies"), ";"),
       service_cost: form.get("service_cost"),
       product_cost: form.get("product_cost"),

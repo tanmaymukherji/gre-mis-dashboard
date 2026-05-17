@@ -80,6 +80,20 @@ function asStringArray(value: unknown) {
   return [];
 }
 
+function normalizeLanguageLabel(value: unknown) {
+  const text = requireString(value);
+  if (!text) return "";
+  const normalized = text.toLowerCase();
+  if (["eng", "english"].includes(normalized)) return "English";
+  if (["hin", "hindi"].includes(normalized)) return "Hindi";
+  if (["odia", "oriya", "odiya", "od"].includes(normalized)) return "Odia";
+  return text;
+}
+
+function normalizeLanguageArray(value: unknown) {
+  return uniqueStrings(asStringArray(value).map((item) => normalizeLanguageLabel(item)).filter(Boolean));
+}
+
 function parseBoolean(value: unknown) {
   if (typeof value === "boolean") return value;
   const normalized = requireString(value).toLowerCase();
@@ -2077,7 +2091,7 @@ async function buildGreServicePublishPayload(
   const trainerEmail = requireString(payload.trainer_email).toLowerCase();
   const trainerPhone = requireString(payload.trainer_phone);
   const trainerDetails = normalizeRichText(payload.trainer_details_text || payload.trainer_details);
-  const languages = asStringArray(payload.languages);
+  const languages = normalizeLanguageArray(payload.languages);
   const geographies = asStringArray(payload.geographies);
   const duration = requireString(payload.duration);
   const durationUnit = requireString(payload.duration_unit || "Days");
@@ -2343,9 +2357,12 @@ async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
   );
   const verifiedPayload = (verifiedRequest && typeof verifiedRequest === "object") ? verifiedRequest as Record<string, unknown> : {};
   const verifiedCurationList = Array.isArray(verifiedPayload.curationList) ? verifiedPayload.curationList : [];
-  const verifiedPrimaryCuration = (verifiedCurationList[selectedCurationIndex] && typeof verifiedCurationList[selectedCurationIndex] === "object")
-    ? verifiedCurationList[selectedCurationIndex] as Record<string, unknown>
-    : {};
+  const verifiedPrimaryCuration = findVerifiedGreCurationEntry(
+    verifiedCurationList,
+    primaryCuration,
+    selectedCurationIndex,
+    requestRow,
+  );
 
   if (requestRow.proposed_status) {
     const nextCode = requireString(((verifiedPayload.status || {}) as Record<string, unknown>).code);
@@ -2364,8 +2381,17 @@ async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
   if (requestRow.proposed_curation_notes) {
     const verifiedNotes = requireString(verifiedPrimaryCuration.callDetails);
     const expectedNotes = requireString(primaryCuration.callDetails);
-    if (expectedNotes && verifiedNotes !== expectedNotes) {
-      throw new Error("GRE verification failed for curation notes.");
+    const normalizedVerifiedNotes = normalizeComparable(verifiedNotes);
+    const normalizedExpectedNotes = normalizeComparable(expectedNotes);
+    const notesMatch =
+      !normalizedExpectedNotes ||
+      normalizedVerifiedNotes === normalizedExpectedNotes ||
+      normalizedVerifiedNotes.includes(normalizedExpectedNotes) ||
+      normalizedExpectedNotes.includes(normalizedVerifiedNotes);
+    if (!notesMatch) {
+      throw new Error(
+        `GRE verification failed for curation notes. Expected snippet "${expectedNotes.slice(0, 80)}", found "${verifiedNotes.slice(0, 80)}".`,
+      );
     }
   }
   if (requestRow.proposed_curation_call_date) {
@@ -2397,6 +2423,50 @@ function selectGreCurationIndex(curationList: unknown[], requestRow: Record<stri
     if (withExistingDetail >= 0) return withExistingDetail;
   }
   return 0;
+}
+
+function findVerifiedGreCurationEntry(
+  curationList: unknown[],
+  expectedCuration: Record<string, unknown>,
+  selectedCurationIndex: number,
+  requestRow: Record<string, unknown>,
+) {
+  const rows = Array.isArray(curationList)
+    ? curationList.map((entry) => (entry && typeof entry === "object") ? entry as Record<string, unknown> : {})
+    : [];
+  if (!rows.length) return {};
+
+  const selectedRow = rows[selectedCurationIndex] || {};
+  const expectedNotes = normalizeComparable(expectedCuration.callDetails);
+  const expectedDate = requireString(expectedCuration.callDate);
+  const expectedCuratorId = requireString(expectedCuration.curatorUserId);
+  const expectedCuratorName = normalizeComparable(expectedCuration.curatorUserName);
+  const wantsNotes = Boolean(requireString(requestRow.proposed_curation_notes));
+  const wantsDate = Boolean(requireString(requestRow.proposed_curation_call_date));
+
+  const scoreRow = (row: Record<string, unknown>) => {
+    let score = 0;
+    const rowNotes = normalizeComparable(row.callDetails);
+    const rowDate = requireString(row.callDate);
+    const rowCuratorId = requireString(row.curatorUserId);
+    const rowCuratorName = normalizeComparable(row.curatorUserName);
+
+    if (expectedCuratorId && rowCuratorId === expectedCuratorId) score += 6;
+    if (expectedCuratorName && rowCuratorName === expectedCuratorName) score += 3;
+    if (wantsDate && expectedDate && rowDate === expectedDate) score += 5;
+    if (wantsNotes && expectedNotes) {
+      if (rowNotes === expectedNotes) score += 8;
+      else if (rowNotes.includes(expectedNotes) || expectedNotes.includes(rowNotes)) score += 4;
+    }
+    return score;
+  };
+
+  const bestRow = rows
+    .map((row, index) => ({ row, index, score: scoreRow(row) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)[0];
+
+  if (bestRow && bestRow.score > 0) return bestRow.row;
+  return selectedRow;
 }
 
 function stableRowSignature(value: unknown) {
@@ -4377,7 +4447,7 @@ async function createLocalSolutionFromSubmission(
   const solutionName = requireString(payload.solution_name || offeringName);
   const solutionDescription = requireString(payload.about_solution_text || offeringDescription || offeringName);
   const tags = uniqueStrings(asStringArray(payload.tags));
-  const languages = uniqueStrings(asStringArray(payload.languages));
+  const languages = normalizeLanguageArray(payload.languages);
   const geographies = uniqueStrings(asStringArray(payload.geographies));
   const locationAvailability = uniqueStrings(asStringArray(payload.location_availability));
   const contactDetails = buildLocalContactDetails(payload);
@@ -5150,7 +5220,7 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
   const solutionDescription = requireString(payload.about_solution_text || offeringDescription || solutionRow?.about_solution_text);
   const tags = uniqueStrings(asStringArray(payload.tags || offering.tags));
   if (!tags.length) throw new Error("At least one tag is required.");
-  const languages = uniqueStrings(asStringArray(payload.languages || offering.languages));
+  const languages = normalizeLanguageArray(payload.languages || offering.languages);
   const geographies = uniqueStrings(asStringArray(payload.geographies || offering.geographies));
   const locationAvailability = uniqueStrings(asStringArray(payload.location_availability)).join(", ") || requireString(offering.location_availability);
   const productCost = requireString(payload.product_cost || offering.product_cost);
@@ -5656,7 +5726,7 @@ function normalizeOfferingRowForChatbot(row: Record<string, unknown>) {
   const valuechains = splitLooseList(normalizeCell(row.Valuechains));
   const applications = splitLooseList(normalizeCell(row.Applications));
   const tags = splitLooseList(normalizeCell(row.Tags));
-  const languages = splitLooseList(normalizeCell(row.Languages));
+  const languages = normalizeLanguageArray(splitLooseList(normalizeCell(row.Languages)));
   const geographiesRaw = normalizeCell(row.Geographies);
   const geographies = splitGeographies(geographiesRaw);
 
