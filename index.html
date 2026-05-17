@@ -504,13 +504,13 @@
             <div class="panel-head">
               <div>
                 <p class="eyebrow">Request Solution</p>
-                <h3>Need Solution</h3>
+                <h3>Need Help</h3>
               </div>
             </div>
             <form id="needSubmissionForm" class="form-grid solution-form-grid">
               <section class="form-section wide">
                 <div class="form-section-head">
-                  <p class="eyebrow">Need Solution</p>
+                  <p class="eyebrow">Need Help</p>
                   <h4>Account and Contact</h4>
                 </div>
                 <div class="form-grid">
@@ -573,11 +573,20 @@
                     <div id="needDeploymentChips" class="tag-cloud tag-chip-editor"></div>
                     <datalist id="needDeploymentOptions"></datalist>
                   </div>
+                  <div class="wide choice-block">
+                    <span class="field-label">Broadcast to Ecosystem</span>
+                    <div class="option-grid option-grid-two">
+                      <label class="option-chip">
+                        <input type="checkbox" name="broadcast_to_ecosystem" value="true" checked />
+                        <span>Allow this need to be broadcast wider if needed</span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               </section>
 
               <div class="wide intake-actions">
-                <button type="submit" class="btn btn-primary">Need Solution</button>
+                <button type="submit" class="btn btn-primary">Need Help</button>
                 <button type="button" id="shareNeedFormBtn" class="btn btn-secondary">Share Page Link</button>
               </div>
               <p id="needSubmissionStatus" class="helper-text wide"></p>

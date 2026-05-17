@@ -2929,6 +2929,7 @@ function getSubmissionReviewFieldConfig(submissionType, payload = {}) {
       { key: "offering_type", label: "Need Type" },
       { key: "thematic_area", label: "Thematic Area" },
       { key: "deployment_locations", label: "Place of Deployment", multiline: true, list: true, wide: true },
+      { key: "demand_broadcast_needed", label: "Broadcast to Ecosystem" },
       { key: "keywords", label: "Keywords for Need Statement", multiline: true, list: true, wide: true },
       { key: "problem_statement", label: "Need Statement", multiline: true, wide: true },
     ];
@@ -3258,7 +3259,7 @@ function renderSubmissionViews() {
     solutionTitle.textContent = isSharedFormMode() ? "Share a Solution for GRE Review" : "Add Solution to Admin Review Queue";
   }
   if (needTitle) {
-    needTitle.textContent = isSharedFormMode() ? "Share a Need with GRE" : "Need Solution";
+    needTitle.textContent = isSharedFormMode() ? "Share a Need with GRE" : "Need Help";
   }
 }
 
@@ -5014,6 +5015,7 @@ async function collectSubmissionPayload(form, submissionType = "need") {
       thematic_area: thematicArea,
       keywords: [],
       deployment_locations: deploymentLocations,
+      demand_broadcast_needed: normalizeText(entries.broadcast_to_ecosystem) === "true",
       state: stateFromDeployment || "",
       district: districtFromDeployment || "",
     };
@@ -5310,21 +5312,28 @@ function bindStaticEvents() {
   byId("needSubmissionForm")?.addEventListener("submit", safeAsync(async (event) => {
       event.preventDefault();
       const status = byId("needSubmissionStatus");
-      if (status) status.textContent = "Submitting need for admin review...";
+      if (status) status.textContent = "Submitting help request for admin review...";
       const payload = await collectSubmissionPayload(event.target, "need");
       const result = isLoggedIn()
         ? await store.submitSignedInForm("need", payload)
         : await store.submitSharedForm("need", payload);
-    event.target.reset();
-    state.needTags = [];
-    state.needDeploymentLocations = [];
-    renderNeedTagChips();
-    renderNeedDeploymentChips();
-    fillSupplierSelect("needTraderSelect", "needOrgName");
-    renderNeedReferenceInputs();
-    if (status) status.textContent = result.message || "Need submission sent to admin review.";
-    if (isAdminUser()) await refreshAll();
-    toast("Need submission queued for admin review.");
+      event.target.reset();
+      state.needTags = [];
+      state.needDeploymentLocations = [];
+      renderNeedTagChips();
+      renderNeedDeploymentChips();
+      if (isSharedFormMode()) {
+        event.target.innerHTML = `<button type="button" class="btn btn-primary" id="needSubmissionReloadBtn">Need Help Submitted for Approval</button>`;
+        byId("needSubmissionReloadBtn")?.addEventListener("click", () => window.location.reload());
+      } else {
+        fillSupplierSelect("needTraderSelect", "needOrgName");
+        renderNeedReferenceInputs();
+        if (status) status.textContent = result.message || "Need Help Submitted for Approval";
+      }
+      if (isAdminUser()) await refreshAll();
+      if (!isSharedFormMode()) {
+        toast(result.message || "Need Help Submitted for Approval");
+      }
   }));
 
   byId("shareSolutionFormBtn")?.addEventListener("click", safeAsync(async () => {

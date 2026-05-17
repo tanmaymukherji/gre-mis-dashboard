@@ -3258,6 +3258,49 @@ async function sendSolutionSubmissionConfirmationEmail(payload: Record<string, u
   return { ok: true };
 }
 
+async function sendNeedSubmissionConfirmationEmail(payload: Record<string, unknown>) {
+  const seekerEmail = requireString(payload.seeker_email || payload.seekerEmail).toLowerCase();
+  if (!seekerEmail) return { ok: false, reason: "No seeker email provided." };
+
+  const seekerName =
+    requireString(payload.contact_person || payload.contactPerson) ||
+    requireString(payload.submitter_name || payload.submitterName) ||
+    "Seeker";
+  const allowBroadcast = parseBoolean(payload.demand_broadcast_needed) ?? false;
+  const broadcastLine = allowBroadcast
+    ? "have"
+    : "have not";
+  const cc = ["help@greenruraleconomy.in", "tanmay@greenruraleconomy.in"].join(", ");
+  const subject = "We have received your help request on AskGRE";
+  const body = [
+    `Hello ${seekerName},`,
+    "",
+    "We have received your help request at our end and will shortly review it. Once we are able to understand the need we will setup a call with you to fine tune the requirements and suggest possible solution providers for your need. In case we are unable to find one in our current network, we will also broadcast these needs to the wider ecosystem, if you so permit. We have noted that you " + broadcastLine + " given us the permission to Broadcast this need to the wider ecosystem.",
+    "",
+    "We thank you for reaching out to us.",
+    "Regards,",
+    "Team GRE",
+  ].join("\n");
+
+  await sendEmail({
+    to: seekerEmail,
+    cc,
+    subject,
+    body,
+    mailbox: "default",
+  });
+
+  await adminClient.from("gre_mis_email_log").insert({
+    recipient_email: seekerEmail,
+    cc_email: cc,
+    subject,
+    body_preview: body.slice(0, 1000),
+    sent_by_email: gmailSenderEmail,
+  });
+
+  return { ok: true };
+}
+
 async function createUserSession(userId: string) {
   const token = generateToken();
   const tokenHash = await hashToken(token);
@@ -4868,6 +4911,7 @@ async function submitFormSubmission(
   const submitterEmail = requireString(payload.submitter_email || payload.submitterEmail || userCtx?.user?.email).toLowerCase();
   const submitterPhone = requireString(payload.submitter_phone || payload.submitterPhone || userCtx?.user?.phone);
   const shareContext = requireString(payload.share_context || payload.shareContext);
+  const demandBroadcastNeeded = parseBoolean(payload.demand_broadcast_needed) ?? false;
 
   if (!organizationName) throw new Error("Organization name is required.");
   let trader: Record<string, unknown> | null = null;
@@ -4918,13 +4962,23 @@ async function submitFormSubmission(
 
   let message = normalizedType === "solution"
     ? "Solution Submitted for Approval"
-    : "Submission saved for admin review.";
+    : "Need Help Submitted for Approval";
   if (normalizedType === "solution") {
     try {
       await sendSolutionSubmissionConfirmationEmail(payload);
     } catch (mailError) {
       const reason = requireString((mailError as { message?: string } | null)?.message) || "Unknown mail error.";
       message = `Solution Submitted for Approval. Confirmation email could not be sent: ${reason}`;
+    }
+  } else if (normalizedType === "need") {
+    try {
+      await sendNeedSubmissionConfirmationEmail({
+        ...payload,
+        demand_broadcast_needed: demandBroadcastNeeded,
+      });
+    } catch (mailError) {
+      const reason = requireString((mailError as { message?: string } | null)?.message) || "Unknown mail error.";
+      message = `Need Help Submitted for Approval. Confirmation email could not be sent: ${reason}`;
     }
   }
 
@@ -4990,6 +5044,7 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       problem_statement: requireString(payload.problem_statement),
       status: "New",
       internal_status: "Need solution providers",
+      demand_broadcast_needed: parseBoolean(payload.demand_broadcast_needed) ?? false,
       curated_need: curatedNeed,
       approval_status: "approved",
       source_kind: "shared_form_submission",
