@@ -4958,15 +4958,16 @@ async function submitFormSubmission(
   if (!organizationName) throw new Error("Organization name is required.");
   let trader: Record<string, unknown> | null = null;
   if (normalizedType !== "solution") {
-    if (!existingTraderId) throw new Error("Please select an existing GRE supplier organization first.");
-    const { data, error: traderError } = await adminClient
-      .from("traders")
-      .select("trader_id, organisation_name, trader_name")
-      .eq("trader_id", existingTraderId)
-      .maybeSingle();
-    if (traderError) throw new Error(traderError.message);
-    if (!data) throw new Error("Selected GRE supplier organization could not be found.");
-    trader = data;
+    if (existingTraderId) {
+      const { data, error: traderError } = await adminClient
+        .from("traders")
+        .select("trader_id, organisation_name, trader_name")
+        .eq("trader_id", existingTraderId)
+        .maybeSingle();
+      if (traderError) throw new Error(traderError.message);
+      if (!data) throw new Error("Selected GRE supplier organization could not be found.");
+      trader = data;
+    }
   } else if (existingTraderId) {
     const { data, error: traderError } = await adminClient
       .from("traders")

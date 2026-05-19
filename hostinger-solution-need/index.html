@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Solution Offering | Green Rural Economy</title>
   <meta name="description" content="Upload your solutions to the AskGRE platform for admin approval and publishing." />
+  <link rel="stylesheet" href="https://grameee.org/shared-shell.css" />
+  <script src="https://grameee.org/supabase-config.js" defer></script>
+  <script src="https://grameee.org/shared-shell.js" defer></script>
+  <script src="https://grameee.org/auth.js" defer></script>
   <style>
     :root {
       color-scheme: light;
@@ -25,6 +29,11 @@
         radial-gradient(circle at top left, rgba(255, 246, 223, 0.95), transparent 32%),
         linear-gradient(180deg, #f8f5eb 0%, var(--bg) 100%);
       color: var(--text);
+    }
+
+    body > .grameee-shell-mount {
+      width: calc(100vw - 36px);
+      max-width: none;
     }
 
     .page {
@@ -108,7 +117,101 @@
       display: block;
     }
 
+    .account-modal[hidden] { display: none; }
+    .account-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 90;
+      background: rgba(19, 38, 28, 0.38);
+      display: grid;
+      place-items: center;
+      padding: 18px;
+    }
+
+    .account-modal-card {
+      width: min(760px, 100%);
+      max-height: min(92vh, 980px);
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 22px;
+      box-shadow: 0 24px 60px rgba(20, 36, 27, 0.18);
+    }
+
+    .account-modal-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+
+    .account-modal-head h2 {
+      margin: 4px 0 0;
+      font-size: clamp(1.3rem, 2vw, 1.8rem);
+    }
+
+    .account-modal-form,
+    .account-modal-grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .account-modal-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .account-modal-grid label,
+    .account-modal-form label {
+      display: grid;
+      gap: 6px;
+      font-size: 0.94rem;
+      color: var(--muted);
+    }
+
+    .account-modal-grid label.wide,
+    .account-modal-form label.wide,
+    .account-modal-grid .wide {
+      grid-column: 1 / -1;
+    }
+
+    .account-modal-grid input,
+    .account-modal-form input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 14px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+    }
+
+    .account-modal-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .status-text {
+      margin: 0;
+      font-size: 0.92rem;
+      color: var(--muted);
+    }
+
+    .status-text.error { color: #9f2f2f; }
+    .field-meta {
+      margin: 0;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
     @media (max-width: 900px) {
+      body > .grameee-shell-mount {
+        width: calc(100vw - 24px);
+      }
+
       .page { padding: 12px; }
       .hero { padding: 18px; border-radius: 20px; flex-direction: column; align-items: flex-start; }
       iframe { height: calc(100vh - 220px); min-height: 680px; }
@@ -124,18 +227,358 @@
         <p class="lede">Upload your Solutions to the AskGRE Platform. Added Solutions would go through an approval process and then reflect on the askgre.grameee.org platform.</p>
       </div>
       <div class="hero-actions">
-        <a class="link-btn" href="https://askgre.grameee.org/" target="_blank" rel="noreferrer">Visit AskGRE</a>
+        <a class="link-btn" href="https://askgre.grameee.org/">Visit AskGRE</a>
       </div>
     </section>
 
     <section class="frame-shell">
       <iframe
+        id="solutionFormFrame"
         title="GRE Solution Offering Form"
-        src="https://tanmaymukherji.github.io/gre-mis-dashboard/?sharedForm=solution&publicForm=solution"
+        src="https://tanmaymukherji.github.io/gre-mis-dashboard/?sharedForm=solution&publicForm=solution&grameeeEmbed=1"
         loading="eager"
         referrerpolicy="strict-origin-when-cross-origin"
       ></iframe>
     </section>
   </div>
+
+  <section id="addUserModal" class="account-modal" hidden>
+    <div class="account-modal-card">
+      <div class="account-modal-head">
+        <div>
+          <p class="eyebrow">Add on Behalf of Other</p>
+          <h2>Create a GramEEE user and use those details in this form</h2>
+          <p class="lede">This uses the same GramEEE account validations as the main registration flow. Once created, the new user details will be copied into the intake form.</p>
+        </div>
+        <button class="link-btn" type="button" id="closeAddUserModal">Close</button>
+      </div>
+
+      <form id="addUserForm" class="account-modal-form">
+        <div class="account-modal-grid">
+          <label>
+            <span>Full Name</span>
+            <input id="delegateFullName" type="text" required />
+          </label>
+          <label>
+            <span>Organisation</span>
+            <input id="delegateOrganization" list="delegateOrganizationSuggestions" type="text" required />
+            <datalist id="delegateOrganizationSuggestions"></datalist>
+          </label>
+          <div class="wide">
+            <p class="field-meta" id="delegateOrganizationHelper" hidden>
+              Organisation not found in the combined GramEEE and GRE directories yet. You can still continue, and richer organisation details can be added later through ecosystem.grameee.org.
+            </p>
+          </div>
+          <label class="wide">
+            <span>Organisation Directory / New Org Form Link (optional)</span>
+            <input id="delegateOrganizationLink" type="url" />
+          </label>
+          <label>
+            <span>Email Address</span>
+            <input id="delegateEmail" type="email" required />
+          </label>
+          <label>
+            <span>Phone Number (optional)</span>
+            <input id="delegatePhone" type="tel" />
+          </label>
+          <label class="wide">
+            <span>Email Verification</span>
+            <div class="account-modal-actions">
+              <input id="delegateVerificationCode" type="text" inputmode="numeric" placeholder="6-digit code" />
+              <button class="link-btn" id="delegateSendCode" type="button">Send Verification Code</button>
+              <button class="link-btn" id="delegateVerifyCode" type="button">Verify Code</button>
+            </div>
+            <p id="delegateVerificationStatus" class="status-text"></p>
+          </label>
+          <label>
+            <span>User Name</span>
+            <input id="delegateUsername" type="text" required />
+            <p id="delegateUsernameStatus" class="status-text"></p>
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="delegatePassword" type="password" required />
+            <p id="delegatePasswordStatus" class="status-text"></p>
+          </label>
+        </div>
+        <p id="delegateCreateStatus" class="status-text"></p>
+        <div class="account-modal-actions">
+          <button class="link-btn" id="delegateCreateButton" type="submit">Create Account and Use Details</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <script>
+    window.addEventListener("DOMContentLoaded", () => {
+      const iframe = document.getElementById("solutionFormFrame");
+      const modal = document.getElementById("addUserModal");
+      const closeModalButton = document.getElementById("closeAddUserModal");
+      const form = document.getElementById("addUserForm");
+      const organizationInput = document.getElementById("delegateOrganization");
+      const organizationList = document.getElementById("delegateOrganizationSuggestions");
+      const organizationHelper = document.getElementById("delegateOrganizationHelper");
+      const emailInput = document.getElementById("delegateEmail");
+      const verificationCodeInput = document.getElementById("delegateVerificationCode");
+      const sendCodeButton = document.getElementById("delegateSendCode");
+      const verifyCodeButton = document.getElementById("delegateVerifyCode");
+      const verificationStatus = document.getElementById("delegateVerificationStatus");
+      const usernameInput = document.getElementById("delegateUsername");
+      const usernameStatus = document.getElementById("delegateUsernameStatus");
+      const passwordInput = document.getElementById("delegatePassword");
+      const passwordStatus = document.getElementById("delegatePasswordStatus");
+      const createStatus = document.getElementById("delegateCreateStatus");
+      const createButton = document.getElementById("delegateCreateButton");
+      const iframeOrigin = new URL(iframe.src).origin;
+      let verificationToken = "";
+      let emailVerificationSentFor = "";
+      let verifiedEmail = "";
+      let knownOrganizations = [];
+
+      function normalizeValue(value) {
+        return (value || "").trim();
+      }
+
+      function setStatus(target, message, isError) {
+        if (!target) return;
+        target.textContent = message || "";
+        target.classList.toggle("error", Boolean(isError));
+      }
+
+      function normalizeActor(summary) {
+        if (!summary || typeof summary !== "object") return null;
+        return {
+          id: normalizeValue(summary.id),
+          fullName: normalizeValue(summary.fullName || summary.full_name || ""),
+          username: normalizeValue(summary.username || summary.user_name || ""),
+          organization: normalizeValue(summary.organization || summary.organisation || "") || "Individual",
+          email: normalizeValue(summary.email).toLowerCase(),
+          phone: normalizeValue(summary.phone || "")
+        };
+      }
+
+      async function getCurrentUser() {
+        const stored = window.grameeeAuth?.getStoredSummary?.();
+        if (stored) return normalizeActor(stored);
+        const hydrated = await window.grameeeAuth?.hydrateAuthSession?.().catch(() => null);
+        return normalizeActor(hydrated);
+      }
+
+      async function postContextToFrame() {
+        const user = await getCurrentUser();
+        iframe.contentWindow?.postMessage({
+          type: "grameee-form-context",
+          payload: { user }
+        }, iframeOrigin);
+      }
+
+      function renderOrganizations() {
+        organizationList.innerHTML = "";
+        knownOrganizations.forEach((name) => {
+          const option = document.createElement("option");
+          option.value = name;
+          organizationList.appendChild(option);
+        });
+      }
+
+      async function loadOrganizations() {
+        try {
+          knownOrganizations = await window.grameeeAuth.listOrganizations();
+          renderOrganizations();
+        } catch {
+          knownOrganizations = [];
+          renderOrganizations();
+        }
+      }
+
+      function updateOrganizationHelper() {
+        const currentValue = normalizeValue(organizationInput.value).toLowerCase();
+        const known = knownOrganizations.some((name) => name.toLowerCase() === currentValue);
+        organizationHelper.hidden = !currentValue || known;
+      }
+
+      async function sendVerificationCode() {
+        const email = normalizeValue(emailInput.value).toLowerCase();
+        if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+          setStatus(verificationStatus, "Please enter a valid email address first.", true);
+          return;
+        }
+        sendCodeButton.disabled = true;
+        verifyCodeButton.disabled = true;
+        createButton.disabled = true;
+        verifiedEmail = "";
+        setStatus(verificationStatus, "Sending verification code...");
+        try {
+          verificationToken = await window.grameeeAuth.sendEmailCode(email, "register");
+          emailVerificationSentFor = email;
+          verificationCodeInput.value = "";
+          setStatus(verificationStatus, "A 6-digit code has been sent. Please enter it and click Verify Code.");
+        } catch (error) {
+          setStatus(verificationStatus, error instanceof Error ? error.message : "Code could not be sent.", true);
+        } finally {
+          sendCodeButton.disabled = false;
+          verifyCodeButton.disabled = false;
+        }
+      }
+
+      async function verifyEmailCode() {
+        const email = normalizeValue(emailInput.value).toLowerCase();
+        const verificationCode = normalizeValue(verificationCodeInput.value);
+        if (!email || !verificationToken || !emailVerificationSentFor) {
+          setStatus(verificationStatus, "Please send the verification code first.", true);
+          return;
+        }
+        if (!verificationCode) {
+          setStatus(verificationStatus, "Please enter the 6-digit verification code.", true);
+          return;
+        }
+        verifyCodeButton.disabled = true;
+        setStatus(verificationStatus, "Verifying email code...");
+        try {
+          const result = await window.grameeeAuth.apiRequest("verifyEmailCode", {
+            email,
+            verificationToken,
+            verificationCode,
+            purpose: "register"
+          });
+          verifiedEmail = String(result?.email || email);
+          createButton.disabled = false;
+          setStatus(verificationStatus, "Email verified. You can now create the account.");
+          usernameInput.focus();
+        } catch (error) {
+          verifiedEmail = "";
+          createButton.disabled = true;
+          setStatus(verificationStatus, error instanceof Error ? error.message : "Verification code could not be confirmed.", true);
+        } finally {
+          verifyCodeButton.disabled = false;
+        }
+      }
+
+      async function checkUsername() {
+        const username = normalizeValue(usernameInput.value).toLowerCase();
+        if (!username) {
+          setStatus(usernameStatus, "");
+          return;
+        }
+        try {
+          const available = await window.grameeeAuth.checkUsernameAvailability(username, "");
+          setStatus(usernameStatus, available ? "Username is available." : "That username is already in use.", !available);
+        } catch (error) {
+          setStatus(usernameStatus, error instanceof Error ? error.message : "Username could not be checked.", true);
+        }
+      }
+
+      function validatePasswordHint() {
+        const password = passwordInput.value;
+        const strong = window.grameeeAuth.passwordIsStrong(password);
+        setStatus(
+          passwordStatus,
+          strong ? "Password strength looks good." : "Use at least 8 characters with 1 number and 1 special character.",
+          password && !strong
+        );
+      }
+
+      function openModal() {
+        modal.hidden = false;
+        document.body.style.overflow = "hidden";
+        setStatus(createStatus, "");
+        setStatus(verificationStatus, "");
+        if (!knownOrganizations.length) {
+          loadOrganizations();
+        }
+      }
+
+      function closeModal() {
+        modal.hidden = true;
+        document.body.style.overflow = "";
+      }
+
+      function resetVerificationState() {
+        verificationToken = "";
+        emailVerificationSentFor = "";
+        verifiedEmail = "";
+        createButton.disabled = true;
+        setStatus(verificationStatus, "");
+      }
+
+      async function submitDelegateAccount(event) {
+        event.preventDefault();
+        const payload = {
+          fullName: normalizeValue(document.getElementById("delegateFullName").value),
+          organization: normalizeValue(organizationInput.value),
+          organizationLink: normalizeValue(document.getElementById("delegateOrganizationLink").value),
+          email: normalizeValue(emailInput.value).toLowerCase(),
+          phone: normalizeValue(document.getElementById("delegatePhone").value),
+          username: normalizeValue(usernameInput.value).toLowerCase(),
+          password: passwordInput.value,
+          verificationCode: normalizeValue(verificationCodeInput.value),
+          verificationToken
+        };
+        if (!payload.fullName || !payload.organization || !payload.email || !payload.username || !payload.password) {
+          setStatus(createStatus, "Please complete all required fields before creating the account.", true);
+          return;
+        }
+        if (!verificationToken || emailVerificationSentFor !== payload.email || verifiedEmail !== payload.email) {
+          setStatus(createStatus, "Please send and verify the email code before creating the account.", true);
+          return;
+        }
+        if (!window.grameeeAuth.passwordIsStrong(payload.password)) {
+          setStatus(createStatus, "Password must be at least 8 characters with 1 number and 1 special character.", true);
+          return;
+        }
+        createButton.disabled = true;
+        setStatus(createStatus, "Creating the GramEEE account...");
+        try {
+          await window.grameeeAuth.apiRequest("registerUser", payload);
+          const createdUser = {
+            fullName: payload.fullName,
+            username: payload.username,
+            organization: payload.organization,
+            email: payload.email,
+            phone: payload.phone
+          };
+          iframe.contentWindow?.postMessage({
+            type: "grameee-form-add-user-created",
+            payload: { user: createdUser }
+          }, iframeOrigin);
+          form.reset();
+          resetVerificationState();
+          setStatus(usernameStatus, "");
+          setStatus(passwordStatus, "");
+          setStatus(createStatus, "");
+          closeModal();
+        } catch (error) {
+          setStatus(createStatus, error instanceof Error ? error.message : "Account could not be created.", true);
+        } finally {
+          createButton.disabled = false;
+        }
+      }
+
+      closeModalButton.addEventListener("click", closeModal);
+      modal.addEventListener("click", (event) => {
+        if (event.target === modal) closeModal();
+      });
+      organizationInput.addEventListener("input", updateOrganizationHelper);
+      organizationInput.addEventListener("blur", updateOrganizationHelper);
+      emailInput.addEventListener("input", resetVerificationState);
+      sendCodeButton.addEventListener("click", sendVerificationCode);
+      verifyCodeButton.addEventListener("click", verifyEmailCode);
+      usernameInput.addEventListener("blur", checkUsername);
+      passwordInput.addEventListener("input", validatePasswordHint);
+      form.addEventListener("submit", submitDelegateAccount);
+      iframe.addEventListener("load", postContextToFrame);
+      document.addEventListener("grameee:auth-updated", postContextToFrame);
+      window.addEventListener("message", (event) => {
+        if (event.origin !== iframeOrigin || !event.data || typeof event.data !== "object") return;
+        if (event.data.type === "grameee-form-request-context") {
+          postContextToFrame();
+        }
+        if (event.data.type === "grameee-form-open-add-user") {
+          openModal();
+        }
+      });
+      postContextToFrame();
+    });
+  </script>
 </body>
 </html>

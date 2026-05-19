@@ -16,6 +16,9 @@ const state = {
       ? "need-intake"
       : "",
   standalonePublicFormMode: bootstrapQuery.get("publicForm") || "",
+  grameeeEmbed: bootstrapQuery.get("grameeeEmbed") === "1",
+  embeddedContextOrigin: "",
+  embeddedActor: null,
   selectedNeedId: null,
   queueNeedsScrollIntoView: false,
   overviewPage: 1,
@@ -444,6 +447,64 @@ function isStandalonePublicFormMode(mode = "") {
   if (!state.standalonePublicFormMode) return false;
   if (!mode) return true;
   return state.standalonePublicFormMode === mode;
+}
+
+function isGrameeeEmbed() {
+  return Boolean(state.grameeeEmbed);
+}
+
+function isEmbeddedSharedForm() {
+  return isGrameeeEmbed() && isSharedFormMode();
+}
+
+function isAllowedGrameeeOrigin(origin) {
+  try {
+    const url = new URL(origin);
+    return url.protocol === "https:" && (url.hostname === "grameee.org" || url.hostname.endsWith(".grameee.org"));
+  } catch {
+    return false;
+  }
+}
+
+function normalizeEmbeddedActor(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const fullName = normalizeText(payload.fullName || payload.full_name || payload.name || "");
+  const username = normalizeText(payload.username || payload.user_name || "");
+  return {
+    id: normalizeText(payload.id || ""),
+    username,
+    full_name: fullName,
+    first_name: normalizeText(payload.firstName || payload.first_name || fullName || username || ""),
+    email: normalizeText(payload.email || "").toLowerCase(),
+    phone: normalizeText(payload.phone || ""),
+    organization: normalizeText(payload.organization || payload.organisation || "") || "Individual",
+  };
+}
+
+function getSubmissionActor() {
+  return state.embeddedActor || state.userSession || null;
+}
+
+function getSubmissionActorDisplayName(actor = getSubmissionActor()) {
+  return normalizeText(actor?.username || actor?.full_name || actor?.first_name || "");
+}
+
+function postEmbeddedMessage(type, payload = {}) {
+  if (!isEmbeddedSharedForm() || window.parent === window) return;
+  window.parent.postMessage({ type, payload }, state.embeddedContextOrigin || "*");
+}
+
+function requestEmbeddedContext() {
+  postEmbeddedMessage("grameee-form-request-context", {
+    mode: state.sharedFormMode,
+  });
+}
+
+function applyEmbeddedContext(payload, origin = "") {
+  const actor = normalizeEmbeddedActor(payload?.user || payload);
+  state.embeddedContextOrigin = isAllowedGrameeeOrigin(origin) ? origin : state.embeddedContextOrigin;
+  state.embeddedActor = actor;
+  renderSubmissionViews();
 }
 
 function isAdminUser() {
@@ -3220,19 +3281,82 @@ function renderSharePanel(targetId, mode) {
   `;
 }
 
-function populateSubmissionDefaults(form) {
-  if (!form || !state.userSession) return;
+function populateSubmissionDefaults(form, force = false) {
+  const actor = getSubmissionActor();
+  if (!form || !actor) return;
+  const organizationName = normalizeText(actor.organization) || "Individual";
+  const displayName = getSubmissionActorDisplayName(actor);
   [
-    ["submitter_name", state.userSession.full_name || state.userSession.first_name || ""],
-    ["submitter_email", state.userSession.email || ""],
-    ["submitter_phone", state.userSession.phone || ""],
-    ["contact_person", state.userSession.full_name || state.userSession.first_name || ""],
-    ["seeker_email", state.userSession.email || ""],
-    ["seeker_phone", state.userSession.phone || ""],
+    ["organization_name", organizationName],
+    ["submitter_name", displayName],
+    ["submitter_email", actor.email || ""],
+    ["submitter_phone", actor.phone || ""],
+    ["contact_person", displayName],
+    ["seeker_email", actor.email || ""],
+    ["seeker_phone", actor.phone || ""],
   ].forEach(([name, value]) => {
     const input = form.querySelector(`[name="${name}"]`);
-    if (input && !input.value && value) input.value = value;
+    if (input && value && (force || !input.value)) input.value = value;
   });
+}
+
+function ensureEmbeddedSubmissionActionRow(formId, mode) {
+  const form = byId(formId);
+  if (!form) return;
+  const primarySectionGrid = form.querySelector(".form-section .form-grid");
+  if (!primarySectionGrid) return;
+  let actionRow = form.querySelector(`[data-on-behalf-row="${mode}"]`);
+  if (!isEmbeddedSharedForm()) {
+    actionRow?.remove();
+    return;
+  }
+  if (!actionRow) {
+    actionRow = document.createElement("div");
+    actionRow.className = "wide card-actions";
+    actionRow.dataset.onBehalfRow = mode;
+    primarySectionGrid.appendChild(actionRow);
+  }
+  actionRow.innerHTML = `
+    <p class="helper-text">These contact fields are being filled from the active GramEEE login. If you are submitting this ${esc(mode === "solution" ? "solution" : "need")} for another person or organisation, add them first and use their details here.</p>
+    <button type="button" class="btn btn-secondary" data-action="add-on-behalf" data-mode="${escAttr(mode)}">Add on Behalf of Other</button>
+  `;
+}
+
+function configureEmbeddedSubmissionForms() {
+  [
+    { formId: "solutionSubmissionForm", selectId: "solutionTraderSelect", mode: "solution" },
+    { formId: "needSubmissionForm", selectId: "needTraderSelect", mode: "need" },
+  ].forEach(({ formId, selectId, mode }) => {
+    const form = byId(formId);
+    const select = byId(selectId);
+    const label = select?.closest("label");
+    if (select) {
+      if (isEmbeddedSharedForm()) {
+        select.value = "";
+      }
+      select.disabled = isEmbeddedSharedForm();
+      select.required = !isEmbeddedSharedForm() && mode === "need";
+    }
+    label?.classList.toggle("hidden", isEmbeddedSharedForm());
+    ensureEmbeddedSubmissionActionRow(formId, mode);
+    populateSubmissionDefaults(form, isEmbeddedSharedForm());
+  });
+}
+
+function bindEmbeddedBridge() {
+  if (!isEmbeddedSharedForm()) return;
+  window.addEventListener("message", (event) => {
+    if (!isAllowedGrameeeOrigin(event.origin)) return;
+    const data = event.data && typeof event.data === "object" ? event.data : {};
+    if (data.type === "grameee-form-context") {
+      applyEmbeddedContext(data.payload || {}, event.origin);
+    }
+    if (data.type === "grameee-form-add-user-created") {
+      applyEmbeddedContext({ user: data.payload?.user || data.payload }, event.origin);
+      toast("Form details updated for the selected organisation or person.");
+    }
+  });
+  requestEmbeddedContext();
 }
 
 function renderSubmissionViews() {
@@ -3250,8 +3374,9 @@ function renderSubmissionViews() {
   renderNeedDeploymentChips();
   renderSharePanel("solutionSharePanel", "solution");
   renderSharePanel("needSharePanel", "need");
-  populateSubmissionDefaults(byId("solutionSubmissionForm"));
-  populateSubmissionDefaults(byId("needSubmissionForm"));
+  configureEmbeddedSubmissionForms();
+  populateSubmissionDefaults(byId("solutionSubmissionForm"), isEmbeddedSharedForm());
+  populateSubmissionDefaults(byId("needSubmissionForm"), isEmbeddedSharedForm());
 
   const solutionTitle = document.querySelector('#solutionView h3');
   const needTitle = document.querySelector('#need-intakeView h3');
@@ -4983,7 +5108,7 @@ async function collectSubmissionPayload(form, submissionType = "need") {
   if (submissionType !== "solution") {
     const traderId = normalizeText(entries.existing_trader_id);
     const trader = getTraderById(traderId);
-    if (!trader) {
+    if (!trader && !isEmbeddedSharedForm()) {
       openMissingOrgDialog(entries.organization_name || "");
       throw new Error("Please select an approved GRE supplier before submitting.");
     }
@@ -5005,9 +5130,9 @@ async function collectSubmissionPayload(form, submissionType = "need") {
       : "";
     return {
       ...entries,
-      existing_trader_id: trader.trader_id,
-      existing_trader_name: trader.organisation_name || trader.trader_name || entries.organization_name || "",
-      organization_name: entries.organization_name || trader.organisation_name || trader.trader_name || "",
+      existing_trader_id: trader?.trader_id || "",
+      existing_trader_name: trader?.organisation_name || trader?.trader_name || entries.organization_name || "",
+      organization_name: entries.organization_name || trader?.organisation_name || trader?.trader_name || "Individual",
       offering_category: offeringCategory,
       offering_type: offeringType,
       need_kind: offeringCategory.replace(/\s+offerings$/i, "").toLowerCase(),
@@ -5254,11 +5379,13 @@ function bindStaticEvents() {
     const selectId = kind === "solution" ? "solutionTraderSelect" : "needTraderSelect";
     const orgInputId = kind === "solution" ? "solutionOrgName" : "needOrgName";
     byId(selectId)?.addEventListener("change", (event) => {
+      if (isEmbeddedSharedForm()) return;
       const trader = getTraderById(event.target.value);
       const orgInput = byId(orgInputId);
       if (orgInput && trader) orgInput.value = trader.organisation_name || trader.trader_name || "";
     });
     byId(orgInputId)?.addEventListener("blur", (event) => {
+      if (isEmbeddedSharedForm()) return;
       const orgName = normalizeText(event.target.value);
       const select = byId(selectId);
       if (!orgName) return;
@@ -5269,6 +5396,14 @@ function bindStaticEvents() {
       } else if (kind !== "solution" && !matchingSupplier && !(select && select.value)) {
         openMissingOrgDialog(orgName);
       }
+    });
+  });
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest('[data-action="add-on-behalf"]');
+    if (!button || !isEmbeddedSharedForm()) return;
+    postEmbeddedMessage("grameee-form-open-add-user", {
+      mode: button.dataset.mode || state.sharedFormMode,
     });
   });
 
@@ -6115,6 +6250,7 @@ async function init() {
   setText("resetStatus", "");
   setText("changePasswordStatus", "");
   bindStaticEvents();
+  bindEmbeddedBridge();
   await store.validateUserSession();
   await refreshAll();
 }
