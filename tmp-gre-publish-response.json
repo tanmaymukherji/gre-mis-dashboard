@@ -1,0 +1,643 @@
+[
+  {
+    "marketId": 5,
+    "marketName": "Green Rural Economy",
+    "marketCode": "COMMONS.GRE",
+    "channelId": 4,
+    "channelCode": "CHANNEL.COMMONS.GRE_DEFAULT_CHANNEL",
+    "channelName": "Green Rural Economy",
+    "tenantId": 2217,
+    "traderId": 487,
+    "traderName": "GRE Curated Solutions",
+    "traderIconPic": "https://attachment-ms.s3.ap-south-1.amazonaws.com/2217/trader/1761191757401-GRE_circular_curated.png",
+    "solutionId": 2115,
+    "solutionProductStatus": "SOLUTION_PRODUCT_STATUS.APPROVED",
+    "customProductDTO": {
+      "id": 7042,
+      "varietyId": 2016,
+      "genericProductId": 1008,
+      "name": [
+        {
+          "id": 63164,
+          "text": "tetete",
+          "languageCode": "ENG"
+        }
+      ],
+      "description": [
+        {
+          "id": 63163,
+          "text": "<p>tetetet</p>",
+          "languageCode": "ENG"
+        }
+      ],
+      "code": "MARKIFY_PRODUCT._1778434027552",
+      "type": "OFFERINGS.SERVICE_OFFERINGS",
+      "productKind": "PRODUCT_KIND.PACKAGED",
+      "isMarketChannelProduct": true,
+      "channelId": 4,
+      "customProductSKUDTOs": [
+        {
+          "id": 7288,
+          "mrp": {
+            "id": 3291,
+            "currency": "INR",
+            "value": 0
+          },
+          "productId": 7042,
+          "name": [
+            {
+              "id": 63166,
+              "text": "tetete",
+              "languageCode": "ENG"
+            }
+          ],
+          "code": "MARKIFY_SKU._1778434027552",
+          "description": [
+            {
+              "id": 63165,
+              "text": "<p>tetetet</p>",
+              "languageCode": "ENG"
+            }
+          ],
+          "skuType": "OFFERINGS.SERVICE_OFFERINGS",
+          "skuSubType": "OFFERINGS_CATEGORY.TRAINING",
+          "productSkuKind": "PRODUCT_SKU_KIND.PACKAGED",
+          "quantity": {
+            "id": 0,
+            "uoM": "Units",
+            "value": 0
+          },
+          "discountPercentage": 0,
+          "discountedMrp": {
+            "id": 5768,
+            "currency": "INR",
+            "value": 0
+          },
+          "productSkuSpecificationList": [
+            {
+              "uuid": "9f03562a-8105-40f4-a918-2f9871faf0aa",
+              "id": 15723,
+              "specificationMaster": 86,
+              "specificationMasterDTO": {
+                "uuid": "94815428-96ae-44d5-a2cd-acce2abded68",
+                "isActive": true,
+                "id": 86,
+                "paramName": "Certification Offered",
+                "specificationCode": "SO_CERTIFICATION_OFFERED",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 12,
+                "classificationList": [],
+                "customRefClass": "CLASS.CERTIFICATION",
+                "groupCode": "SPECIFICATION_GROUP.SERVICE_OFFERINGS",
+                "dataType": "CHIP"
+              },
+              "productSKUId": 7288,
+              "value": "Not Provided",
+              "sequence": 15
+            },
+            {
+              "uuid": "e62711ad-a767-40de-91b9-cb03cd1ca0d6",
+              "id": 15728,
+              "specificationMaster": 83,
+              "specificationMasterDTO": {
+                "uuid": "d0d1bd3f-e56c-4fda-abe0-ce4b7db7af24",
+                "isActive": true,
+                "id": 83,
+                "paramName": "Support post Service",
+                "specificationCode": "SO_SUPPORT_POST_SERVICE",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 9,
+                "classificationList": [],
+                "customRefClass": "CLASS.POST_SERVICE",
+                "groupCode": "SPECIFICATION_GROUP.SUPPORT_POST_SERVICE_AND_COST",
+                "dataType": "CHIP"
+              },
+              "productSKUId": 7288,
+              "value": "Yes,Provided if in the service location",
+              "sequence": 12
+            },
+            {
+              "uuid": "43b6aafd-5173-4c0c-a248-8f4ac7441313",
+              "id": 15719,
+              "specificationMaster": 95,
+              "specificationMasterDTO": {
+                "uuid": "4ee69399-0257-43fe-a45c-0706780ee1f3",
+                "isActive": true,
+                "id": 95,
+                "paramName": "Location Availability",
+                "specificationCode": "SO_LOCATION_AVAILABILITY",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 6,
+                "classificationList": [],
+                "customRefClass": "CLASS.SERVICE_LOCATION_AVAILABILITY",
+                "groupCode": "SPECIFICATION_GROUP.SERVICE_OFFERINGS",
+                "dataType": "CHIP"
+              },
+              "productSKUId": 7288,
+              "value": "",
+              "sequence": 9,
+              "specificationValues": [
+                {
+                  "uuid": "cd5e157d-dbe4-40b2-95ac-00322c5cc552",
+                  "id": 34247,
+                  "code": "SERVICE_LOCATION_AVAILABILITY.PROVIDER_END",
+                  "value": [
+                    {
+                      "text": "At Service Provider",
+                      "languageCode": "ENG"
+                    }
+                  ],
+                  "sequence": 0
+                }
+              ]
+            },
+            {
+              "uuid": "c8523b01-5aa3-4c7a-a377-ea761b9a0889",
+              "id": 15725,
+              "specificationMaster": 87,
+              "specificationMasterDTO": {
+                "uuid": "9bdaf31a-64b9-45d4-90cc-51526d3aa42c",
+                "isActive": true,
+                "id": 87,
+                "paramName": "Service offering Brochure",
+                "specificationCode": "SO_SERVICE_OFFERING_BROCHURE",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 13,
+                "classificationList": [],
+                "groupCode": "SPECIFICATION_GROUP.SERVICE_OFFERINGS",
+                "dataType": "ATTACHMENT"
+              },
+              "productSKUId": 7288,
+              "value": "",
+              "sequence": 16,
+              "specificationValues": []
+            },
+            {
+              "uuid": "b9c60799-e0bd-4b55-9542-e457155367e5",
+              "id": 15718,
+              "specificationMaster": 78,
+              "specificationMasterDTO": {
+                "uuid": "71509456-e7d8-4e63-873d-7b9a2e56697f",
+                "isActive": true,
+                "id": 78,
+                "paramName": "Duration",
+                "specificationCode": "SO_DURATION",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 4,
+                "classificationList": [],
+                "customRefClass": "CLASS.TRAINING_DURATION",
+                "groupCode": "SPECIFICATION_GROUP.SERVICE_OFFERINGS",
+                "dataType": "DURATION"
+              },
+              "productSKUId": 7288,
+              "value": "1 Days",
+              "sequence": 7
+            },
+            {
+              "uuid": "f973eaf2-0050-409e-9fe8-55b3471a486c",
+              "id": 15722,
+              "specificationMaster": 85,
+              "specificationMasterDTO": {
+                "uuid": "daff44c0-ac6a-4576-8542-2ea9262c0006",
+                "isActive": true,
+                "id": 85,
+                "paramName": "Is it offered - Online or Offline?",
+                "specificationCode": "SO_OFFERED_ONLINE_OR_OFFLINE",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 11,
+                "classificationList": [],
+                "customRefClass": "CLASS.SESSION_AVAILABILITY",
+                "groupCode": "SPECIFICATION_GROUP.SERVICE_OFFERINGS",
+                "dataType": "CHIP"
+              },
+              "productSKUId": 7288,
+              "value": "Online & Offline",
+              "sequence": 14
+            },
+            {
+              "uuid": "f60bb4a6-79f0-4671-8fca-8fe028cdb358",
+              "id": 15715,
+              "specificationMaster": 73,
+              "specificationMasterDTO": {
+                "uuid": "24ae6bbf-3feb-476c-a97a-7b0eed861a06",
+                "isActive": true,
+                "id": 73,
+                "paramName": "Geographies",
+                "specificationCode": "SOLUTION_GEOGRAPHIES",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 3,
+                "classificationList": [],
+                "groupCode": "SPECIFICATION_GROUP.SOLUTION",
+                "dataType": "LOCATION"
+              },
+              "productSKUId": 7288,
+              "value": "",
+              "sequence": 4,
+              "specificationValues": [
+                {
+                  "uuid": "03370b89-8cf4-438c-9834-68c1b075242a",
+                  "id": 34246,
+                  "code": "REGION_DISTRICT.INDORE",
+                  "value": [
+                    {
+                      "id": 63167,
+                      "text": "Indore, Madhya Pradesh, India",
+                      "languageCode": "ENG"
+                    }
+                  ],
+                  "type": "LOCATION",
+                  "subType": "DISTRICT"
+                }
+              ]
+            },
+            {
+              "uuid": "4cc017ae-f5a0-4569-872e-1abaaa6986b7",
+              "id": 15720,
+              "specificationMaster": 76,
+              "specificationMasterDTO": {
+                "uuid": "721d0286-52dc-4373-8365-84bffa74e88d",
+                "isActive": true,
+                "id": 76,
+                "paramName": "Trainer Phone Number",
+                "specificationCode": "SO_RESOURCE_PERSON_PHONE",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 3,
+                "classificationList": [],
+                "groupCode": "SPECIFICATION_GROUP.RESOURCE_PERSON_CONTACT",
+                "dataType": "TEXT"
+              },
+              "productSKUId": 7288,
+              "value": "1234567891",
+              "sequence": 5
+            },
+            {
+              "uuid": "06bd775b-6291-4bc3-b419-6fb423f80f26",
+              "id": 15727,
+              "specificationMaster": 72,
+              "specificationMasterDTO": {
+                "uuid": "e34fb485-d60e-482c-9d2f-6924dc9b2c55",
+                "isActive": true,
+                "id": 72,
+                "paramName": "Languages",
+                "specificationCode": "SOLUTION_LANGUAGE",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 2,
+                "classificationList": [],
+                "customRefClass": "CLASS.TRAINING_LANGUAGE",
+                "groupCode": "SPECIFICATION_GROUP.SOLUTION",
+                "dataType": "CHIP"
+              },
+              "productSKUId": 7288,
+              "value": "",
+              "sequence": 3,
+              "specificationValues": [
+                {
+                  "uuid": "ed7940df-0940-4b01-9d58-b13d97a4e59a",
+                  "id": 34249,
+                  "code": "TRAINING_LANGUAGE.BENGALI",
+                  "value": [
+                    {
+                      "text": "Bengali",
+                      "languageCode": "ENG"
+                    }
+                  ],
+                  "sequence": 2
+                },
+                {
+                  "uuid": "b7fbd1c9-6950-48ef-952d-526b14e2e906",
+                  "id": 34248,
+                  "code": "TRAINING_LANGUAGE.HIN",
+                  "value": [
+                    {
+                      "text": "Hindi",
+                      "languageCode": "ENG"
+                    }
+                  ],
+                  "sequence": 1
+                },
+                {
+                  "uuid": "65fe8ae9-cb01-47bf-9419-8f5c6c781afc",
+                  "id": 34250,
+                  "code": "TRAINING_LANGUAGE.ENG",
+                  "value": [
+                    {
+                      "text": "English",
+                      "languageCode": "ENG"
+                    }
+                  ],
+                  "sequence": 0
+                }
+              ]
+            },
+            {
+              "uuid": "e4e0b9e2-47df-44d6-8c1c-9647ae45b6e4",
+              "id": 15724,
+              "specificationMaster": 75,
+              "specificationMasterDTO": {
+                "uuid": "2576a700-4af0-41c7-9b97-0ee9a8dc4494",
+                "isActive": true,
+                "id": 75,
+                "paramName": "Trainer Email Address",
+                "specificationCode": "SO_RESOURCE_PERSON_EMAIL",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 2,
+                "classificationList": [],
+                "groupCode": "SPECIFICATION_GROUP.RESOURCE_PERSON_CONTACT",
+                "dataType": "TEXT"
+              },
+              "productSKUId": 7288,
+              "value": "tanmay@greenruraleconomy.in",
+              "sequence": 2
+            },
+            {
+              "uuid": "4ea1e050-5db0-4a82-879d-e445c280d373",
+              "id": 15713,
+              "specificationMaster": 74,
+              "specificationMasterDTO": {
+                "uuid": "90faa92a-43c7-403a-9c95-f6b6c9896118",
+                "isActive": true,
+                "id": 74,
+                "paramName": "Trainer Name",
+                "specificationCode": "SO_RESOURCE_PERSON_NAME",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 1,
+                "classificationList": [],
+                "groupCode": "SPECIFICATION_GROUP.RESOURCE_PERSON_CONTACT",
+                "dataType": "TEXT"
+              },
+              "productSKUId": 7288,
+              "value": "Tanmay",
+              "sequence": 1
+            },
+            {
+              "uuid": "8b2939e6-06cf-4922-8f49-39e364c0afaf",
+              "id": 15714,
+              "specificationMaster": 82,
+              "specificationMasterDTO": {
+                "uuid": "5786d7a6-f09b-4edf-982f-5af1c6da7bc6",
+                "isActive": true,
+                "id": 82,
+                "paramName": "Cost",
+                "maxValue": "1",
+                "minValue": "100000000",
+                "specificationCode": "SO_COST",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 7,
+                "classificationList": [],
+                "customRefClass": "CLASS.COST_SPEC",
+                "groupCode": "SPECIFICATION_GROUP.SERVICE_OFFERINGS",
+                "dataType": "COST_WITH_SPEC"
+              },
+              "productSKUId": 7288,
+              "value": "0 Can be quoted after finalising scope",
+              "sequence": 10
+            },
+            {
+              "uuid": "e70893ae-052c-4e40-b00b-29a41b46aceb",
+              "id": 15717,
+              "specificationMaster": 94,
+              "specificationMasterDTO": {
+                "uuid": "1d185e25-b187-4d60-bca2-690833c88758",
+                "isActive": true,
+                "id": 94,
+                "paramName": "Remarks on Cost",
+                "specificationCode": "SO_COST_REMARKS",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 8,
+                "classificationList": [],
+                "groupCode": "SPECIFICATION_GROUP.SERVICE_OFFERINGS",
+                "dataType": "TEXT"
+              },
+              "productSKUId": 7288,
+              "value": "sfsdfsdf",
+              "sequence": 11
+            },
+            {
+              "uuid": "d32ef17c-3043-41aa-9af8-44c3b0b0f3b3",
+              "id": 15716,
+              "specificationMaster": 84,
+              "specificationMasterDTO": {
+                "uuid": "84c42c0a-ed9b-4d35-a9bc-40310d2caa8c",
+                "isActive": true,
+                "id": 84,
+                "paramName": "Support post Service Cost",
+                "specificationCode": "SO_SUPPORT_POST_SERVICE_COST",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 10,
+                "classificationList": [],
+                "customRefClass": "CLASS.POST_SERVICE_COST",
+                "groupCode": "SPECIFICATION_GROUP.SUPPORT_POST_SERVICE_AND_COST",
+                "dataType": "CHIP"
+              },
+              "productSKUId": 7288,
+              "value": "No Cost, if in the service location",
+              "sequence": 13
+            },
+            {
+              "uuid": "d7b2f064-21d1-4c75-87f3-2dd71aa037e6",
+              "id": 15726,
+              "specificationMaster": 77,
+              "specificationMasterDTO": {
+                "uuid": "54de131f-cd65-4f74-8a27-5caffd7dcc19",
+                "isActive": true,
+                "id": 77,
+                "paramName": "Trainer Details",
+                "specificationCode": "SO_TRAINER_DETAILS",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 4,
+                "classificationList": [],
+                "groupCode": "SPECIFICATION_GROUP.RESOURCE_PERSON_CONTACT",
+                "dataType": "RICH_TEXT"
+              },
+              "productSKUId": 7288,
+              "value": "<p>tetsetst</p>",
+              "sequence": 6
+            },
+            {
+              "uuid": "988bc53a-6cb1-4e8c-afca-3129f017a316",
+              "id": 15721,
+              "specificationMaster": 79,
+              "specificationMasterDTO": {
+                "uuid": "2a2d9397-9e4c-4845-9e57-00f3c2105ad4",
+                "isActive": true,
+                "id": 79,
+                "paramName": "Prerequisites - Participants and Training",
+                "specificationCode": "SO_PR_PARTICIPANTS_AND_TRAINING_LOCATION",
+                "specificationLabel": [],
+                "specificationDisplayLabel": [],
+                "sequence": 5,
+                "classificationList": [],
+                "groupCode": "SPECIFICATION_GROUP.SERVICE_OFFERINGS",
+                "dataType": "TEXT_AREA"
+              },
+              "productSKUId": 7288,
+              "value": "esesdgsdgsdg",
+              "sequence": 8
+            }
+          ],
+          "isDefaultSKU": true,
+          "tmaChannelProductId": 2230,
+          "tmaChannelProductStatus": "TMA_CHANNEL_PRODUCT_PUBLISH_STATUS.DRAFT",
+          "productSKUTagList": [
+            {
+              "uuid": "f299a0c5-24ae-40a9-8799-2628f8790d31",
+              "isActive": true,
+              "id": 10924,
+              "tagId": 522,
+              "tagCode": "TAG.FARM__FARM_INPUTS.MAIZE",
+              "tagSequence": 1,
+              "tag": {
+                "uuid": "724eb53b-28a0-4225-b9c1-96d82dca1795",
+                "id": 522,
+                "code": "TAG.FARM__FARM_INPUTS.MAIZE",
+                "name": "Maize",
+                "type": "TAG_TYPE.TAG",
+                "sequence": 382,
+                "nameML": [
+                  {
+                    "id": 387,
+                    "text": "Maize",
+                    "languageCode": "ENG"
+                  }
+                ],
+                "descriptionML": [],
+                "categoryCode": "COMMONS.GRE_SOLUTION.FARM__FARM_INPUTS",
+                "context": "COMMONS.GRE"
+              }
+            },
+            {
+              "uuid": "e309d105-54ec-4f3a-bdbf-01973c702f2d",
+              "isActive": true,
+              "id": 10923,
+              "tagId": 2768,
+              "tagCode": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR",
+              "tagSequence": 0,
+              "tag": {
+                "uuid": "ce322db3-cc10-4854-bfc9-87dd47a541f8",
+                "id": 2768,
+                "code": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR",
+                "name": "Achar",
+                "type": "TAG_TYPE.GENERIC_PRODUCT",
+                "sequence": 1,
+                "nameML": [
+                  {
+                    "id": 3303,
+                    "text": "Achar",
+                    "languageCode": "ENG"
+                  }
+                ],
+                "descriptionML": [],
+                "categoryCode": "COMMONS.GRE_VALUE_CHAIN.SOCIO_ECONOMIC_DEVELOPMENT",
+                "subCategoryCode": "COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP",
+                "context": "COMMONS.GRE"
+              }
+            },
+            {
+              "uuid": "c743f670-6952-4c99-b13b-6eec06d671dd",
+              "isActive": true,
+              "id": 10925,
+              "tagId": 2950,
+              "tagCode": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.BISCUITS_COOKIES.BAKED_PRODUCTS",
+              "tagSequence": 2,
+              "tag": {
+                "uuid": "d979f574-070c-4ffa-aee6-6f53baa3b016",
+                "id": 2950,
+                "code": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.BISCUITS_COOKIES.BAKED_PRODUCTS",
+                "name": "Baked Products",
+                "type": "TAG_TYPE.GENERIC_PRODUCT_VARIETY",
+                "sequence": 1,
+                "nameML": [
+                  {
+                    "id": 3485,
+                    "text": "Baked Products",
+                    "languageCode": "ENG"
+                  }
+                ],
+                "descriptionML": [],
+                "categoryCode": "COMMONS.GRE_VALUE_CHAIN.SOCIO_ECONOMIC_DEVELOPMENT",
+                "subCategoryCode": "COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP",
+                "context": "COMMONS.GRE"
+              }
+            },
+            {
+              "uuid": "575d5805-bf6d-4448-a6f0-e854a6741274",
+              "isActive": true,
+              "id": 10926,
+              "tagId": 2818,
+              "tagCode": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR.ACHAR",
+              "tagSequence": 0,
+              "tag": {
+                "uuid": "888b16e5-92e5-4b0a-a3f5-f2b42ffd5ff8",
+                "id": 2818,
+                "code": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR.ACHAR",
+                "name": "Achar",
+                "type": "TAG_TYPE.GENERIC_PRODUCT_VARIETY",
+                "sequence": 1,
+                "nameML": [
+                  {
+                    "id": 3353,
+                    "text": "Achar",
+                    "languageCode": "ENG"
+                  }
+                ],
+                "descriptionML": [],
+                "categoryCode": "COMMONS.GRE_VALUE_CHAIN.SOCIO_ECONOMIC_DEVELOPMENT",
+                "subCategoryCode": "COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP",
+                "context": "COMMONS.GRE"
+              }
+            },
+            {
+              "uuid": "6b2750e0-a7ab-4dac-a6a8-47d09102dde5",
+              "isActive": true,
+              "id": 10922,
+              "tagId": 2774,
+              "tagCode": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.BISCUITS_COOKIES",
+              "tagSequence": 1,
+              "tag": {
+                "uuid": "65162b33-757f-4dc9-ab1d-cda4bba5082f",
+                "id": 2774,
+                "code": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.BISCUITS_COOKIES",
+                "name": "Bakery",
+                "type": "TAG_TYPE.GENERIC_PRODUCT",
+                "sequence": 1,
+                "nameML": [
+                  {
+                    "id": 3309,
+                    "text": "Bakery",
+                    "languageCode": "ENG"
+                  }
+                ],
+                "descriptionML": [],
+                "categoryCode": "COMMONS.GRE_VALUE_CHAIN.SOCIO_ECONOMIC_DEVELOPMENT",
+                "subCategoryCode": "COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP",
+                "context": "COMMONS.GRE"
+              }
+            }
+          ],
+          "productSKUFactorList": [
+            {
+              "code": "6M.MAN",
+              "value": "Manpower"
+            }
+          ]
+        }
+      ],
+      "subType": "OFFERINGS_CATEGORY.TRAINING"
+    }
+  }
+]

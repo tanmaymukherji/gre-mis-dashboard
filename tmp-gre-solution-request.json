@@ -1,0 +1,205 @@
+{
+  "channelId": "4",
+  "marketId": "5",
+  "solutionDTO": {
+    "description": [
+      {
+        "id": 63157,
+        "languageCode": "ENG",
+        "text": "testee"
+      }
+    ],
+    "id": 2115,
+    "isGenericSolution": false,
+    "statusUpdatedOnDate": 1778434051469,
+    "genericProduct": {
+      "uuid": "47e26ae4-9d25-4950-8516-4a71062fbc3f",
+      "id": 1008,
+      "name": [
+        {
+          "id": 13701,
+          "text": "Achar",
+          "languageCode": "ENG"
+        }
+      ],
+      "code": "COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR",
+      "description": [],
+      "type": "VALUE_CHAIN",
+      "productClass": "",
+      "isPrivate": false,
+      "marketId": 5,
+      "classificationList": [
+        {
+          "uuid": "7dec96d5-2972-4d20-8c3a-18f1eea9fd2c",
+          "id": 241,
+          "code": "COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP",
+          "context": "COMMONS.GRE",
+          "name": [
+            {
+              "id": 12064,
+              "text": "Entrepreneurship",
+              "languageCode": "ENG"
+            }
+          ],
+          "description": [],
+          "productType": "VALUE_CHAIN",
+          "iconPic": "",
+          "logoURL": ""
+        }
+      ],
+      "genericProductVarietyList": [
+        {
+          "uuid": "8e5d9273-adce-45ea-a600-de285248bbf1",
+          "id": 2016,
+          "varietyCode": "COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR.ACHAR",
+          "name": [
+            {
+              "id": 13743,
+              "text": "Achar",
+              "languageCode": "ENG"
+            }
+          ],
+          "description": [
+            {
+              "id": 13742,
+              "text": "",
+              "languageCode": "ENG"
+            }
+          ],
+          "tagIdentifier": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR.ACHAR"
+        }
+      ],
+      "tagIdentifier": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR"
+    },
+    "genericProductVariety": {
+      "uuid": "8e5d9273-adce-45ea-a600-de285248bbf1",
+      "id": 2016,
+      "varietyCode": "COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR.ACHAR",
+      "name": [
+        {
+          "id": 13743,
+          "text": "Achar",
+          "languageCode": "ENG"
+        }
+      ],
+      "description": [
+        {
+          "id": 13742,
+          "text": "",
+          "languageCode": "ENG"
+        }
+      ],
+      "tagIdentifier": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR.ACHAR"
+    },
+    "solutionTagList": [
+      {
+        "id": 4747,
+        "tagCode": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.BISCUITS_COOKIES",
+        "tagId": 2774,
+        "tagSequence": 1,
+        "isActive": true
+      },
+      {
+        "id": 4744,
+        "tagCode": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.BISCUITS_COOKIES.BAKED_PRODUCTS",
+        "tagId": 2950,
+        "tagSequence": 2,
+        "isActive": true
+      },
+      {
+        "id": 4745,
+        "tagCode": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR",
+        "tagId": 2768,
+        "tagSequence": 0,
+        "isActive": true
+      },
+      {
+        "id": 4746,
+        "tagCode": "TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.ACHAR.ACHAR",
+        "tagId": 2818,
+        "tagSequence": 0,
+        "isActive": true
+      }
+    ],
+    "marketId": "5",
+    "title": [
+      {
+        "id": 63162,
+        "languageCode": "ENG",
+        "text": "test"
+      }
+    ],
+    "solutionSpecificationList": [
+      {
+        "id": 3672,
+        "sequence": 1,
+        "specificationMaster": {
+          "uuid": "2e469e82-71ac-42df-8267-048a4a8bc237",
+          "isActive": true,
+          "id": 71,
+          "paramName": "Who Can avail it?",
+          "specificationCode": "SOLUTION_WHO_CAN_AVAIL",
+          "specificationLabel": [],
+          "specificationDisplayLabel": [],
+          "sequence": 1,
+          "classificationList": [],
+          "customRefClass": "CLASS.COMMUNITY_ENTITIES",
+          "groupCode": "SPECIFICATION_GROUP.SOLUTION",
+          "dataType": "CHIP",
+          "isMandatory": true,
+          "isMultiValued": true
+        },
+        "specificationValues": [
+          {
+            "id": 0,
+            "sequence": 0,
+            "value": [
+              {
+                "id": 0,
+                "text": "Individuals",
+                "languageCode": "ENG"
+              }
+            ]
+          },
+          {
+            "id": 0,
+            "sequence": 1,
+            "value": [
+              {
+                "id": 0,
+                "text": "Groups",
+                "languageCode": "ENG"
+              }
+            ]
+          },
+          {
+            "id": 0,
+            "sequence": 2,
+            "value": [
+              {
+                "id": 0,
+                "text": "SHGs",
+                "languageCode": "ENG"
+              }
+            ]
+          },
+          {
+            "id": 0,
+            "sequence": 3,
+            "value": [
+              {
+                "id": 0,
+                "text": "Organisations",
+                "languageCode": "ENG"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "status": "SOLUTION_STATUS.PENDING_REVIEW",
+    "solutionClass": "SOLUTION_CLASS.VALUE_CHAIN"
+  },
+  "status": "TRADER_CENTER_SOLUTION_STATUS.DRAFT",
+  "traderId": 487
+}

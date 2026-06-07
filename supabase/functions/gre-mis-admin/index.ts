@@ -61,6 +61,9 @@ const githubAssetRepo = Deno.env.get("GRE_MIS_GITHUB_ASSET_REPO") ?? "tanmaymukh
 const githubAssetBranch = Deno.env.get("GRE_MIS_GITHUB_ASSET_BRANCH") ?? "main";
 const githubAssetRoot = Deno.env.get("GRE_MIS_GITHUB_ASSET_ROOT") ?? "public/uploads/local-offerings";
 const askGreBaseUrl = Deno.env.get("ASKGRE_BASE_URL") ?? "https://askgre.grameee.org";
+const greMisBaseUrl = Deno.env.get("GRE_MIS_BASE_URL") ?? "https://gre.grameee.org";
+const libreTranslateApiUrl = Deno.env.get("LIBRETRANSLATE_API_URL") ?? "https://libretranslate.com/translate";
+const libreTranslateApiKey = Deno.env.get("LIBRETRANSLATE_API_KEY") ?? "";
 
 const adminClient = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false },
@@ -78,6 +81,134 @@ function jsonResponse(body: unknown, status = 200) {
 
 function requireString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeEmailList(value: unknown): string[] {
+  const list = Array.isArray(value) ? value : String(value || "").split(/[;,]/);
+  return list
+    .map((item: unknown) => String(item ?? "").trim().toLowerCase())
+    .filter((item: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item));
+}
+
+function formatLgdGeographyLabel(row: Record<string, unknown>) {
+  const country = "India";
+  const block = requireString(row.block_name || row.gram_panchayat_name || row.village_name);
+  const city = requireString(row.district_name);
+  const state = requireString(row.state_name);
+  const kind = requireString(row.location_kind).toLowerCase();
+  if (block && city && state) return [block, city, state, country].filter(Boolean).join(", ");
+  if (city && state) return [city, state, country].filter(Boolean).join(", ");
+  if (state) return [state, country].filter(Boolean).join(", ");
+  if (kind === "country") return country;
+  return requireString(row.display_label) || country;
+}
+
+function buildLgdGeographyVariants(row: Record<string, unknown>) {
+  const country = "India";
+  const block = requireString(row.block_name || row.gram_panchayat_name || row.village_name);
+  const city = requireString(row.district_name);
+  const state = requireString(row.state_name);
+  const display = requireString(row.display_label);
+  const variants = new Set<string>();
+  if (block && city && state) variants.add([block, city, state, country].filter(Boolean).join(", "));
+  if (city && state) variants.add([city, state, country].filter(Boolean).join(", "));
+  if (state) variants.add([state, country].filter(Boolean).join(", "));
+  variants.add(country);
+  if (display) variants.add(display);
+  return [...variants].filter(Boolean);
+}
+
+function scoreLgdSuggestion(label: string, query: string) {
+  const normalizedLabel = requireString(label).toLowerCase();
+  const normalizedQuery = requireString(query).toLowerCase();
+  if (!normalizedLabel || !normalizedQuery) return -1;
+  if (normalizedLabel === normalizedQuery) return 400;
+  if (normalizedLabel.startsWith(`${normalizedQuery},`)) return 320;
+  if (normalizedLabel.startsWith(normalizedQuery)) return 280;
+  const parts = normalizedLabel.split(",").map((item) => item.trim());
+  if (parts[0] === normalizedQuery) return 260;
+  if (parts.some((part) => part === normalizedQuery)) return 220;
+  if (parts.some((part) => part.startsWith(normalizedQuery))) return 180;
+  if (normalizedLabel.includes(normalizedQuery)) return 120;
+  return 0;
+}
+
+function buildRankedLgdSuggestions(rows: Record<string, unknown>[], query: string) {
+  const seen = new Set<string>();
+  return rows
+    .flatMap((row) => buildLgdGeographyVariants(row))
+    .filter((label) => {
+      const key = requireString(label).toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((label) => ({ label, score: scoreLgdSuggestion(label, query) }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || left.label.localeCompare(right.label))
+    .slice(0, 20)
+    .map((item) => item.label);
+}
+
+function decodeJwtPayload(token: string) {
+  const normalized = requireString(token);
+  if (!normalized) return null;
+  const parts = normalized.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const decoded = atob(padded);
+    return JSON.parse(decoded) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveGrameeeAuthUser(grameeeAccessToken: string) {
+  const normalizedToken = requireString(grameeeAccessToken);
+  if (!normalizedToken) return null;
+
+  const { data: authData, error: authError } = await adminClient.auth.getUser(normalizedToken);
+  if (!authError && authData?.user) {
+    return authData.user;
+  }
+
+  const jwtPayload = decodeJwtPayload(normalizedToken);
+  if (!jwtPayload) return null;
+
+  const appMetadata = (jwtPayload.app_metadata || {}) as Record<string, unknown>;
+  const userMetadata = (jwtPayload.user_metadata || jwtPayload.raw_user_meta_data || {}) as Record<string, unknown>;
+
+  return {
+    email: requireString(jwtPayload.email),
+    app_metadata: appMetadata,
+    user_metadata: userMetadata,
+    raw_user_meta_data: userMetadata,
+  } as unknown as { email?: string | null; app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown>; raw_user_meta_data?: Record<string, unknown> };
+}
+
+function resolveGrameeeSummaryFallback(summary: unknown) {
+  const record = summary && typeof summary === "object" ? summary as Record<string, unknown> : null;
+  if (!record) return null;
+  const email = requireString(record.email).toLowerCase();
+  if (!email) return null;
+  return {
+    email,
+    user_metadata: {
+      full_name: requireString(record.fullName || record.full_name),
+      first_name: requireString(record.firstName || record.first_name),
+      username: requireString(record.username),
+      phone: requireString(record.phone),
+    },
+    raw_user_meta_data: {
+      full_name: requireString(record.fullName || record.full_name),
+      first_name: requireString(record.firstName || record.first_name),
+      username: requireString(record.username),
+      phone: requireString(record.phone),
+    },
+    app_metadata: {},
+  } as unknown as { email?: string | null; app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown>; raw_user_meta_data?: Record<string, unknown> };
 }
 
 function escapeHtml(value: unknown) {
@@ -134,6 +265,42 @@ function normalizeCell(value: unknown) {
   return text.length ? text : null;
 }
 
+function rowValue(row: Record<string, unknown>, aliases: string[]) {
+  for (const alias of aliases) {
+    if (Object.prototype.hasOwnProperty.call(row, alias)) {
+      const value = requireString(row[alias]);
+      if (value) return value;
+    }
+  }
+  const normalizedAliases = aliases.map((alias) => alias.toLowerCase().replace(/[^a-z0-9]+/g, ""));
+  for (const [key, value] of Object.entries(row)) {
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    if (normalizedAliases.includes(normalizedKey)) {
+      const text = requireString(value);
+      if (text) return text;
+    }
+  }
+  return "";
+}
+
+function rowDateValue(row: Record<string, unknown>, aliases: string[]) {
+  for (const alias of aliases) {
+    if (Object.prototype.hasOwnProperty.call(row, alias)) {
+      const parsed = parseWorkbookDate(row[alias])?.slice(0, 10) || requireString(row[alias]);
+      if (parsed) return parsed;
+    }
+  }
+  const normalizedAliases = aliases.map((alias) => alias.toLowerCase().replace(/[^a-z0-9]+/g, ""));
+  for (const [key, value] of Object.entries(row)) {
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    if (normalizedAliases.includes(normalizedKey)) {
+      const parsed = parseWorkbookDate(value)?.slice(0, 10) || requireString(value);
+      if (parsed) return parsed;
+    }
+  }
+  return "";
+}
+
 function stripHtml(html: string | null) {
   if (!html) return "";
   return html
@@ -148,6 +315,15 @@ function stripHtml(html: string | null) {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function getStoredPayloadRecord(value: unknown) {
+  if (!value || typeof value !== "object") return {} as Record<string, unknown>;
+  const record = value as Record<string, unknown>;
+  if (record.payload && typeof record.payload === "object") {
+    return record.payload as Record<string, unknown>;
+  }
+  return record;
 }
 
 async function invalidateAskGreSearchCache() {
@@ -456,12 +632,305 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-async function createWorkbookDownloadPayload(buffer: ArrayBuffer, fileName: string) {
+async function createWorkbookDownloadPayload(buffer: ArrayBuffer, fileName: string, mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
   return {
     fileName,
-    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    mimeType,
     base64: bytesToBase64(new Uint8Array(buffer)),
   };
+}
+
+function escapeExcelHtml(value: unknown) {
+  return requireString(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/\n/g, "<br>");
+}
+
+function escapeExcelXml(value: unknown) {
+  const str = value === null || value === undefined ? "" : String(value);
+  return str
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildSeekerSolutionEntries(notes: unknown) {
+  const text = requireString(notes).replace(/\r/g, "\n");
+  if (!text) return "";
+  const section = text.match(/solutions\s+shared\s*:\s*([\s\S]*?)(?:\n\s*solution\s+links\s+shared\s+with\s+seeker|$)/i)?.[1] || "";
+  const entries = section.split(/,|;|\n/).map((s) => s.trim()).filter(Boolean);
+  return entries.map((entry) => {
+    const parts = entry.split(/\s*:\s*/);
+    if (parts.length >= 3) {
+      const name = parts[0];
+      const provider = parts[1];
+      const url = parts.slice(2).join(": ");
+      return `${escapeExcelXml(name)} | ${escapeExcelXml(provider)}\n${escapeExcelXml(url)}`;
+    }
+    if (parts.length === 2) {
+      return `${escapeExcelXml(parts[0])}\n${escapeExcelXml(parts[1])}`;
+    }
+    return escapeExcelXml(entry);
+  }).join("\n\n");
+}
+
+function buildSeekerStatusStyle(styleId: string, fontColor: string, fillColor: string) {
+  return `<Style ss:ID="${styleId}"><Alignment ss:Horizontal="Left" ss:Vertical="Top" ss:WrapText="1"/><Font ss:FontName="Calibri" ss:Size="11" ss:Color="${fontColor}"/><Interior ss:Color="${fillColor}" ss:Pattern="Solid"/><Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders></Style>`;
+}
+
+function buildStyledTrackerHtml({
+  seekerLabel,
+  totalNeeds,
+  solutionProviderNeeded,
+  seekerResponsePending,
+  solutionsImplemented,
+  needs,
+}: {
+  seekerLabel: string;
+  totalNeeds: number;
+  solutionProviderNeeded: number;
+  seekerResponsePending: number;
+  solutionsImplemented: number;
+  needs: Array<Record<string, unknown>>;
+}) {
+  const generatedOn = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+  const emptyCell = () => '<Cell ss:StyleID="Empty"/>';
+  const labelCell = (value: unknown, styleId: string) =>
+    `<Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeExcelXml(value)}</Data></Cell>`;
+  const valueCell = (value: unknown, styleId: string, type = "String") =>
+    value === "" || value === undefined || value === null
+      ? emptyCell()
+      : `<Cell ss:StyleID="${styleId}"><Data ss:Type="${type}">${escapeExcelXml(value)}</Data></Cell>`;
+  const dataCell = (value: unknown, styleId: string) => {
+    const text = requireString(value);
+    if (!text) return emptyCell();
+    return `<Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeExcelXml(value)}</Data></Cell>`;
+  };
+
+  const dStyle = (need: Record<string, unknown>) => {
+    const s = requireString(need.status).toLowerCase();
+    if (s === "accepted") return "StAccepted";
+    if (s === "closed") return "StClosed";
+    return "BodyBordered";
+  };
+  const eStyle = (need: Record<string, unknown>) => {
+    const s = requireString(need.internal_status).toLowerCase();
+    if (s.includes("connection made")) return "StConnMade";
+    if (s.includes("need solution")) return "StNeedSol";
+    if (s.includes("blocked")) return "StBlocked";
+    if (s === "complete") return "StClosed";
+    return "BodyBordered";
+  };
+  const fStyle = (need: Record<string, unknown>) => {
+    const s = requireString(need.next_action).toLowerCase();
+    if (s === "follow up with seeker") return "StFollowUp";
+    return "StOtherAction";
+  };
+  const gStyle = (need: Record<string, unknown>) => {
+    const s = requireString(need.seeker_provider_agreement).toLowerCase();
+    if (!s) return "StNoAgree";
+    if (s === "agreement completed") return "StAgreeDone";
+    if (s.includes("no agreement")) return "StNoAgree";
+    return "StAgreeOther";
+  };
+
+  const safeStr = (v: unknown) => v === null || v === undefined || v === "" ? null : requireString(v);
+  const makeCell = (col: number, value: unknown, styleId: string, type = "String") => {
+    if (value === null || value === undefined || value === "") {
+      return `<Cell ss:Index="${col}" ss:StyleID="Empty"/>`;
+    }
+    return `<Cell ss:Index="${col}" ss:StyleID="${styleId}"><Data ss:Type="${type}">${escapeExcelXml(value)}</Data></Cell>`;
+  };
+
+  const dataRows = needs.map((need, index) => {
+    const solutions = buildSeekerSolutionEntries(need.curation_notes);
+    return `
+    <Row ss:AutoFitHeight="0" ss:Height="80">
+      ${makeCell(1, index + 1, "Serial", "Number")}
+      ${makeCell(2, safeStr(need.problem_statement), "BodyBordered")}
+      ${makeCell(3, safeStr(solutions), "BodyBordered")}
+      ${makeCell(4, safeStr(need.status), dStyle(need))}
+      ${makeCell(5, safeStr(need.internal_status), eStyle(need))}
+      ${makeCell(6, safeStr(need.next_action), fStyle(need))}
+      ${makeCell(7, safeStr(need.seeker_provider_agreement), gStyle(need))}
+      ${makeCell(8, null, "BodyNoBorder")}
+    </Row>`;
+  }).join("");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+  <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
+    <Title>Request Tracker Sheet - ${escapeExcelXml(seekerLabel)}</Title>
+    <Author>GRE MIS</Author>
+    <Created>${new Date().toISOString()}</Created>
+  </DocumentProperties>
+  <Styles>
+    <Style ss:ID="Default" ss:Name="Normal">
+      <Alignment ss:Vertical="Top"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Color="#333333"/>
+    </Style>
+    <Style ss:ID="Empty"/>
+    <Style ss:ID="HeaderCenter">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>
+      <Interior ss:Color="#F2F2F2" ss:Pattern="Solid"/>
+      <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders>
+    </Style>
+    <Style ss:ID="TitleLabel">
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+      <Font ss:FontName="Calibri" ss:Size="12" ss:Bold="1" ss:Color="#333333"/>
+    </Style>
+    <Style ss:ID="TitleValue">
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+      <Font ss:FontName="Calibri" ss:Size="12" ss:Color="#333333"/>
+    </Style>
+    <Style ss:ID="SummaryGrey">
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>
+      <Interior ss:Color="#F2F2F2" ss:Pattern="Solid"/>
+      <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders>
+    </Style>
+    <Style ss:ID="SummaryValueGrey">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>
+      <Interior ss:Color="#F2F2F2" ss:Pattern="Solid"/>
+      <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders>
+    </Style>
+    <Style ss:ID="SummaryBlue">
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>
+      <Interior ss:Color="#D6E4F0" ss:Pattern="Solid"/>
+      <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders>
+    </Style>
+    <Style ss:ID="SummaryValueBlue">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>
+      <Interior ss:Color="#D6E4F0" ss:Pattern="Solid"/>
+      <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders>
+    </Style>
+    <Style ss:ID="SummaryOrange">
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>
+      <Interior ss:Color="#FCE4D6" ss:Pattern="Solid"/>
+      <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders>
+    </Style>
+    <Style ss:ID="SummaryValueOrange">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>
+      <Interior ss:Color="#FCE4D6" ss:Pattern="Solid"/>
+      <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders>
+    </Style>
+    <Style ss:ID="SummaryGreen">
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>
+      <Interior ss:Color="#E2EFDA" ss:Pattern="Solid"/>
+      <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders>
+    </Style>
+    <Style ss:ID="SummaryValueGreen">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>
+      <Interior ss:Color="#E2EFDA" ss:Pattern="Solid"/>
+      <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders>
+    </Style>
+    <Style ss:ID="BodyBordered">
+      <Alignment ss:Horizontal="Left" ss:Vertical="Top" ss:WrapText="1"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Color="#333333"/>
+      <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders>
+    </Style>
+    <Style ss:ID="BodyNoBorder">
+      <Alignment ss:Horizontal="Left" ss:Vertical="Top" ss:WrapText="1"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Color="#333333"/>
+    </Style>
+    <Style ss:ID="Serial">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>
+      <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders>
+    </Style>
+    ${buildSeekerStatusStyle("StAccepted", "#333333", "#FFF2CC")}
+    ${buildSeekerStatusStyle("StClosed", "#333333", "#E2EFDA")}
+    ${buildSeekerStatusStyle("StConnMade", "#333333", "#D6E4F0")}
+    ${buildSeekerStatusStyle("StNeedSol", "#333333", "#FFF2CC")}
+    ${buildSeekerStatusStyle("StBlocked", "#333333", "#FCE4EC")}
+    ${buildSeekerStatusStyle("StFollowUp", "#333333", "#FFF2CC")}
+    ${buildSeekerStatusStyle("StOtherAction", "#333333", "#FCE4EC")}
+    ${buildSeekerStatusStyle("StAgreeDone", "#333333", "#E2EFDA")}
+    ${buildSeekerStatusStyle("StNoAgree", "#333333", "#FCE4EC")}
+    ${buildSeekerStatusStyle("StAgreeOther", "#333333", "#FFF2CC")}
+  </Styles>
+  <Worksheet ss:Name="Tracker">
+    <Table ss:ExpandedColumnCount="8" ss:ExpandedRowCount="${needs.length + 10}" x:FullColumns="1" x:FullRows="1"
+           ss:DefaultRowHeight="16">
+      <Column ss:Width="30.48"/>
+      <Column ss:Width="376.63"/>
+      <Column ss:Width="298.37"/>
+      <Column ss:Width="108.11"/>
+      <Column ss:Width="144.37"/>
+      <Column ss:Width="138.63"/>
+      <Column ss:Width="152"/>
+      <Column ss:Width="188.26"/>
+      <Row ss:Height="24">
+        ${emptyCell()}
+        ${labelCell("Request Tracker Sheet", "TitleLabel")}
+        ${labelCell(seekerLabel, "TitleValue")}
+      </Row>
+      <Row ss:Height="20">
+        ${emptyCell()}
+        ${labelCell("Generated On", "TitleLabel")}
+        ${labelCell(generatedOn, "TitleValue")}
+      </Row>
+      <Row ss:Height="10"><Cell ss:StyleID="Empty"/></Row>
+      <Row ss:Height="24">
+        ${emptyCell()}
+        ${labelCell("Total Needs Logged", "SummaryGrey")}
+        ${valueCell(totalNeeds, "SummaryValueGrey", "Number")}
+      </Row>
+      <Row ss:Height="24">
+        ${emptyCell()}
+        ${labelCell("Solution Provider Needed", "SummaryBlue")}
+        ${valueCell(solutionProviderNeeded, "SummaryValueBlue", "Number")}
+      </Row>
+      <Row ss:Height="24">
+        ${emptyCell()}
+        ${labelCell("Solution Provider Connected, Seeker Response Pending", "SummaryOrange")}
+        ${valueCell(seekerResponsePending, "SummaryValueOrange", "Number")}
+      </Row>
+      <Row ss:Height="24">
+        ${emptyCell()}
+        ${labelCell("Solutions Implemented", "SummaryGreen")}
+        ${valueCell(solutionsImplemented, "SummaryValueGreen", "Number")}
+      </Row>
+      <Row ss:Height="10"><Cell ss:StyleID="Empty"/></Row>
+      <Row ss:Height="28">
+        ${labelCell("Sr", "HeaderCenter")}
+        ${labelCell("Request", "HeaderCenter")}
+        ${labelCell("Solution Shared", "HeaderCenter")}
+        ${labelCell("Status", "HeaderCenter")}
+        ${labelCell("Internal Status", "HeaderCenter")}
+        ${labelCell("Next Action", "HeaderCenter")}
+        ${labelCell("Seeker-Provider Agreement", "HeaderCenter")}
+        ${labelCell("Comments", "HeaderCenter")}
+      </Row>
+      ${dataRows}
+    </Table>
+    <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
+      <FreezePanes/>
+      <FrozenNoSplit/>
+      <SplitHorizontal>9</SplitHorizontal>
+      <TopRowBottomPane>9</TopRowBottomPane>
+      <ActivePane>2</ActivePane>
+    </WorksheetOptions>
+  </Worksheet>
+</Workbook>`;
 }
 
 async function loginToGre() {
@@ -765,7 +1234,16 @@ async function checkGreIdentity(loginName: string) {
 function getRoleCodeForMisRole(role: string) {
   if (role === "admin") return `role.${greMasterTenant}.admin`;
   if (role === "curator") return `role.${greMasterTenant}.curator`;
+  if (role === "moderator") return `role.${greMasterTenant}.user`;
   return `role.${greMasterTenant}.user`;
+}
+
+function isAdminLikeMisRole(role: string) {
+  return ["admin", "moderator"].includes(requireString(role).toLowerCase());
+}
+
+function isModeratorMisRole(role: string) {
+  return requireString(role).toLowerCase() === "moderator";
 }
 
 function normalizePhoneLogin(value: unknown) {
@@ -1304,9 +1782,9 @@ async function removeGreRole(greUserId: number, roleCode: string) {
 
 async function syncGreRoleAssignment(greUserId: number, targetRole: string) {
   const targetRoleCode = getRoleCodeForMisRole(targetRole);
-  const rolesToRemove = ["admin", "curator", "user"]
+  const rolesToRemove = [...new Set(["admin", "moderator", "curator", "user"]
     .filter((role) => role !== targetRole)
-    .map((role) => getRoleCodeForMisRole(role));
+    .map((role) => getRoleCodeForMisRole(role)))];
 
   await addGreRole(greUserId, targetRoleCode);
   for (const roleCode of rolesToRemove) {
@@ -1322,7 +1800,7 @@ async function syncGreRoleAssignment(greUserId: number, targetRole: string) {
 }
 
 async function removeGreTenantRoles(greUserId: number) {
-  for (const roleCode of ["admin", "curator", "user"].map((role) => getRoleCodeForMisRole(role))) {
+  for (const roleCode of [...new Set(["admin", "moderator", "curator", "user"].map((role) => getRoleCodeForMisRole(role)))]) {
     try {
       await removeGreRole(greUserId, roleCode);
     } catch (error) {
@@ -2304,6 +2782,79 @@ function buildGreDateString(value: string) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+function normalizeFieldKey(value: unknown) {
+  return requireString(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function findGreFieldPath(root: unknown, aliases: string[], depth = 0, path: (string | number)[] = []): (string | number)[] | null {
+  if (!root || typeof root !== "object" || depth > 5) return null;
+  const normalizedAliases = aliases.map(normalizeFieldKey).filter(Boolean);
+  if (Array.isArray(root)) {
+    for (let index = 0; index < root.length; index += 1) {
+      const nested = findGreFieldPath(root[index], aliases, depth + 1, [...path, index]);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  const record = root as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (normalizedAliases.includes(normalizeFieldKey(key))) return [...path, key];
+  }
+  for (const key of Object.keys(record)) {
+    const nested = findGreFieldPath(record[key], aliases, depth + 1, [...path, key]);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function getPathValue(root: Record<string, unknown>, path: (string | number)[]) {
+  return path.reduce((current: unknown, key) => {
+    if (!current || typeof current !== "object") return undefined;
+    return (current as Record<string | number, unknown>)[key];
+  }, root as unknown);
+}
+
+function setPathValue(root: Record<string, unknown>, path: (string | number)[], value: unknown) {
+  let current: Record<string | number, unknown> | null = root;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const key = path[index];
+    const next = current?.[key];
+    if (!next || typeof next !== "object") return false;
+    current = next as Record<string | number, unknown>;
+  }
+  if (!current) return false;
+  current[path[path.length - 1]] = value;
+  return true;
+}
+
+async function buildGreCompatibleFieldValue(existing: unknown, nextValue: string) {
+  const normalized = requireString(nextValue);
+  if (!normalized) return null;
+  if (existing && typeof existing === "object" && !Array.isArray(existing)) {
+    const record = existing as Record<string, unknown>;
+    const classCode = requireString(record.classCode);
+    if (classCode) {
+      const mapped = findGreRefDataOption(await getGreRefData(classCode), normalized);
+      if (mapped) return mapped;
+    }
+    return {
+      ...record,
+      name: normalized,
+      value: normalized,
+    };
+  }
+  return normalized;
+}
+
+async function setGreFieldIfPresent(root: Record<string, unknown>, aliases: string[], value: unknown) {
+  const normalized = requireString(value);
+  if (!normalized) return false;
+  const path = findGreFieldPath(root, aliases);
+  if (!path) return false;
+  const existing = getPathValue(root, path);
+  return setPathValue(root, path, await buildGreCompatibleFieldValue(existing, normalized));
+}
+
 async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
   const needId = requireString(requestRow.need_id);
   if (!needId) throw new Error("Need id is required for GRE sync.");
@@ -2351,6 +2902,34 @@ async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
     primaryCuration.callDate = buildGreDateString(requestRow.proposed_curation_call_date);
   }
 
+  if (Array.isArray(requestRow.proposed_curated_need)) {
+    const curatedNeedValues = asStringArray(requestRow.proposed_curated_need);
+    if (curatedNeedValues.length) {
+      const curatedNeedClass = await getGreRefData("CLASS.CURATED_NEED_OF_SERVICE_SEEKER");
+      const curatedCodeMap = new Map<string, Record<string, unknown>>();
+      for (const opt of curatedNeedClass as Record<string, unknown>[]) {
+        const code = String(opt.code || "");
+        const name = String(opt.name || "");
+        if (name) curatedCodeMap.set(name.toLowerCase(), opt);
+        if (code) {
+          const shortCode = code.includes(".") ? code.split(".").pop()?.toLowerCase() || "" : code;
+          if (shortCode) curatedCodeMap.set(shortCode, opt);
+        }
+      }
+      primaryCuration.curatedNeedOfServiceSeekers = curatedNeedValues.map((v) => {
+        const match = curatedCodeMap.get(v.toLowerCase());
+        if (!match) throw new Error(`Curated need "${v}" not found in GRE reference data class CLASS.CURATED_NEED_OF_SERVICE_SEEKER.`);
+        return {
+          code: String(match.code),
+          name: String(match.name),
+          classCode: "CLASS.CURATED_NEED_OF_SERVICE_SEEKER",
+        };
+      });
+    } else {
+      primaryCuration.curatedNeedOfServiceSeekers = [];
+    }
+  }
+
   if (typeof requestRow.proposed_demand_broadcast_needed === "boolean") {
     const mapped = findGreRefDataOption(
       demandBroadcastOptions,
@@ -2360,7 +2939,24 @@ async function syncApprovedUpdateToGre(requestRow: Record<string, any>) {
     primaryCuration.demandBroadcastNeed = mapped;
   }
 
-  if (requestRow.proposed_next_action) unsupportedFields.push("next_action");
+  if (requestRow.proposed_next_action) {
+    const synced = await setGreFieldIfPresent(payload, ["nextAction", "next_action", "nextActionStatus"], requestRow.proposed_next_action);
+    if (!synced) unsupportedFields.push("next_action");
+  }
+  const outcomeSyncs: Array<[string, string[], unknown]> = [
+    ["funding_mechanism", ["fundingMechanism", "funding_mechanism", "funding", "outcomeFundingMechanism"], requestRow.proposed_funding_mechanism],
+    ["seeker_provider_agreement", ["seekerProviderAgreement", "seeker_provider_agreement", "seekerAgreement", "providerAgreement"], requestRow.proposed_seeker_provider_agreement],
+    ["solution_deployment_status", ["solutionDeploymentStatus", "solution_deployment_status", "deploymentStatus"], requestRow.proposed_solution_deployment_status],
+    ["closure_date", ["closureDate", "closure_date", "closedOn"], buildGreDateString(requireString(requestRow.proposed_closure_date)) || requestRow.proposed_closure_date],
+    ["feedback_about_seeker", ["feedbackAboutSeeker", "feedback_about_seeker", "seekerFeedback"], requestRow.proposed_feedback_about_seeker],
+    ["feedback_about_provider", ["feedbackAboutProvider", "feedback_about_provider", "providerFeedback"], requestRow.proposed_feedback_about_provider],
+  ];
+  for (const [fieldName, aliases, value] of outcomeSyncs) {
+    if (!requireString(value)) continue;
+    const syncedOnRequest = await setGreFieldIfPresent(payload, aliases, value);
+    const syncedOnCuration = await setGreFieldIfPresent(primaryCuration, aliases, value);
+    if (!syncedOnRequest && !syncedOnCuration) unsupportedFields.push(fieldName);
+  }
   if (Number.isInteger(requestRow.proposed_solutions_shared_count)) unsupportedFields.push("solutions_shared_count");
   if (Number.isInteger(requestRow.proposed_invited_providers_count)) unsupportedFields.push("invited_providers_count");
 
@@ -2490,6 +3086,27 @@ function stableRowSignature(value: unknown) {
   return JSON.stringify(value, Object.keys(value as Record<string, unknown>).sort());
 }
 
+const inboundOutcomeSignatureKeys = [
+  "funding_mechanism",
+  "seeker_provider_agreement",
+  "solution_deployment_status",
+  "closure_date",
+  "feedback_about_seeker",
+  "feedback_about_provider",
+];
+
+function stableInboundRowSignature(row: Record<string, unknown>) {
+  const signatureRow: Record<string, unknown> = { ...row };
+  inboundOutcomeSignatureKeys.forEach((key) => {
+    const value = signatureRow[key];
+    const isEmptyArray = Array.isArray(value) && value.length === 0;
+    if (!requireString(value) || isEmptyArray) {
+      delete signatureRow[key];
+    }
+  });
+  return stableRowSignature(signatureRow);
+}
+
 function buildNeedIntelligencePrompt(need: Record<string, unknown>) {
   return `
 Classify this GRE inbound need into structured JSON for matching. Return only valid JSON.
@@ -2515,6 +3132,11 @@ ${JSON.stringify({
     problem_statement: need.problem_statement,
     curated_need: need.curated_need,
     curation_notes: need.curation_notes,
+    funding_mechanism: need.funding_mechanism,
+    seeker_provider_agreement: need.seeker_provider_agreement,
+    solution_deployment_status: need.solution_deployment_status,
+    feedback_about_seeker: need.feedback_about_seeker,
+    feedback_about_provider: need.feedback_about_provider,
     solutions_shared_count: need.solutions_shared_count,
   })}
 
@@ -2738,6 +3360,63 @@ function buildNeedTagDraft(input: {
     .slice(0, 12);
 }
 
+function extractSolutionPriorityPhrases(value: unknown) {
+  const text = requireString(value)
+    .toLowerCase()
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ");
+
+  const phrases: string[] = [];
+
+  for (const match of text.matchAll(/\b([a-z][a-z\s-]{1,30})\s+processing\b/g)) {
+    const phrase = normalizeNeedTag(`${requireString(match[1])} processing`);
+    if (!isWeakNeedTag(phrase)) phrases.push(phrase);
+  }
+
+  if (/\bvalue added\b|\bvalue addition\b/.test(text)) phrases.push("value addition");
+  if (/\bdrying\b/.test(text) && /\bmango|fruit|fruits\b/.test(text)) phrases.push("fruit drying");
+  if (/\bachar\b/.test(text)) phrases.push("achar production");
+  if (/\bamchur\b/.test(text)) phrases.push("amchur powder");
+  if (/\bjuice\b|\bjuices\b/.test(text)) phrases.push("juice processing");
+  if (/\bdrying\b|\bpreservation\b|\bpickle\b|\bachar\b|\bamchur\b/.test(text)) phrases.push("food preservation");
+  if (/\bmango\b|\bfruit\b|\bfruits\b|\bagricultural\b|\bproduce\b/.test(text)) phrases.push("agricultural products");
+  if (/\brural\b|\bvillage\b|\bvillages\b|\bfarmer\b|\bfarmers\b|\bsmallholder\b/.test(text)) phrases.push("rural livelihoods");
+  if (/\bsmallholder\b|\bfarmers?\b/.test(text)) phrases.push("smallholder farmers");
+
+  return uniqueStrings(
+    phrases
+      .map((entry) => normalizeNeedTag(entry))
+      .filter((entry) => !isWeakNeedTag(entry)),
+  );
+}
+
+function buildSolutionTagDraft(input: {
+  offeringName?: unknown;
+  offeringDescription?: unknown;
+  organizationName?: unknown;
+  rules: ReturnType<typeof classifyOfferingByRules>;
+}) {
+  const combined = [
+    requireString(input.offeringName),
+    requireString(input.offeringDescription),
+    requireString(input.organizationName),
+  ].filter(Boolean).join(" | ");
+  const phrases = extractSolutionPriorityPhrases(combined);
+  const scopedTokens = tokenizeLooseText(combined, 5)
+    .filter((token) => !domainStopwords.has(token))
+    .filter((token) => !/^\d+$/.test(token))
+    .slice(0, 6);
+  return uniqueStrings([
+    ...phrases,
+    ...input.rules.thematicHints.map((entry) => normalizeNeedTag(entry)),
+    ...input.rules.serviceHints.map((entry) => normalizeNeedTag(entry)),
+    ...input.rules.keywords.map((entry) => normalizeNeedTag(entry)),
+    ...scopedTokens.map((entry) => normalizeNeedTag(entry)),
+  ])
+    .filter((entry) => !isWeakNeedTag(entry))
+    .slice(0, 12);
+}
+
 function validateAiEnrichment(
   need: Record<string, unknown>,
   ai: Record<string, unknown>,
@@ -2915,6 +3594,134 @@ async function callAiJson(providerInput: string, prompt: string) {
         ? ["openai", "gemini", "openrouter", "deepseek"]
         : ["openrouter", "gemini", "deepseek", "openai"];
   return await callAiJsonWithOrder(requestedOrder, prompt);
+}
+
+function isHindiSourceLanguage(value: unknown) {
+  return requireString(value).toLowerCase() === "hi";
+}
+
+async function translateTextWithLibreTranslate(
+  text: string,
+  source = "auto",
+  target = "en",
+) {
+  const normalized = requireString(text);
+  if (!normalized || source === target) return normalized;
+
+  try {
+    const requestBody: Record<string, unknown> = {
+      q: normalized,
+      source,
+      target,
+      format: "text",
+    };
+    if (libreTranslateApiKey) requestBody.api_key = libreTranslateApiKey;
+
+    const response = await fetch(libreTranslateApiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(requireString(data?.error || data?.message) || "LibreTranslate request failed.");
+    }
+    return requireString(data?.translatedText || normalized);
+  } catch (error) {
+    console.warn("LibreTranslate failed, using original text:", error instanceof Error ? error.message : String(error));
+    return normalized;
+  }
+}
+
+async function translateStringArrayToEnglish(values: unknown) {
+  const normalizedValues = uniqueStrings(asStringArray(values));
+  if (!normalizedValues.length) return [];
+  const translated = await Promise.all(
+    normalizedValues.map((value) => translateTextWithLibreTranslate(value, "hi", "en")),
+  );
+  return uniqueStrings(translated);
+}
+
+async function normalizeSubmissionTranslations(
+  submissionType: string,
+  input: Record<string, unknown>,
+) {
+  const payload = { ...input };
+  if (!isHindiSourceLanguage(payload.source_language)) return payload;
+
+  if (requireString(payload.organization_name)) {
+    payload.original_organization_name_hi = requireString(payload.organization_name);
+    payload.organization_name = await translateTextWithLibreTranslate(requireString(payload.organization_name), "hi", "en");
+  }
+
+  if (submissionType === "solution") {
+    if (requireString(payload.offering_name)) {
+      payload.original_offering_name_hi = requireString(payload.offering_name);
+      payload.offering_name = await translateTextWithLibreTranslate(requireString(payload.offering_name), "hi", "en");
+    }
+    const currentSolutionName = requireString(payload.solution_name || payload.offering_name);
+    if (currentSolutionName) {
+      payload.original_solution_name_hi = requireString(payload.solution_name || "");
+      payload.solution_name = await translateTextWithLibreTranslate(currentSolutionName, "hi", "en");
+    }
+    if (requireString(payload.about_offering_text)) {
+      payload.translated_about_offering_text_en = await translateTextWithLibreTranslate(
+        requireString(payload.about_offering_text),
+        "hi",
+        "en",
+      );
+    }
+    if (requireString(payload.about_solution_text)) {
+      payload.translated_about_solution_text_en = await translateTextWithLibreTranslate(
+        requireString(payload.about_solution_text),
+        "hi",
+        "en",
+      );
+    } else if (requireString(payload.translated_about_offering_text_en)) {
+      payload.translated_about_solution_text_en = requireString(payload.translated_about_offering_text_en);
+    }
+    payload.tags = await translateStringArrayToEnglish(payload.tags);
+    payload.geographies = await translateStringArrayToEnglish(payload.geographies);
+  } else if (submissionType === "need") {
+    if (requireString(payload.thematic_area)) {
+      payload.original_thematic_area_hi = requireString(payload.thematic_area);
+      payload.thematic_area = await translateTextWithLibreTranslate(requireString(payload.thematic_area), "hi", "en");
+    }
+    if (requireString(payload.problem_statement)) {
+      payload.translated_problem_statement_en = await translateTextWithLibreTranslate(
+        requireString(payload.problem_statement),
+        "hi",
+        "en",
+      );
+    }
+    payload.keywords = await translateStringArrayToEnglish(payload.keywords);
+    payload.deployment_locations = await translateStringArrayToEnglish(payload.deployment_locations);
+  }
+
+  return payload;
+}
+
+async function searchLgdGeographies(query: string) {
+  const search = requireString(query);
+  if (search.length < 2) {
+    return { ok: true, suggestions: scoreLgdSuggestion("India", search) > 0 ? ["India"] : [] };
+  }
+  const wildcard = `%${search.replace(/[%_]/g, " ").trim()}%`;
+  const { data, error } = await adminClient
+    .from("lgd_geography_directory")
+    .select("display_label,location_kind,block_name,district_name,state_name,gram_panchayat_name,village_name")
+    .or(`search_text.ilike.${wildcard},display_label.ilike.${wildcard},block_name.ilike.${wildcard},district_name.ilike.${wildcard},state_name.ilike.${wildcard}`)
+    .limit(20);
+  if (error) {
+    throw new Error(error.message || "LGD search failed.");
+  }
+  return {
+    ok: true,
+    suggestions: uniqueStrings([
+      ...(scoreLgdSuggestion("India", search) > 0 ? ["India"] : []),
+      ...buildRankedLgdSuggestions((data || []) as Record<string, unknown>[], search),
+    ]),
+  };
 }
 
 async function enrichNeedIntelligence(need: Record<string, unknown>, provider: string) {
@@ -3190,7 +3997,26 @@ async function getGmailAccessToken(mailbox: GmailMailbox = "default") {
 }
 
 function toBase64Url(input: string) {
-  return btoa(input).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return bytesToBase64(new TextEncoder().encode(input)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function wrapBase64Lines(value: string, lineLength = 76) {
+  const lines: string[] = [];
+  for (let index = 0; index < value.length; index += lineLength) {
+    lines.push(value.slice(index, index + lineLength));
+  }
+  return lines.join("\r\n");
+}
+
+function encodeMimeHeader(value: string) {
+  const text = requireString(value);
+  if (!text) return "";
+  if (/^[\x00-\x7F]*$/.test(text)) return text;
+  return `=?UTF-8?B?${bytesToBase64(new TextEncoder().encode(text))}?=`;
+}
+
+function encodeMimeBody(value: string) {
+  return wrapBase64Lines(bytesToBase64(new TextEncoder().encode(value)));
 }
 
 async function sendEmail({
@@ -3211,13 +4037,13 @@ async function sendEmail({
   const headers = [
     `From: ${config.senderEmail}`,
     `To: ${to}`,
-    `Subject: ${subject}`,
+    `Subject: ${encodeMimeHeader(subject)}`,
     "MIME-Version: 1.0",
     "Content-Type: text/plain; charset=UTF-8",
-    "Content-Transfer-Encoding: 7bit",
+    "Content-Transfer-Encoding: base64",
   ];
   if (cc) headers.splice(2, 0, `Cc: ${cc}`);
-  const rawMessage = `${headers.join("\r\n")}\r\n\r\n${body}`;
+  const rawMessage = `${headers.join("\r\n")}\r\n\r\n${encodeMimeBody(body)}`;
 
   const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
     method: "POST",
@@ -3435,6 +4261,17 @@ async function requireUserSession(req: Request, bodyToken?: string) {
   return { session, user: session.user, token };
 }
 
+async function requireUserSessionFromRequest(req: Request, payload: Record<string, unknown>, bodyToken?: string) {
+  try {
+    return await requireUserSession(req, bodyToken);
+  } catch (sessionError) {
+    const accessToken = requireString(payload.grameeeAccessToken);
+    if (!accessToken) throw sessionError;
+    const bridge = await bridgeGrameeeSession(accessToken);
+    return await requireUserSession(req, requireString(bridge.token));
+  }
+}
+
 function assertRoles(
   userCtx: { user: { role?: string } },
   roles: string[],
@@ -3452,7 +4289,7 @@ async function requireAdminSession(req: Request, bodyToken?: string) {
     requireString(bodyToken);
   try {
     const userCtx = await requireUserSession(req, bodyToken);
-    assertRoles(userCtx, ["admin"], "Admin login required.");
+    assertRoles(userCtx, ["admin", "moderator"], "Admin or moderator login required.");
     return {
       ...userCtx,
       admin: {
@@ -3478,6 +4315,25 @@ async function requireAdminSession(req: Request, bodyToken?: string) {
   }
 }
 
+async function requireAdminSessionFromRequest(req: Request, payload: Record<string, unknown>, bodyToken?: string) {
+  try {
+    return await requireAdminSession(req, bodyToken);
+  } catch (sessionError) {
+    const accessToken = requireString(payload.grameeeAccessToken);
+    if (!accessToken) throw sessionError;
+    const bridge = await bridgeGrameeeSession(accessToken);
+    const userCtx = await requireUserSession(req, requireString(bridge.token));
+    assertRoles(userCtx, ["admin", "moderator"], "Admin or moderator login required.");
+    return {
+      ...userCtx,
+      admin: {
+        email: userCtx.user.email,
+        display_name: userCtx.user.full_name || userCtx.user.first_name || userCtx.user.username,
+      },
+    };
+  }
+}
+
 async function verifyUserPassword(identifier: string, password: string) {
   const { data, error } = await adminClient.rpc("gre_mis_user_password_matches", {
     p_identifier: identifier,
@@ -3496,6 +4352,110 @@ async function verifyLegacyAdminPassword(username: string, password: string) {
   return Boolean(data);
 }
 
+async function bridgeGrameeeSession(grameeeAccessToken: string) {
+  const normalizedToken = requireString(grameeeAccessToken);
+  if (!normalizedToken) {
+    throw new Error("GramEEE login is required.");
+  }
+
+  const authUser = await resolveGrameeeAuthUser(normalizedToken);
+  if (!authUser) {
+    throw new Error("Your GramEEE login could not be verified. Please sign in again.");
+  }
+
+  const appMetadata = (authUser.app_metadata || {}) as Record<string, unknown>;
+  const userMetadata = (authUser.user_metadata || {}) as Record<string, unknown>;
+  const role = requireString(appMetadata.grameee_role).toLowerCase();
+
+  if (!["admin", "moderator", "curator"].includes(role)) {
+    throw new Error("This GramEEE login does not currently have GRE access.");
+  }
+
+  const email = requireString(authUser.email).toLowerCase();
+  const username = requireString(userMetadata.username).toLowerCase();
+  if (!email) {
+    throw new Error("Your GramEEE login is missing an email address.");
+  }
+
+  const rawFullName = requireString(userMetadata.full_name) || username || email;
+  const fullName = email === "tanmay@greenruraleconomy.in" && /admin/i.test(rawFullName)
+    ? "Tanmay Mukherji"
+    : rawFullName;
+  const firstName = requireString(userMetadata.first_name) || fullName.split(/\s+/)[0] || fullName;
+  const phone = requireString(userMetadata.phone);
+  const syncedAt = new Date().toISOString();
+
+  const { data: existingUser, error: existingError } = await adminClient
+    .from("gre_mis_users")
+    .select("id, username, email, first_name, full_name, phone, role, is_active, must_change_password")
+    .or(`email.eq.${email},username.eq.${username || email}`)
+    .limit(1)
+    .maybeSingle();
+  if (existingError) throw new Error(existingError.message);
+
+  let greUser: Record<string, unknown> | null = existingUser as Record<string, unknown> | null;
+
+  if (greUser) {
+    const { data: updatedUser, error: updateError } = await adminClient
+      .from("gre_mis_users")
+      .update({
+        username: username || requireString(greUser.username) || email,
+        email,
+        first_name: firstName,
+        full_name: fullName,
+        phone: phone || null,
+        role,
+        is_active: true,
+        updated_at: syncedAt,
+      })
+      .eq("id", requireString(greUser.id))
+      .select("id, username, email, first_name, full_name, phone, role, is_active, must_change_password")
+      .single();
+    if (updateError || !updatedUser) throw new Error(updateError?.message || "GRE MIS user could not be updated.");
+    greUser = updatedUser as Record<string, unknown>;
+  } else {
+    const { data: insertedUser, error: insertError } = await adminClient
+      .from("gre_mis_users")
+      .insert({
+        username: username || email,
+        email,
+        first_name: firstName,
+        full_name: fullName,
+        phone: phone || null,
+        role,
+        is_active: true,
+        must_change_password: false,
+        password_hash: "placeholder",
+      })
+      .select("id, username, email, first_name, full_name, phone, role, is_active, must_change_password")
+      .single();
+    if (insertError || !insertedUser) throw new Error(insertError?.message || "GRE MIS user could not be created.");
+    greUser = insertedUser as Record<string, unknown>;
+  }
+
+  await syncRoleArtifactsForUser(greUser, role, "GRE MIS access refreshed from GramEEE session.");
+
+  const session = await createUserSession(requireString(greUser.id));
+  await adminClient
+    .from("gre_mis_users")
+    .update({ last_login_at: syncedAt })
+    .eq("id", requireString(greUser.id));
+
+  const { data: refreshedUser, error: refreshedError } = await adminClient
+    .from("gre_mis_users")
+    .select("id, username, email, first_name, full_name, phone, role, is_active, must_change_password")
+    .eq("id", requireString(greUser.id))
+    .single();
+  if (refreshedError || !refreshedUser) throw new Error(refreshedError?.message || "GRE MIS user could not be refreshed.");
+
+  return {
+    ok: true,
+    bridged: true,
+    ...session,
+    user: refreshedUser,
+  };
+}
+
 async function ensureAdminUserFromLegacyPassword(password: string) {
   const { data: existingUser, error: existingError } = await adminClient
     .from("gre_mis_users")
@@ -3510,8 +4470,8 @@ async function ensureAdminUserFromLegacyPassword(password: string) {
       .from("gre_mis_users")
       .insert({
         username: "admin",
-        first_name: "Admin",
-        full_name: "GRE Admin",
+        first_name: "Tanmay",
+        full_name: "Tanmay Mukherji",
         email: "tanmay@greenruraleconomy.in",
         role: "admin",
         is_active: true,
@@ -3530,6 +4490,18 @@ async function ensureAdminUserFromLegacyPassword(password: string) {
     p_must_change_password: false,
   });
   if (passwordError) throw new Error(passwordError.message);
+
+  await adminClient
+    .from("gre_mis_users")
+    .update({
+      first_name: "Tanmay",
+      full_name: "Tanmay Mukherji",
+      email: "tanmay@greenruraleconomy.in",
+      role: "admin",
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", userId);
 
   const { data: refreshedUser, error: refreshedError } = await adminClient
     .from("gre_mis_users")
@@ -3628,6 +4600,7 @@ async function getAdminSnapshot() {
       .from("gre_mis_needs")
       .select("*")
       .eq("approval_status", "approved")
+      .eq("source_kind", "shared_form_submission")
       .order("requested_on", { ascending: false })
       .limit(500);
   };
@@ -3662,7 +4635,7 @@ async function getAdminSnapshot() {
       .order("created_at", { ascending: false }),
     adminClient
       .from("gre_mis_form_submissions")
-      .select("id, target_need_id, organization_name, contact_name, contact_email, contact_phone, payload")
+      .select("id, target_need_id, organization_name, payload")
       .eq("submission_type", "need")
       .eq("approval_status", "approved")
       .not("target_need_id", "is", null)
@@ -3684,10 +4657,24 @@ async function getAdminSnapshot() {
         geographies,
         about_offering_text,
         contact_details,
+        raw_payload,
+        trainer_name,
+        trainer_email,
+        trainer_phone,
+        trainer_details_text,
+        duration,
+        prerequisites,
+        location_availability,
         service_cost,
         product_cost,
         lead_time,
         support_details,
+        support_post_service,
+        support_post_service_cost,
+        delivery_mode,
+        certification_offered,
+        cost_remarks,
+        grade_capacity,
         service_brochure_url,
         product_brochure_url,
         knowledge_content_url,
@@ -3709,6 +4696,7 @@ async function getAdminSnapshot() {
         )
       `)
       .eq("publish_status", "MIS Published")
+      .like("offering_id", "MIS-OFFERING-%")
       .order("updated_at", { ascending: false })
       .limit(500),
     localNeedsQuery(),
@@ -3738,9 +4726,16 @@ async function getAdminSnapshot() {
     const payload = linkedSubmission?.payload && typeof linkedSubmission.payload === "object"
       ? linkedSubmission.payload as Record<string, unknown>
       : {};
-    if (!requireString(needRecord.contact_person)) needRecord.contact_person = requireString(linkedSubmission?.contact_name || payload.contact_person);
-    if (!requireString(needRecord.seeker_email)) needRecord.seeker_email = requireString(linkedSubmission?.contact_email || payload.seeker_email).toLowerCase();
-    if (!requireString(needRecord.seeker_phone)) needRecord.seeker_phone = requireString(linkedSubmission?.contact_phone || payload.seeker_phone);
+    if (!requireString(needRecord.organization_name)) needRecord.organization_name = requireString(linkedSubmission?.organization_name || payload.organization_name);
+    if (!requireString(needRecord.contact_person)) {
+      needRecord.contact_person = requireString(payload.contact_person || payload.contact_name || payload.submitter_name);
+    }
+    if (!requireString(needRecord.seeker_email)) {
+      needRecord.seeker_email = requireString(payload.seeker_email || payload.contact_email || payload.submitter_email).toLowerCase();
+    }
+    if (!requireString(needRecord.seeker_phone)) {
+      needRecord.seeker_phone = requireString(payload.seeker_phone || payload.contact_phone || payload.submitter_phone);
+    }
     if (!Array.isArray(needRecord.deployment_locations) || !needRecord.deployment_locations.length) {
       needRecord.deployment_locations = uniqueStrings(asStringArray(payload.deployment_locations));
     }
@@ -3758,9 +4753,36 @@ async function getAdminSnapshot() {
     }
     return needRecord;
   });
-  const greProfiles = await fetchGreTenantUsers(true);
-  const usersWithGreSeed = await ensureMissingGreDirectoryUsers(usersResult as Record<string, unknown>[], greProfiles);
-  const reconciledUsers = await reconcileGreUserMappings(usersWithGreSeed);
+  // Keep the dashboard snapshot as a pure read path.
+  // GRE reconciliation and role sync belong on the explicit refresh action,
+  // not on the page-load snapshot that powers Management Desk.
+  const reconciledUsers = usersResult as Record<string, unknown>[];
+
+  let greMailTemplates;
+  try {
+    greMailTemplates = await getGreMailTemplates();
+  } catch (error) {
+    console.error("GRE mail template load failed during admin snapshot", error);
+    greMailTemplates = {
+      providerIntroTemplate: DEFAULT_PROVIDER_INTRO_TEMPLATE,
+      curatorForwardTemplate: DEFAULT_CURATOR_FORWARD_TEMPLATE,
+      solutionSeekerTemplate: DEFAULT_SOLUTION_SEEKER_TEMPLATE,
+      needSeekerTemplate: DEFAULT_NEED_SEEKER_TEMPLATE,
+      inboundAutoSyncEnabled: true,
+      lshContactEmails: ["subekkumar@pradan.net"],
+      lshHelpCcEmails: ["help@greenruraleconomy.in"],
+      lshRequestSupportTemplate: DEFAULT_LSH_MANAGEMENT_SETTINGS.requestSupportDraft,
+      lshEmailProviderTemplate: DEFAULT_LSH_MANAGEMENT_SETTINGS.emailProviderDraft,
+    };
+  }
+
+  let impactAuditLogs;
+  try {
+    impactAuditLogs = await getImpactAuditLogs();
+  } catch (error) {
+    console.error("Impact audit log load failed during admin snapshot", error);
+    impactAuditLogs = { viewLogs: [], emailLogs: [] };
+  }
 
   return {
     ok: true,
@@ -3771,8 +4793,220 @@ async function getAdminSnapshot() {
       return requireString(record.source_kind) !== "shared_form_submission" && !requireString(record.id).startsWith("FORM-");
     }),
     users: reconciledUsers,
+    mailTemplates: greMailTemplates,
+    impactAuditLogs,
     pendingFormSubmissions: pendingFormSubmissionsResult,
     localSolutions: localSolutionsResult,
+    localNeeds: hydratedLocalNeeds.filter((row) => {
+      const record = row as Record<string, unknown>;
+      return requireString(record.approval_status) === "approved"
+        && (requireString(record.source_kind) === "shared_form_submission" || requireString(record.id).startsWith("FORM-"));
+    }),
+  };
+}
+
+async function getAdminUsersSnapshot() {
+  const { data, error } = await adminClient
+    .from("gre_mis_users")
+    .select("id, username, first_name, full_name, email, phone, role, is_active, must_change_password, last_login_at, created_at, gre_user_id, gre_login_name, gre_sync_status, gre_sync_message, gre_synced_at, gre_pending_role, gre_activation_mod_key, gre_activation_requested_at")
+    .order("role", { ascending: true })
+    .order("first_name", { ascending: true });
+  if (error) throw new Error(error.message);
+  return { ok: true, users: data || [] };
+}
+
+async function getAdminMailImpactSnapshot() {
+  let greMailTemplates;
+  try {
+    greMailTemplates = await getGreMailTemplates();
+  } catch (error) {
+    console.error("GRE mail template load failed during mail/impact snapshot", error);
+    greMailTemplates = {
+      providerIntroTemplate: DEFAULT_PROVIDER_INTRO_TEMPLATE,
+      curatorForwardTemplate: DEFAULT_CURATOR_FORWARD_TEMPLATE,
+      solutionSeekerTemplate: DEFAULT_SOLUTION_SEEKER_TEMPLATE,
+      needSeekerTemplate: DEFAULT_NEED_SEEKER_TEMPLATE,
+      inboundAutoSyncEnabled: true,
+      lshContactEmails: ["subekkumar@pradan.net"],
+      lshHelpCcEmails: ["help@greenruraleconomy.in"],
+      lshRequestSupportTemplate: DEFAULT_LSH_MANAGEMENT_SETTINGS.requestSupportDraft,
+      lshEmailProviderTemplate: DEFAULT_LSH_MANAGEMENT_SETTINGS.emailProviderDraft,
+    };
+  }
+
+  let impactAuditLogs;
+  try {
+    impactAuditLogs = await getImpactAuditLogs();
+  } catch (error) {
+    console.error("Impact audit log load failed during mail/impact snapshot", error);
+    impactAuditLogs = { viewLogs: [], emailLogs: [] };
+  }
+
+  return {
+    ok: true,
+    mailTemplates: greMailTemplates,
+    impactAuditLogs,
+  };
+}
+
+async function getAdminDataSyncSnapshot() {
+  const { data, error } = await adminClient
+    .from("gre_mis_needs")
+    .select("id, organization_name, state, district, problem_statement, curation_notes, curated_need, ai_thematic_area, ai_application_area, ai_need_kind, ai_service_kind, ai_keywords, ai_6m_signals, ai_validation_status, ai_validation_flags, ai_confidence, ai_enrichment_status, ai_engine, ai_enriched_at, rule_thematic_hints, rule_6m_signals, override_thematic_area, override_application_area, override_need_kind, override_service_kind, override_keywords, override_6m_signals, override_summary, override_source, override_conflict_note, override_updated_at, source_kind")
+    .eq("approval_status", "approved")
+    .or("ai_validation_status.is.null,ai_validation_status.eq.flagged,ai_enrichment_status.is.null")
+    .order("updated_at", { ascending: false })
+    .limit(60);
+  if (error) throw new Error(error.message);
+  const templates = await getGreMailTemplates().catch(() => ({ inboundAutoSyncEnabled: true }));
+  return {
+    ok: true,
+    aiReviewNeeds: (data || []).filter((row) => {
+      const record = row as Record<string, unknown>;
+      return requireString(record.source_kind) !== "shared_form_submission" && !requireString(record.id).startsWith("FORM-");
+    }),
+    inboundAutoSyncEnabled: typeof templates.inboundAutoSyncEnabled === "boolean" ? templates.inboundAutoSyncEnabled : true,
+  };
+}
+
+async function getAdminApprovalsSnapshot() {
+  const [pendingNeeds, pendingUpdates, pendingFormSubmissions] = await Promise.all([
+    adminClient
+      .from("gre_mis_needs")
+      .select("id, organization_name, state, district, status, internal_status, requested_on, curator_id, problem_statement, source_kind")
+      .eq("approval_status", "pending_admin")
+      .order("requested_on", { ascending: false }),
+    adminClient
+      .from("gre_mis_update_requests")
+      .select("*")
+      .eq("approval_status", "pending")
+      .order("created_at", { ascending: false }),
+    adminClient
+      .from("gre_mis_form_submissions")
+      .select("id, submission_type, organization_name, source_mode, existing_trader_name, gre_sync_status, submitter_name, submitter_email, payload")
+      .or("approval_status.eq.pending_admin,approval_status.is.null")
+      .order("created_at", { ascending: false }),
+  ]);
+  if (pendingNeeds.error) throw new Error(pendingNeeds.error.message);
+  if (pendingUpdates.error) throw new Error(pendingUpdates.error.message);
+  if (pendingFormSubmissions.error) throw new Error(pendingFormSubmissions.error.message);
+  return {
+    ok: true,
+    pendingNeeds: pendingNeeds.data || [],
+    pendingUpdates: pendingUpdates.data || [],
+    pendingFormSubmissions: pendingFormSubmissions.data || [],
+  };
+}
+
+async function getAdminLocalSolutionsSnapshot() {
+  const { data, error } = await adminClient
+    .from("offerings")
+    .select(`
+      offering_id,
+      solution_id,
+      trader_id,
+      publish_status,
+      offering_name,
+      offering_category,
+      offering_group,
+      offering_type,
+      tags,
+      languages,
+      geographies,
+      about_offering_text,
+      updated_at,
+      solution:solutions (
+        solution_id,
+        solution_name,
+        about_solution_text,
+        solution_image_url
+      ),
+      trader:traders (
+        trader_id,
+        trader_name,
+        organisation_name,
+        email,
+        mobile,
+        poc_name,
+        association_status
+      )
+    `)
+    .eq("publish_status", "MIS Published")
+    .like("offering_id", "MIS-OFFERING-%")
+    .order("updated_at", { ascending: false })
+    .limit(500);
+  if (error) throw new Error(error.message);
+  return { ok: true, localSolutions: data || [] };
+}
+
+async function getAdminLocalNeedsSnapshot() {
+  const [localNeeds, approvedNeedSubmissions] = await Promise.all([
+    adminClient
+      .from("gre_mis_needs")
+      .select("*")
+      .eq("approval_status", "approved")
+      .eq("source_kind", "shared_form_submission")
+      .order("requested_on", { ascending: false })
+      .limit(500),
+    adminClient
+      .from("gre_mis_form_submissions")
+      .select("id, target_need_id, organization_name, payload")
+      .eq("submission_type", "need")
+      .eq("approval_status", "approved")
+      .not("target_need_id", "is", null)
+      .order("reviewed_at", { ascending: false })
+      .limit(500),
+  ]);
+  if (localNeeds.error) throw new Error(localNeeds.error.message);
+  if (approvedNeedSubmissions.error) throw new Error(approvedNeedSubmissions.error.message);
+
+  const approvedNeedSubmissionMap = new Map(
+    (approvedNeedSubmissions.data || [])
+      .map((row) => {
+        const record = row as Record<string, unknown>;
+        const targetNeedId = requireString(record.target_need_id);
+        if (!targetNeedId) return null;
+        return [targetNeedId, record] as const;
+      })
+      .filter(Boolean) as readonly (readonly [string, Record<string, unknown>])[],
+  );
+
+  const hydratedLocalNeeds = (localNeeds.data || []).map((row) => {
+    const needRecord = { ...(row as Record<string, unknown>) };
+    const linkedSubmission = approvedNeedSubmissionMap.get(requireString(needRecord.id));
+    const payload = linkedSubmission?.payload && typeof linkedSubmission.payload === "object"
+      ? linkedSubmission.payload as Record<string, unknown>
+      : {};
+    if (!requireString(needRecord.organization_name)) needRecord.organization_name = requireString(linkedSubmission?.organization_name || payload.organization_name);
+    if (!requireString(needRecord.contact_person)) {
+      needRecord.contact_person = requireString(payload.contact_person || payload.contact_name || payload.submitter_name);
+    }
+    if (!requireString(needRecord.seeker_email)) {
+      needRecord.seeker_email = requireString(payload.seeker_email || payload.contact_email || payload.submitter_email).toLowerCase();
+    }
+    if (!requireString(needRecord.seeker_phone)) {
+      needRecord.seeker_phone = requireString(payload.seeker_phone || payload.contact_phone || payload.submitter_phone);
+    }
+    if (!Array.isArray(needRecord.deployment_locations) || !needRecord.deployment_locations.length) {
+      needRecord.deployment_locations = uniqueStrings(asStringArray(payload.deployment_locations));
+    }
+    if (!Array.isArray(needRecord.submitted_keywords) || !needRecord.submitted_keywords.length) {
+      needRecord.submitted_keywords = uniqueStrings(asStringArray(payload.keywords));
+    }
+    if (!requireString(needRecord.submitted_thematic_area)) {
+      needRecord.submitted_thematic_area = requireString(payload.thematic_area) || null;
+    }
+    if (!requireString(needRecord.submitted_offering_category)) {
+      needRecord.submitted_offering_category = requireString(payload.offering_category) || null;
+    }
+    if (!requireString(needRecord.submitted_offering_type)) {
+      needRecord.submitted_offering_type = requireString(payload.offering_type) || null;
+    }
+    return needRecord;
+  });
+
+  return {
+    ok: true,
     localNeeds: hydratedLocalNeeds.filter((row) => {
       const record = row as Record<string, unknown>;
       return requireString(record.approval_status) === "approved"
@@ -4053,15 +5287,20 @@ async function persistMisRoleState(user: Record<string, unknown>, targetRole: st
     .eq("id", requireString(user.id));
   if (userUpdateError) throw new Error(userUpdateError.message);
 
-  if (targetRole === "curator") {
-    await syncCanonicalCuratorRowForUser(user, "GRE curator role synced successfully.");
+  if (["admin", "moderator", "curator"].includes(targetRole)) {
+    await syncCanonicalCuratorRowForUser(
+      user,
+      targetRole === "curator"
+        ? "GRE curator role synced successfully."
+        : `GRE role synced as ${targetRole}; curator allocations remain active on MIS.`,
+    );
   } else {
     const { error: curatorError } = await adminClient
       .from("gre_mis_curators")
       .update({
         is_active: false,
         gre_sync_status: "synced",
-        gre_sync_message: targetRole === "user"
+        gre_sync_message: targetRole === "user" || targetRole === "moderator"
           ? "Curator access removed from GRE and MIS."
           : `GRE curator role removed. Current GRE role is ${targetRole}.`,
         gre_synced_at: syncedAt,
@@ -4088,7 +5327,7 @@ async function persistMisRoleState(user: Record<string, unknown>, targetRole: st
 async function syncRoleArtifactsForUser(user: Record<string, unknown>, nextRole: string, syncMessage: string) {
   const syncedAt = new Date().toISOString();
   const email = requireString(user.email).toLowerCase();
-  if (nextRole === "curator") {
+  if (["admin", "moderator", "curator"].includes(nextRole)) {
     await syncCanonicalCuratorRowForUser(user, syncMessage);
   } else {
     const { error: curatorError } = await adminClient
@@ -4120,7 +5359,8 @@ async function syncRoleArtifactsForUser(user: Record<string, unknown>, nextRole:
 
 async function updateUserRole(userId: string, targetRoleInput: string) {
   const targetRole = requireString(targetRoleInput).toLowerCase();
-  if (!["user", "curator", "admin"].includes(targetRole)) throw new Error("Invalid role selected.");
+  if (!["user", "curator", "moderator", "admin"].includes(targetRole)) throw new Error("Invalid role selected.");
+  const greTargetRole = targetRole === "moderator" ? "user" : targetRole;
 
   const { data: user, error } = await adminClient
     .from("gre_mis_users")
@@ -4149,11 +5389,11 @@ async function updateUserRole(userId: string, targetRoleInput: string) {
   }
 
   const greResolution = await resolveExistingGreUser(user);
-  if (targetRole === "user" && (!greResolution.greUserId || greResolution.status !== "mapped")) {
+  if ((targetRole === "user" || targetRole === "moderator") && (!greResolution.greUserId || greResolution.status !== "mapped")) {
     const { error: localOnlyError } = await adminClient
       .from("gre_mis_users")
       .update({
-        role: "user",
+        role: targetRole,
         gre_pending_role: null,
         gre_activation_mod_key: null,
         gre_activation_requested_at: null,
@@ -4180,8 +5420,8 @@ async function updateUserRole(userId: string, targetRoleInput: string) {
     return {
       ok: true,
       status: "local_only",
-      role: "user",
-      message: `${user.full_name || user.username} is now a MIS user only.`,
+      role: targetRole,
+      message: `${user.full_name || user.username} is now a MIS ${targetRole} only.`,
     };
   }
 
@@ -4284,7 +5524,7 @@ async function updateUserRole(userId: string, targetRoleInput: string) {
     };
   }
 
-  await syncGreRoleAssignment(greResolution.greUserId, targetRole);
+  await syncGreRoleAssignment(greResolution.greUserId, greTargetRole);
   await persistMisRoleState(
     user,
     targetRole,
@@ -4600,8 +5840,10 @@ async function createLocalSolutionFromSubmission(
   const offeringType = requireString(payload.offering_type);
   const offeringName = requireString(payload.offering_name);
   const offeringDescription = requireString(payload.about_offering_text);
+  const offeringSearchDescription = requireString(payload.translated_about_offering_text_en || offeringDescription);
   const solutionName = requireString(payload.solution_name || offeringName);
   const solutionDescription = requireString(payload.about_solution_text || offeringDescription || offeringName);
+  const solutionSearchDescription = requireString(payload.translated_about_solution_text_en || solutionDescription);
   const tags = uniqueStrings(asStringArray(payload.tags));
   const languages = normalizeLanguageArray(payload.languages);
   const geographies = uniqueStrings(asStringArray(payload.geographies));
@@ -4650,11 +5892,11 @@ async function createLocalSolutionFromSubmission(
     tags,
     languages,
     geographies,
-    about_offering_text: offeringDescription,
+    about_offering_text: offeringSearchDescription,
     contact_details: contactDetails,
   }, {
     solution_name: solutionName,
-    about_solution_text: solutionDescription,
+    about_solution_text: solutionSearchDescription,
   });
 
   const solutionRow = {
@@ -4727,7 +5969,9 @@ async function createLocalSolutionFromSubmission(
       languages,
       geographies,
       offeringDescription,
+      offeringSearchDescription,
       solutionDescription,
+      solutionSearchDescription,
       requireString(trader.organisation_name || trader.trader_name),
       contactDetails,
     ]),
@@ -4752,11 +5996,13 @@ async function createLocalSolutionFromSubmission(
 }
 
 async function suggestSolutionTags(payload: Record<string, unknown>) {
+  payload = await normalizeSubmissionTranslations("solution", payload);
+  const sourceLanguage = requireString(payload.source_language || payload.sourceLanguage).toLowerCase();
   const normalized = {
     offering_name: requireString(payload.offering_name),
     offering_category: requireString(payload.offering_category),
     offering_type: requireString(payload.offering_type),
-    about_offering_text: requireString(payload.about_offering_text),
+    about_offering_text: requireString(payload.translated_about_offering_text_en || payload.about_offering_text),
     trainer_details_text: requireString(payload.trainer_details_text),
     organization_name: requireString(payload.organization_name),
     contact_details: requireString(payload.contact_details),
@@ -4780,6 +6026,25 @@ async function suggestSolutionTags(payload: Record<string, unknown>) {
       .replace(/\bdecentralised\b/g, "decentralized")
       .replace(/\s+/g, " ")
       .trim();
+  const collapseSolutionTags = (values: unknown[]) => {
+    const normalizedTags = uniqueStrings(
+      values
+        .map((entry) => normalizeSolutionTag(entry))
+        .filter((entry) => !isWeakSolutionTag(entry)),
+    );
+    const phraseTags = normalizedTags.filter((tag) => tag.includes(" "));
+    const compactTags = normalizedTags.filter((tag) => {
+      const words = tag.split(" ").filter(Boolean);
+      if (words.length > 1) return true;
+      const singular = words[0]?.replace(/s$/i, "") || "";
+      return !phraseTags.some((phrase) => {
+        if (phrase === tag) return false;
+        const phraseWords = phrase.split(" ").filter(Boolean);
+        return phraseWords.includes(tag) || (singular && phraseWords.includes(singular));
+      });
+    });
+    return compactTags.slice(0, 12);
+  };
   const weakSolutionTags = new Set([
     "service",
     "services",
@@ -4812,12 +6077,35 @@ Return valid JSON only in this shape:
 }
 
 Rules:
-- give 6 to 12 tags
-- prefer thematic area, use-case, beneficiary, deployment context, technical capability, and commodity or domain terms
-- preserve meaningful multi-word phrases where relevant
-- avoid generic filler like "service", "solution", "support", "offering", "provider", "product"
-- avoid repeating single words from the description as separate tags
-- keep tags short and thematic
+- return 8 to 12 tags
+- prefer phrase-level discovery tags, not raw token fragments
+- prioritize use-case, value addition, beneficiary segment, deployment context, technical capability, commodity, and end-product language
+- preserve meaningful multi-word phrases wherever possible
+- prefer concrete outputs such as "mango processing", "fruit drying", "achar production", "juice processing", "food preservation"
+- include sector/domain context when useful, such as "agricultural products", "rural livelihoods", "smallholder farmers"
+- avoid generic filler like "service", "solution", "support", "offering", "provider", "product", "value", "addition", "processing" when they appear as weak standalone words
+- avoid repeating single words from the description as separate tags when a better phrase exists
+- each tag should be 1 to 4 words
+- do not include numbering
+
+Example:
+Input offering name: Mango Value Addition
+Input description: We offer services for Mango processing. Mainly wild mangoes. Drying and converting them into value added products like Achar, Amchur, Juices.
+Good output:
+{
+  "tags": [
+    "mango processing",
+    "value addition",
+    "wild mangoes",
+    "fruit drying",
+    "achar production",
+    "amchur powder",
+    "juice processing",
+    "food preservation",
+    "agricultural products",
+    "rural livelihoods"
+  ]
+}
 
 Organisation: ${normalized.organization_name}
 Offering Category: ${normalized.offering_category}
@@ -4825,11 +6113,22 @@ Offering Type: ${normalized.offering_type}
 Offering Name: ${normalized.offering_name}
 Offering Description: ${normalized.about_offering_text}
 Facilitator / Contact Notes: ${normalized.trainer_details_text || normalized.contact_details}`);
-    const tags = uniqueStrings(asStringArray(ai.tags).map((entry) => normalizeSolutionTag(entry)).filter((entry) => !isWeakSolutionTag(entry))).slice(0, 12);
+    const tags = collapseSolutionTags([
+      ...asStringArray(ai.tags),
+      ...buildSolutionTagDraft({
+        offeringName: normalized.offering_name,
+        offeringDescription: normalized.about_offering_text,
+        organizationName: normalized.organization_name,
+        rules,
+      }),
+    ]);
     if (tags.length) {
+      const finalTags = isHindiSourceLanguage(sourceLanguage)
+        ? await Promise.all(tags.map((tag) => translateTextWithLibreTranslate(tag, "en", "hi")))
+        : tags;
       return {
         ok: true,
-        tags,
+        tags: finalTags,
         message: "AI tags added. You can remove any tag before submitting.",
       };
     }
@@ -4838,31 +6137,31 @@ Facilitator / Contact Notes: ${normalized.trainer_details_text || normalized.con
     aiFallbackReason = error instanceof Error ? error.message : String(error);
   }
 
-  const tags = uniqueStrings([
-    ...rules.thematicHints,
-    ...rules.serviceHints,
-    ...rules.keywords,
-    ...tokenizeLooseText([
-      normalized.offering_name,
-      normalized.offering_type,
-      normalized.about_offering_text,
-      normalized.organization_name,
-    ].filter(Boolean).join(" "), 4),
-  ].map((entry) => normalizeSolutionTag(entry)).filter((entry) => !isWeakSolutionTag(entry))).slice(0, 12);
+  const tags = collapseSolutionTags(buildSolutionTagDraft({
+    offeringName: normalized.offering_name,
+    offeringDescription: [normalized.offering_type, normalized.about_offering_text].filter(Boolean).join(" | "),
+    organizationName: normalized.organization_name,
+    rules,
+  }));
+  const finalTags = isHindiSourceLanguage(sourceLanguage)
+    ? await Promise.all(tags.map((tag) => translateTextWithLibreTranslate(tag, "en", "hi")))
+    : tags;
   return {
     ok: true,
-    tags,
+    tags: finalTags,
     message: `AI fallback used: ${aiFallbackReason || "No usable AI response."} A rule-based tag draft was added instead.`,
   };
 }
 
 async function suggestNeedTags(payload: Record<string, unknown>) {
+  payload = await normalizeSubmissionTranslations("need", payload);
+  const sourceLanguage = requireString(payload.source_language || payload.sourceLanguage).toLowerCase();
   const normalized = {
     organization_name: requireString(payload.organization_name),
     offering_category: requireString(payload.offering_category),
     offering_type: requireString(payload.offering_type),
     thematic_area: requireString(payload.thematic_area),
-    problem_statement: requireString(payload.problem_statement),
+    problem_statement: requireString(payload.translated_problem_statement_en || payload.problem_statement),
     deployment_locations: asStringArray(payload.deployment_locations),
   };
   const rules = classifyNeedByRules({
@@ -4915,9 +6214,12 @@ Problem Statement: ${normalized.problem_statement}`);
       ...extractNeedPriorityPhrases(normalized.problem_statement).filter((entry) => !aiTags.includes(entry)),
     ]).slice(0, 12);
     if (tags.length) {
+      const finalTags = isHindiSourceLanguage(sourceLanguage)
+        ? await Promise.all(tags.map((tag) => translateTextWithLibreTranslate(tag, "en", "hi")))
+        : tags;
       return {
         ok: true,
-        tags,
+        tags: finalTags,
         message: "AI keywords added. You can remove any keyword before submitting.",
       };
     }
@@ -4931,9 +6233,12 @@ Problem Statement: ${normalized.problem_statement}`);
     problemStatement: normalized.problem_statement,
     rules,
   });
+  const finalTags = isHindiSourceLanguage(sourceLanguage)
+    ? await Promise.all(tags.map((tag) => translateTextWithLibreTranslate(tag, "en", "hi")))
+    : tags;
   return {
     ok: true,
-    tags,
+    tags: finalTags,
     message: `AI fallback used: ${aiFallbackReason || "No usable AI response."} A rule-based keyword draft was added instead.`,
   };
 }
@@ -4946,6 +6251,7 @@ async function submitFormSubmission(
 ) {
   const normalizedType = requireString(submissionType).toLowerCase();
   if (!["need", "solution"].includes(normalizedType)) throw new Error("Unsupported submission type.");
+  payload = await normalizeSubmissionTranslations(normalizedType, payload);
   const organizationName = requireString(payload.organization_name || payload.organizationName);
   const existingTraderId = requireString(payload.existing_trader_id || payload.existingTraderId);
   const existingTraderName = requireString(payload.existing_trader_name || payload.existingTraderName);
@@ -5418,24 +6724,29 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
 
   const traderRow = Array.isArray(offering.trader) ? offering.trader[0] : offering.trader;
   const solutionRow = Array.isArray(offering.solution) ? offering.solution[0] : offering.solution;
+  const offeringPayload = getStoredPayloadRecord(offering.raw_payload);
+  const solutionPayload = getStoredPayloadRecord(solutionRow?.raw_payload);
+  const originalPayload = Object.keys(offeringPayload).length ? offeringPayload : solutionPayload;
   const nowIso = new Date().toISOString();
 
   const organizationName = requireString(payload.organization_name || traderRow?.organisation_name || traderRow?.trader_name);
-  const submitterName = requireString(payload.submitter_name || traderRow?.poc_name);
-  const submitterEmail = requireString(payload.submitter_email || traderRow?.email).toLowerCase();
-  const submitterPhone = requireString(payload.submitter_phone || traderRow?.mobile);
+  const submitterName = requireString(payload.submitter_name || originalPayload.submitter_name || traderRow?.poc_name);
+  const submitterEmail = requireString(payload.submitter_email || originalPayload.submitter_email || traderRow?.email).toLowerCase();
+  const submitterPhone = requireString(payload.submitter_phone || originalPayload.submitter_phone || traderRow?.mobile);
   const offeringName = requireString(payload.offering_name || offering.offering_name);
   const offeringDescription = requireString(payload.about_offering_text || offering.about_offering_text);
+  const offeringSearchDescription = requireString(payload.translated_about_offering_text_en || offeringDescription);
   const offeringCategory = requireString(payload.offering_category || offering.offering_category || "Service offerings");
   const offeringGroup = requireString(payload.offering_group || offering.offering_group || offeringCategory.replace(/\s+offerings$/i, "").trim() || "Service");
   const offeringType = requireString(payload.offering_type || offering.offering_type);
   const solutionName = requireString(payload.solution_name || offeringName || solutionRow?.solution_name);
   const solutionDescription = requireString(payload.about_solution_text || offeringDescription || solutionRow?.about_solution_text);
-  const tags = uniqueStrings(asStringArray(payload.tags || offering.tags));
+  const solutionSearchDescription = requireString(payload.translated_about_solution_text_en || solutionDescription);
+  const tags = uniqueStrings(asStringArray(payload.tags || originalPayload.tags || offering.tags));
   if (!tags.length) throw new Error("At least one tag is required.");
-  const languages = normalizeLanguageArray(payload.languages || offering.languages);
-  const geographies = uniqueStrings(asStringArray(payload.geographies || offering.geographies));
-  const locationAvailability = uniqueStrings(asStringArray(payload.location_availability)).join(", ") || requireString(offering.location_availability);
+  const languages = normalizeLanguageArray(payload.languages || originalPayload.languages || offering.languages);
+  const geographies = uniqueStrings(asStringArray(payload.geographies || originalPayload.geographies || offering.geographies));
+  const locationAvailability = uniqueStrings(asStringArray(payload.location_availability || originalPayload.location_availability)).join(", ") || requireString(offering.location_availability);
   const productCost = requireString(payload.product_cost || offering.product_cost);
   const serviceCost = requireString(payload.service_cost || offering.service_cost);
   const contactDetails = buildLocalContactDetails({
@@ -5443,7 +6754,7 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
     submitter_name: submitterName,
     submitter_email: submitterEmail,
     submitter_phone: submitterPhone,
-    contact_details: payload.contact_details || payload.product_contact_details || offering.contact_details,
+      contact_details: payload.contact_details || payload.product_contact_details || originalPayload.contact_details || offering.contact_details,
   });
   const offeringHtml = normalizeRichText(offeringDescription);
   const solutionHtml = normalizeRichText(solutionDescription);
@@ -5511,11 +6822,11 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
       tags,
       languages,
       geographies,
-      about_offering_text: offeringDescription,
+      about_offering_text: offeringSearchDescription,
       contact_details: contactDetails,
     }, {
       solution_name: solutionName,
-      about_solution_text: solutionDescription,
+      about_solution_text: solutionSearchDescription,
     }).sixMSignals.join(", ") || null,
     tags,
     languages,
@@ -5523,28 +6834,28 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
     geographies_raw: geographies.join("; "),
     about_offering_html: offeringHtml,
     about_offering_text: stripHtml(offeringHtml),
-    trainer_name: requireString(payload.trainer_name || offering.trainer_name) || null,
-    trainer_email: requireString(payload.trainer_email || offering.trainer_email).toLowerCase() || null,
-    trainer_phone: requireString(payload.trainer_phone || offering.trainer_phone) || null,
-    trainer_details_html: normalizeRichText(payload.trainer_details_text || offering.trainer_details_text),
-    trainer_details_text: stripHtml(normalizeRichText(payload.trainer_details_text || offering.trainer_details_text)),
-    duration: [requireString(payload.duration), requireString(payload.duration_unit)].filter(Boolean).join(" ") || requireString(offering.duration) || null,
-    prerequisites: requireString(payload.prerequisites || offering.prerequisites) || null,
+    trainer_name: requireString(payload.trainer_name || originalPayload.trainer_name || offering.trainer_name) || null,
+    trainer_email: requireString(payload.trainer_email || originalPayload.trainer_email || offering.trainer_email).toLowerCase() || null,
+    trainer_phone: requireString(payload.trainer_phone || originalPayload.trainer_phone || offering.trainer_phone) || null,
+    trainer_details_html: normalizeRichText(payload.trainer_details_text || originalPayload.trainer_details_text || offering.trainer_details_text),
+    trainer_details_text: stripHtml(normalizeRichText(payload.trainer_details_text || originalPayload.trainer_details_text || offering.trainer_details_text)),
+    duration: [requireString(payload.duration || originalPayload.duration), requireString(payload.duration_unit || originalPayload.duration_unit)].filter(Boolean).join(" ") || requireString(offering.duration) || null,
+    prerequisites: requireString(payload.prerequisites || originalPayload.prerequisites || offering.prerequisites) || null,
     service_cost: serviceCost || null,
-    support_post_service: requireString(payload.support_post_service || offering.support_post_service) || null,
-    support_post_service_cost: requireString(payload.support_post_service_cost || offering.support_post_service_cost) || null,
-    delivery_mode: requireString(payload.delivery_mode || offering.delivery_mode) || null,
-    certification_offered: requireString(payload.certification_offered || offering.certification_offered) || null,
-    cost_remarks: requireString(payload.cost_remarks || offering.cost_remarks) || null,
+    support_post_service: requireString(payload.support_post_service || originalPayload.support_post_service || offering.support_post_service) || null,
+    support_post_service_cost: requireString(payload.support_post_service_cost || originalPayload.support_post_service_cost || offering.support_post_service_cost) || null,
+    delivery_mode: requireString(payload.delivery_mode || originalPayload.delivery_mode || offering.delivery_mode) || null,
+    certification_offered: requireString(payload.certification_offered || originalPayload.certification_offered || offering.certification_offered) || null,
+    cost_remarks: requireString(payload.cost_remarks || originalPayload.cost_remarks || offering.cost_remarks) || null,
     location_availability: locationAvailability || null,
-    grade_capacity: requireString(payload.grade_capacity || offering.grade_capacity) || null,
+    grade_capacity: requireString(payload.grade_capacity || originalPayload.grade_capacity || offering.grade_capacity) || null,
     product_cost: productCost || null,
-    lead_time: requireString(payload.lead_time || offering.lead_time) || null,
-    support_details: requireString(payload.support_details || offering.support_details) || null,
+    lead_time: requireString(payload.lead_time || originalPayload.lead_time || offering.lead_time) || null,
+    support_details: requireString(payload.support_details || originalPayload.support_details || offering.support_details) || null,
     service_brochure_url: nextServiceBrochureUrl || null,
     product_brochure_url: nextProductBrochureUrl || null,
     knowledge_content_url: nextKnowledgeContentUrl || null,
-    contact_details: contactDetails || null,
+    contact_details: contactDetails || requireString(originalPayload.contact_details || offering.contact_details) || null,
     search_document: buildSearchDocument([
       solutionName,
       offeringName,
@@ -5555,7 +6866,9 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
       languages,
       geographies,
       offeringDescription,
+      offeringSearchDescription,
       solutionDescription,
+      solutionSearchDescription,
       organizationName,
       contactDetails,
     ]),
@@ -5593,6 +6906,45 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
     ok: true,
     message: "Local solution updated in Supabase.",
   };
+}
+
+async function getLocalSolutionDetail(offeringId: string) {
+  const normalizedOfferingId = requireString(offeringId);
+  if (!normalizedOfferingId) throw new Error("Offering ID is required.");
+
+  const { data: offering, error } = await adminClient
+    .from("offerings")
+    .select("*, solution:solutions(*), trader:traders(*)")
+    .eq("offering_id", normalizedOfferingId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!offering) throw new Error("Local solution offering not found.");
+  if (requireString(offering.publish_status) !== "MIS Published") {
+    throw new Error("Only locally managed MIS offerings can be opened here.");
+  }
+  if (!normalizedOfferingId.startsWith("MIS-OFFERING-")) {
+    throw new Error("This offering is not a local platform offering.");
+  }
+
+  return { ok: true, offering };
+}
+
+async function getLocalNeedDetail(needId: string) {
+  const normalizedNeedId = requireString(needId);
+  if (!normalizedNeedId) throw new Error("Need ID is required.");
+
+  const { data: need, error } = await adminClient
+    .from("gre_mis_needs")
+    .select("*")
+    .eq("id", normalizedNeedId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!need) throw new Error("Local need not found.");
+  if (requireString(need.source_kind) !== "shared_form_submission") {
+    throw new Error("This need is not a local platform need.");
+  }
+
+  return { ok: true, need };
 }
 
 async function deleteLocalSolution(offeringId: string) {
@@ -5730,6 +7082,43 @@ function mergeSuggestedQuestionSection(existingNotes: string, suggestedSection: 
   return [cleanSuggested, cleanExisting].filter(Boolean).join("\n\n").trim();
 }
 
+function removeSuggestedQuestionSection(existingNotes: string) {
+  const cleanExisting = requireString(existingNotes).replace(/\r/g, "").trim();
+  if (!cleanExisting) return "";
+  const pattern = new RegExp(`${suggestedQuestionsHeading}[\\s\\S]*?(?=\\n\\n[^\\n]|$)`, "i");
+  return cleanExisting.replace(pattern, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function appendSharedSolutionToCurationNotes(existingNotes: string, offeringName: string, providerName: string, viewLink: string) {
+  const cleanExisting = requireString(existingNotes).replace(/\r/g, "").trim();
+  const normalizedOffering = requireString(offeringName);
+  const normalizedProvider = requireString(providerName);
+  const normalizedLink = requireString(viewLink);
+  const entryText = [normalizedOffering, normalizedProvider, normalizedLink].filter(Boolean).join(" : ");
+  if (!normalizedOffering && !normalizedProvider) return cleanExisting;
+  if (cleanExisting.includes(entryText)) return cleanExisting;
+
+  const header = "Solutions Shared";
+  const linePattern = new RegExp(`${header}\\n((?:\\d+\\. .*\\n?)*)`, "i");
+  const match = cleanExisting.match(linePattern);
+  let existingLines: string[] = [];
+  let rest = "";
+
+  if (match) {
+    existingLines = match[1].split("\n").map((l) => l.trim()).filter(Boolean);
+    rest = cleanExisting.replace(match[0], "").trim();
+  }
+
+  const isDuplicate = existingLines.some((l) => l.toLowerCase().includes(entryText.toLowerCase()));
+  if (!isDuplicate) {
+    existingLines.push(`${existingLines.length + 1}. ${entryText}`);
+  }
+
+  const section = `${header}\n${existingLines.join("\n")}`;
+  const other = match ? rest : cleanExisting;
+  return [other, section].filter(Boolean).join("\n\n").trim();
+}
+
 function buildRuleBasedSuggestedQuestions(need: Record<string, unknown>) {
   const thematicArea = requireString((need as Record<string, unknown>).submitted_thematic_area) || requireString(need.ai_thematic_area) || "this need";
   const needType = requireString((need as Record<string, unknown>).submitted_offering_type) || requireString(need.ai_service_kind) || "support";
@@ -5792,6 +7181,41 @@ async function saveSuggestedQuestionsForNeed(
     message: sourceLabel === "puter"
       ? "Suggested questions from Puter were added to the curation notes."
       : "Suggested questions were added to the curation notes.",
+  };
+}
+
+async function rejectSuggestedQuestionsForNeed(
+  needId: string,
+  actorEmail: string,
+) {
+  const { data: need, error } = await adminClient
+    .from("gre_mis_needs")
+    .select("*")
+    .eq("id", needId)
+    .single();
+  if (error || !need) throw new Error(error?.message || "Need not found.");
+
+  const nextNotes = removeSuggestedQuestionSection(requireString(need.curation_notes));
+  const { error: updateError } = await adminClient
+    .from("gre_mis_needs")
+    .update({
+      curation_notes: nextNotes || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", needId);
+  if (updateError) throw new Error(updateError.message);
+
+  await adminClient.from("gre_mis_need_updates").insert({
+    need_id: needId,
+    update_type: "suggested_questions_rejected",
+    note: `Suggested curator questions were removed by ${actorEmail}.`,
+    created_by_email: actorEmail,
+  });
+
+  return {
+    ok: true,
+    curationNotes: nextNotes,
+    message: "Suggested questions removed from the curation notes.",
   };
 }
 
@@ -5894,6 +7318,38 @@ function parseGreInboundWorkbookRows(buffer: ArrayBuffer) {
       solutions_shared: requireString(row["Solutions Shared"]),
       invited_providers_count: parseNumber(row["Invited Providers Count"], 0),
       invited_providers: requireString(row["Invited Providers"]),
+      funding_mechanism: rowValue(row, [
+        "Funding Mechanism",
+        "Capture Outcome - Funding Mechanism",
+        "Outcome Funding Mechanism",
+        "Funding mechanism",
+      ]),
+      seeker_provider_agreement: rowValue(row, [
+        "Seeker / Provider Agreement",
+        "Seeker/Provider Agreement",
+        "Capture Outcome - Seeker / Provider Agreement",
+        "Seeker Provider Agreement",
+      ]),
+      solution_deployment_status: rowValue(row, [
+        "Solution Deployment Status",
+        "Capture Outcome - Solution Deployment Status",
+        "Deployment Status",
+      ]),
+      closure_date: rowDateValue(row, [
+        "Closure Date",
+        "Capture Outcome - Closure Date",
+        "Closed On",
+      ]),
+      feedback_about_seeker: rowValue(row, [
+        "Feedback about Seeker",
+        "Feedback About Seeker",
+        "Seeker Feedback",
+      ]),
+      feedback_about_provider: rowValue(row, [
+        "Feedback about Provider",
+        "Feedback About Provider",
+        "Provider Feedback",
+      ]),
     }))
     .filter((row) => row.request_id);
 }
@@ -6192,6 +7648,12 @@ async function normalizeInboundRow(row: Record<string, unknown>, curatorId: stri
     solutions_shared_count: parseNumber(row.solutions_shared_count, 0),
     invited_providers_count: parseNumber(row.invited_providers_count, 0),
     next_action: requireString(row.status).toLowerCase() === "closed" ? "Closed" : "Follow up with seeker",
+    funding_mechanism: requireString(row.funding_mechanism) || null,
+    seeker_provider_agreement: requireString(row.seeker_provider_agreement) || null,
+    solution_deployment_status: requireString(row.solution_deployment_status) || null,
+    closure_date: requireString(row.closure_date) || null,
+    feedback_about_seeker: requireString(row.feedback_about_seeker) || null,
+    feedback_about_provider: requireString(row.feedback_about_provider) || null,
     approval_status: "approved",
     imported_from_batch: fileName,
     source_kind: "website_inbound_snapshot",
@@ -6224,10 +7686,15 @@ async function importInboundWorkbook(rowsInput: unknown, fileName: string, actor
   for (const row of rows) {
     const requestId = requireString(row.request_id);
     if (!requestId) continue;
+    const sourceRowSignature = stableInboundRowSignature(row);
+    const existing = existingMap.get(requestId);
+
+    if (existing && existing.source_row_signature === sourceRowSignature) {
+      continue;
+    }
+
     const curatorId = await resolveCuratorId(requireString(row.curator_name));
     const patch = await normalizeInboundRow(row, curatorId, fileName);
-    const sourceRowSignature = stableRowSignature(row);
-    const existing = existingMap.get(requestId);
 
     if (!existing) {
       toInsert.push({
@@ -6301,7 +7768,7 @@ async function importInboundWorkbook(rowsInput: unknown, fileName: string, actor
 }
 
 async function syncGreLiveInbounds(actorEmail: string, provider: string) {
-  const report = await fetchGreReportWorkbook(greInboundReportName, 5000, "request_details_report");
+  const report = await fetchGreReportWorkbook(greInboundReportName, 1000, "request_details_report");
   const rows = parseGreInboundWorkbookRows(report.buffer);
   const summary = await importInboundWorkbook(rows, report.fileName, actorEmail, provider);
   return {
@@ -6349,6 +7816,77 @@ async function downloadGreChatbotReport(reportKind: string) {
     };
   }
   throw new Error("Unsupported GRE chatbot report kind.");
+}
+
+function formatDdmmyy(date = new Date()) {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = String(date.getFullYear()).slice(-2);
+  return `${day}${month}${year}`;
+}
+
+function safeFilePart(value: unknown) {
+  return (requireString(value) || "Seeker")
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80) || "Seeker";
+}
+
+
+async function downloadSeekerRequestTracker(seekerKey: string, includeClosed = false) {
+  const key = requireString(seekerKey);
+  if (!key) throw new Error("Select a solution seeker first.");
+  const isOrgKey = key.startsWith("org:");
+  let query = adminClient
+    .from("gre_mis_needs")
+    .select("id, organization_name, contact_person, seeker_email, problem_statement, curation_notes, status, internal_status, next_action, requested_on, seeker_provider_agreement")
+    .eq("approval_status", "approved")
+    .order("requested_on", { ascending: true });
+  if (!includeClosed) {
+    query = query.neq("status", "Closed");
+  }
+  const { data, error } = isOrgKey
+    ? await query.eq("organization_name", key.slice(4))
+    : await query.eq("seeker_email", key.toLowerCase());
+  if (error) throw new Error(error.message);
+  const needs = data || [];
+  if (!needs.length) throw new Error("No needs were found for this seeker.");
+
+  const seekerLabel =
+    requireString(needs[0]?.organization_name) ||
+    requireString(needs[0]?.contact_person) ||
+    requireString(needs[0]?.seeker_email) ||
+    "Solution Seeker";
+  const totalNeeds = needs.length;
+  const solutionProviderNeeded = needs.filter((need) => requireString(need.internal_status).toLowerCase() === "need solution providers").length;
+  const seekerResponsePending = needs.filter((need) => {
+    const iStatus = requireString(need.internal_status).toLowerCase();
+    const nAction = requireString(need.next_action).toLowerCase();
+    return iStatus.includes("connection made") && (!nAction || nAction === "follow up with seeker");
+  }).length;
+  const solutionsImplemented = needs.filter((need) =>
+    requireString(need.status).toLowerCase() === "closed" ||
+    requireString(need.seeker_provider_agreement).toLowerCase() === "agreement completed"
+  ).length;
+
+  const html = buildStyledTrackerHtml({
+    seekerLabel,
+    totalNeeds,
+    solutionProviderNeeded,
+    seekerResponsePending,
+    solutionsImplemented,
+    needs,
+  });
+  const buffer = new TextEncoder().encode(html).buffer;
+  return {
+    ok: true,
+    download: await createWorkbookDownloadPayload(
+      buffer,
+      `Solution Seeker Status - ${safeFilePart(seekerLabel)} - ${formatDdmmyy()}.xls`,
+      "application/vnd.ms-excel",
+    ),
+  };
 }
 
 async function refreshNeedIntelligence(actorEmail: string, provider: string) {
@@ -6449,10 +7987,97 @@ async function assignCurator(needId: string, curatorId: string | null, actorEmai
     .single();
   if (needFetchError || !needRow) throw new Error(needFetchError?.message || "Need not found.");
 
+  const sourceKind = requireString(needRow.source_kind);
+  const isLocalOnlyNeed = sourceKind === "shared_form_submission" || requireString(needRow.id).startsWith("FORM-");
+  let resolvedCuratorId: string | null = null;
+
+  if (curatorId) {
+    const normalizedSelection = requireString(curatorId);
+    if (normalizedSelection.startsWith("curator:")) {
+      resolvedCuratorId = normalizedSelection.slice("curator:".length);
+    } else if (normalizedSelection.startsWith("user:")) {
+      const userId = normalizedSelection.slice("user:".length);
+      const { data: userRow, error: userError } = await adminClient
+        .from("gre_mis_users")
+        .select("id, username, first_name, full_name, email, phone, role, gre_user_id, gre_sync_status, is_active")
+        .eq("id", userId)
+        .single();
+      if (userError || !userRow) throw new Error(userError?.message || "Selected user could not be found.");
+      if (userRow.is_active === false) throw new Error("Only active users can be assigned.");
+
+      const userRole = requireString(userRow.role).toLowerCase();
+      if (!["admin", "moderator", "curator"].includes(userRole)) {
+        throw new Error("Only admin, moderator, or curator users can be assigned.");
+      }
+      if (!isLocalOnlyNeed) {
+        if (!["admin", "moderator", "curator"].includes(userRole)) {
+          throw new Error("GRE-synced needs can be assigned only to GRE-registered admins, moderators, or curators.");
+        }
+        if (!requireString(userRow.gre_user_id)) {
+          throw new Error("This user is not registered on the GRE website, so the assignment cannot sync back.");
+        }
+      }
+
+      const email = requireString(userRow.email).toLowerCase();
+      const { data: existingCurator, error: curatorFetchError } = await adminClient
+        .from("gre_mis_curators")
+        .select("id")
+        .or(`user_id.eq.${userId},email.eq.${email}`)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (curatorFetchError) throw new Error(curatorFetchError.message);
+
+      if (existingCurator?.id) {
+        const { error: updateCuratorError } = await adminClient
+          .from("gre_mis_curators")
+          .update({
+            user_id: userId,
+            display_name: requireString(userRow.full_name) || requireString(userRow.first_name) || requireString(userRow.username),
+            first_name: requireString(userRow.first_name) || requireString(userRow.full_name).split(" ")[0] || requireString(userRow.username),
+            email,
+            phone: requireString(userRow.phone) || null,
+            is_active: true,
+            gre_sync_status: isLocalOnlyNeed ? "local_only" : requireString(userRow.gre_sync_status) || "synced",
+            gre_sync_message: isLocalOnlyNeed
+              ? "Local GramEEE curator assignment enabled for shared-form needs."
+              : "GRE-linked curator assignment ready.",
+            gre_synced_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingCurator.id);
+        if (updateCuratorError) throw new Error(updateCuratorError.message);
+        resolvedCuratorId = existingCurator.id;
+      } else {
+        const { data: insertedCurator, error: insertCuratorError } = await adminClient
+          .from("gre_mis_curators")
+          .insert({
+            user_id: userId,
+            display_name: requireString(userRow.full_name) || requireString(userRow.first_name) || requireString(userRow.username),
+            first_name: requireString(userRow.first_name) || requireString(userRow.full_name).split(" ")[0] || requireString(userRow.username),
+            email,
+            phone: requireString(userRow.phone) || null,
+            is_active: true,
+            gre_sync_status: isLocalOnlyNeed ? "local_only" : requireString(userRow.gre_sync_status) || "synced",
+            gre_sync_message: isLocalOnlyNeed
+              ? "Local GramEEE curator assignment enabled for shared-form needs."
+              : "GRE-linked curator assignment ready.",
+            gre_synced_at: new Date().toISOString(),
+          })
+          .select("id")
+          .single();
+        if (insertCuratorError || !insertCurator) throw new Error(insertCuratorError?.message || "Could not create the local curator record.");
+        resolvedCuratorId = requireString(insertedCurator.id);
+      }
+    } else {
+      resolvedCuratorId = normalizedSelection;
+    }
+  }
+
   const { error } = await adminClient
     .from("gre_mis_needs")
     .update({
-      curator_id: curatorId,
+      curator_id: resolvedCuratorId,
       status: "Accepted",
       updated_at: new Date().toISOString(),
     })
@@ -6462,20 +8087,20 @@ async function assignCurator(needId: string, curatorId: string | null, actorEmai
   await adminClient.from("gre_mis_need_updates").insert({
     need_id: needId,
     update_type: "curator_assignment",
-    note: curatorId ? `Curator assigned by ${actorEmail}.` : `Curator unassigned by ${actorEmail}.`,
+    note: resolvedCuratorId ? `Curator assigned by ${actorEmail}.` : `Curator unassigned by ${actorEmail}.`,
     created_by_email: actorEmail,
   });
 
-  if (/^\d+$/.test(requireString(needRow.id)) && needRow.source_kind !== "shared_form_submission") {
+  if (/^\d+$/.test(requireString(needRow.id)) && sourceKind !== "shared_form_submission") {
     const { sessionId, data: greRequest } = await fetchGreJson(`/commons-request-management-service/api/v1/request?id=${encodeURIComponent(needId)}`);
     const payload = structuredClone(greRequest);
     const curationList = Array.isArray(payload.curationList) ? payload.curationList : [];
     const primaryCuration = curationList[0] || { requestId: Number(needId) };
-    if (curatorId) {
+    if (resolvedCuratorId) {
       const { data: curatorRow } = await adminClient
         .from("gre_mis_curators")
         .select("display_name, user_id")
-        .eq("id", curatorId)
+        .eq("id", resolvedCuratorId)
         .maybeSingle();
       let greCuratorUserId: number | null = null;
       let greCuratorName = curatorRow?.display_name || primaryCuration.curatorUserName || null;
@@ -6585,6 +8210,13 @@ async function submitUpdateRequest(payload: Record<string, unknown>) {
     proposed_next_action: requireString(payload.proposedNextAction) || null,
     proposed_curation_notes: requireString(payload.proposedCurationNotes) || null,
     proposed_curation_call_date: requireString(payload.proposedCurationCallDate) || null,
+    proposed_curated_need: asStringArray(payload.proposedCuratedNeed),
+    proposed_funding_mechanism: requireString(payload.proposedFundingMechanism) || null,
+    proposed_seeker_provider_agreement: requireString(payload.proposedSeekerProviderAgreement) || null,
+    proposed_solution_deployment_status: requireString(payload.proposedSolutionDeploymentStatus) || null,
+    proposed_closure_date: requireString(payload.proposedClosureDate) || null,
+    proposed_feedback_about_seeker: requireString(payload.proposedFeedbackAboutSeeker) || null,
+    proposed_feedback_about_provider: requireString(payload.proposedFeedbackAboutProvider) || null,
     proposed_demand_broadcast_needed:
       typeof payload.proposedDemandBroadcastNeeded === "boolean" ? payload.proposedDemandBroadcastNeeded : null,
     proposed_solutions_shared_count:
@@ -6632,6 +8264,31 @@ async function applyApprovedNeedPatch(requestRow: Record<string, unknown>, actor
   }
   if (requestRow.proposed_curation_notes) nextNeedPatch.curation_notes = requestRow.proposed_curation_notes;
   if (requestRow.proposed_curation_call_date) nextNeedPatch.curation_call_date = requestRow.proposed_curation_call_date;
+  if (Array.isArray(requestRow.proposed_curated_need)) {
+    nextNeedPatch.curated_need = asStringArray(requestRow.proposed_curated_need);
+    const curatedLabel = asStringArray(requestRow.proposed_curated_need).length
+      ? asStringArray(requestRow.proposed_curated_need).join(", ")
+      : "(cleared)";
+    changeParts.push(`Curated need -> ${curatedLabel}`);
+  }
+  if (requestRow.proposed_funding_mechanism) {
+    nextNeedPatch.funding_mechanism = requestRow.proposed_funding_mechanism;
+    changeParts.push(`Funding mechanism -> ${requestRow.proposed_funding_mechanism}`);
+  }
+  if (requestRow.proposed_seeker_provider_agreement) {
+    nextNeedPatch.seeker_provider_agreement = requestRow.proposed_seeker_provider_agreement;
+    changeParts.push(`Seeker/provider agreement -> ${requestRow.proposed_seeker_provider_agreement}`);
+  }
+  if (requestRow.proposed_solution_deployment_status) {
+    nextNeedPatch.solution_deployment_status = requestRow.proposed_solution_deployment_status;
+    changeParts.push(`Deployment status -> ${requestRow.proposed_solution_deployment_status}`);
+  }
+  if (requestRow.proposed_closure_date) {
+    nextNeedPatch.closure_date = requestRow.proposed_closure_date;
+    changeParts.push(`Closure date -> ${requestRow.proposed_closure_date}`);
+  }
+  if (requestRow.proposed_feedback_about_seeker) nextNeedPatch.feedback_about_seeker = requestRow.proposed_feedback_about_seeker;
+  if (requestRow.proposed_feedback_about_provider) nextNeedPatch.feedback_about_provider = requestRow.proposed_feedback_about_provider;
   if (requestRow.proposed_demand_broadcast_needed !== null && requestRow.proposed_demand_broadcast_needed !== undefined) {
     nextNeedPatch.demand_broadcast_needed = requestRow.proposed_demand_broadcast_needed;
   }
@@ -6664,11 +8321,11 @@ async function directCuratorUpdate(payload: Record<string, unknown>, userCtx: { 
   if (!needId) throw new Error("Need ID is required.");
   const actorEmail = requireString(userCtx.user.email).toLowerCase();
   const actorRole = requireString(userCtx.user.role).toLowerCase();
-  const isAdminActor = actorRole === "admin";
+  const isAdminActor = isAdminLikeMisRole(actorRole);
 
   const { data: need, error: needError } = await adminClient
     .from("gre_mis_needs")
-    .select("id, approval_status, curator_id, gre_mis_curators:curator_id(user_id, email)")
+    .select("id, approval_status, curator_id, source_kind, gre_mis_curators:curator_id(user_id, email)")
     .eq("id", needId)
     .single();
   if (needError || !need) throw new Error(needError?.message || "Need not found.");
@@ -6688,14 +8345,98 @@ async function directCuratorUpdate(payload: Record<string, unknown>, userCtx: { 
     proposed_next_action: requireString(payload.proposedNextAction) || null,
     proposed_curation_notes: requireString(payload.proposedCurationNotes) || null,
     proposed_curation_call_date: requireString(payload.proposedCurationCallDate) || null,
+    proposed_curated_need: asStringArray(payload.proposedCuratedNeed),
+    proposed_funding_mechanism: requireString(payload.proposedFundingMechanism) || null,
+    proposed_seeker_provider_agreement: requireString(payload.proposedSeekerProviderAgreement) || null,
+    proposed_solution_deployment_status: requireString(payload.proposedSolutionDeploymentStatus) || null,
+    proposed_closure_date: requireString(payload.proposedClosureDate) || null,
+    proposed_feedback_about_seeker: requireString(payload.proposedFeedbackAboutSeeker) || null,
+    proposed_feedback_about_provider: requireString(payload.proposedFeedbackAboutProvider) || null,
     proposed_demand_broadcast_needed: normalizeBooleanInput(payload.proposedDemandBroadcastNeeded),
     proposed_solutions_shared_count: null,
     proposed_invited_providers_count: null,
   };
 
+  const isLocalOnlyNeed = requireString(need.source_kind) === "shared_form_submission" || requireString(need.id).startsWith("FORM-");
+  if (isLocalOnlyNeed) {
+    const nextNeedPatch: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    const changeParts: string[] = [];
+
+    if (requestRow.proposed_status) {
+      nextNeedPatch.status = requestRow.proposed_status;
+      nextNeedPatch.last_status_change_at = new Date().toISOString();
+      changeParts.push(`Status -> ${requestRow.proposed_status}`);
+    }
+    if (requestRow.proposed_internal_status) {
+      nextNeedPatch.internal_status = requestRow.proposed_internal_status;
+      nextNeedPatch.last_status_change_at = new Date().toISOString();
+      changeParts.push(`Internal status -> ${requestRow.proposed_internal_status}`);
+    }
+    if (requestRow.proposed_next_action) {
+      nextNeedPatch.next_action = requestRow.proposed_next_action;
+      changeParts.push(`Next action -> ${requestRow.proposed_next_action}`);
+    }
+    if (requestRow.proposed_curation_notes) nextNeedPatch.curation_notes = requestRow.proposed_curation_notes;
+    if (requestRow.proposed_curation_call_date) nextNeedPatch.curation_call_date = requestRow.proposed_curation_call_date;
+    if (Array.isArray(requestRow.proposed_curated_need)) {
+      nextNeedPatch.curated_need = asStringArray(requestRow.proposed_curated_need);
+      const curatedLabel = asStringArray(requestRow.proposed_curated_need).length
+        ? asStringArray(requestRow.proposed_curated_need).join(", ")
+        : "(cleared)";
+      changeParts.push(`Curated need -> ${curatedLabel}`);
+    }
+    if (requestRow.proposed_funding_mechanism) {
+      nextNeedPatch.funding_mechanism = requestRow.proposed_funding_mechanism;
+      changeParts.push(`Funding mechanism -> ${requestRow.proposed_funding_mechanism}`);
+    }
+    if (requestRow.proposed_seeker_provider_agreement) {
+      nextNeedPatch.seeker_provider_agreement = requestRow.proposed_seeker_provider_agreement;
+      changeParts.push(`Seeker/provider agreement -> ${requestRow.proposed_seeker_provider_agreement}`);
+    }
+    if (requestRow.proposed_solution_deployment_status) {
+      nextNeedPatch.solution_deployment_status = requestRow.proposed_solution_deployment_status;
+      changeParts.push(`Deployment status -> ${requestRow.proposed_solution_deployment_status}`);
+    }
+    if (requestRow.proposed_closure_date) {
+      nextNeedPatch.closure_date = requestRow.proposed_closure_date;
+      changeParts.push(`Closure date -> ${requestRow.proposed_closure_date}`);
+    }
+    if (requestRow.proposed_feedback_about_seeker) nextNeedPatch.feedback_about_seeker = requestRow.proposed_feedback_about_seeker;
+    if (requestRow.proposed_feedback_about_provider) nextNeedPatch.feedback_about_provider = requestRow.proposed_feedback_about_provider;
+    if (requestRow.proposed_demand_broadcast_needed !== null && requestRow.proposed_demand_broadcast_needed !== undefined) {
+      nextNeedPatch.demand_broadcast_needed = requestRow.proposed_demand_broadcast_needed;
+    }
+
+    const { error: patchError } = await adminClient.from("gre_mis_needs").update(nextNeedPatch).eq("id", needId);
+    if (patchError) throw new Error(patchError.message);
+
+    await adminClient.from("gre_mis_need_updates").insert({
+      need_id: needId,
+      update_type: "curation_updated_local",
+      note: [
+        changeParts.join(" | ") || "Local GramEEE curation updated.",
+        "This update remains on GramEEE only and was not synced back to the GRE website.",
+      ].filter(Boolean).join(" "),
+      created_by_email: actorEmail,
+    });
+
+    return {
+      ok: true,
+      message: "Local GramEEE curation update saved.",
+      greSync: {
+        synced: false,
+        mode: "local_only",
+        unsupportedFields: [],
+      },
+    };
+  }
+
   const greSyncResult = await applyApprovedNeedPatch(requestRow, actorEmail);
   return {
     ok: true,
+    message: "Curation update saved and synced to GRE.",
     greSync: {
       synced: true,
       unsupportedFields: greSyncResult.unsupportedFields || [],
@@ -6747,6 +8488,28 @@ async function debugGreNeedSync(needId: string) {
         };
       }),
     },
+    sessionActive: Boolean(sessionId),
+  };
+}
+
+async function debugGreNeedSyncService(needId: string) {
+  const normalizedNeedId = requireString(needId);
+  if (!normalizedNeedId) throw new Error("Need ID is required.");
+  const { data: misNeed, error: misError } = await adminClient
+    .from("gre_mis_needs")
+    .select("*")
+    .eq("id", normalizedNeedId)
+    .maybeSingle();
+  if (misError) throw new Error(misError.message);
+  const { sessionId, data: greRequest } = await fetchGreJson(`/commons-request-management-service/api/v1/request?id=${encodeURIComponent(normalizedNeedId)}`);
+  const payload = (greRequest && typeof greRequest === "object") ? greRequest as Record<string, unknown> : {};
+  const curationList = Array.isArray(payload.curationList) ? payload.curationList : [];
+  return {
+    ok: true,
+    needId: normalizedNeedId,
+    mis: misNeed || null,
+    greRaw: payload,
+    greCurationList: curationList,
     sessionActive: Boolean(sessionId),
   };
 }
@@ -6830,60 +8593,653 @@ async function upsertOption(optionType: string, label: string) {
   return { ok: true };
 }
 
-async function sendProviderIntro(needId: string, providerEmail: string, actorEmail: string) {
+const DEFAULT_PROVIDER_INTRO_TEMPLATE = `Hello {{providerName}},
+
+We are reaching out to you from GRE platform to connect you with {{seekerLabel}}, marked in copy of this mail. They have a need for {{problemStatement}} and your solution of {{viewLink}} may be of interest to them. We would suggest you to connect mutually and take this forward. Do reach out to us if you would like us to help facilitate the conversation.
+
+Regards,
+Team GRE`;
+
+const DEFAULT_CURATOR_FORWARD_TEMPLATE = `Hello {{assignedCuratorName}},
+
+For the needs of {{seekerLabel}} for {{problemStatement}}, i feel the solution {{viewLink}} by {{providerName}} may be of interest to you. Kindly review and do the needful.
+
+Regards,
+{{actorName}}`;
+
+const DEFAULT_SOLUTION_SEEKER_TEMPLATE = `Hello {{seekerLabel}},
+
+Greetings from Team GRE.
+
+We have identified against your stated need of
+
+"{{problemStatement}}",
+
+{{providerName}} offers a solution of {{solutionName}},
+
+Link to solution {{viewLink}}.
+
+Do let us know if this solution is of interest to you enabling us to help coordinate a meeting.
+
+Regards,
+
+Team GRE`;
+
+const DEFAULT_NEED_SEEKER_TEMPLATE = `Hello {{seekerLabel}},
+
+I have reviewed your broadcasted need for {{thematicArea}} on the GramEEE GRE Platform. We feel we can offer you a solution for this and would like to connect with you.
+
+Regards,
+{{actorName}}
+{{actorPhone}}`;
+const LSH_SETTINGS_KEY = "lsh_management";
+const DEFAULT_LSH_MANAGEMENT_SETTINGS = {
+  contactEmails: ["subekkumar@pradan.net"],
+  helpCcEmails: ["help@greenruraleconomy.in"],
+  requestSupportDraft: `Hello Team LSH,
+
+We are looking at some of our needs in the Livestock domain and would like to connect with your team. Do reach out to us.
+
+Regards,
+{{name}}
+{{organisation}}`,
+  emailProviderDraft: `Hello Team LSH,
+
+We would like to know more about {{offeringName}} and request a follow-up from your team.
+
+Regards,
+{{name}}
+{{organisation}}`,
+};
+const IMPACT_VIEW_AUDIT_LOG_KEY = "impact_view_audit_log";
+const IMPACT_EMAIL_AUDIT_LOG_KEY = "impact_email_audit_log";
+const MAX_IMPACT_AUDIT_ENTRIES = 2500;
+
+function normalizeGreMailTemplateLegacyPlaceholders(template: string, kind: "provider" | "curator" | "needSeeker") {
+  const normalized = requireString(template)
+    .replace(/\{\{\s*solutionSeeker\s*\}\}/g, "{{seekerLabel}}")
+    .replace(/\{\{\s*solutionProvider\s*\}\}/g, "{{providerName}}")
+    .replace(/\{\{\s*curatorName\s*\}\}/g, "{{actorName}}")
+    .replace(/\{\{\s*needTheme\s*\}\}/g, "{{thematicArea}}")
+    .replace(/\{\{\s*senderName\s*\}\}/g, "{{actorName}}")
+    .replace(/\{\{\s*senderPhone\s*\}\}/g, "{{actorPhone}}");
+  if (kind === "curator") {
+    return normalized.replace(/\{\{\s*providerLabel\s*\}\}/g, "{{providerName}}");
+  }
+  return normalized;
+}
+
+function renderGreMailTemplateText(template: string, replacements: Record<string, unknown>) {
+  return requireString(template).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
+    const value = replacements[key];
+    return value === undefined || value === null ? "" : String(value);
+  });
+}
+
+async function getGreMisSetting(key: string) {
+  const { data, error } = await adminClient
+    .from("gre_mis_settings")
+    .select("key, value_text, value_json, updated_by_email, updated_at")
+    .eq("key", key)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as Record<string, unknown> | null;
+}
+
+async function upsertGreMisSetting(key: string, valueText: string | null, valueJson: Record<string, unknown>, updatedByEmail: string) {
+  const { error } = await adminClient
+    .from("gre_mis_settings")
+    .upsert({
+      key,
+      value_text: valueText,
+      value_json: valueJson,
+      updated_by_email: updatedByEmail || null,
+      updated_at: new Date().toISOString(),
+    });
+  if (error) throw new Error(error.message);
+}
+
+async function appendGreMisAuditEntry(
+  key: string,
+  entry: Record<string, unknown>,
+  updatedByEmail: string,
+) {
+  const current = await getGreMisSetting(key);
+  const currentValue = current?.value_json && typeof current.value_json === "object"
+    ? current.value_json as Record<string, unknown>
+    : {};
+  const currentEntries = Array.isArray(currentValue.entries) ? currentValue.entries : [];
+  const entries = [entry, ...currentEntries].slice(0, MAX_IMPACT_AUDIT_ENTRIES);
+  await upsertGreMisSetting(key, null, { entries }, updatedByEmail || "system:audit");
+}
+
+async function getImpactAuditLogs() {
+  const [viewRow, emailRow] = await Promise.all([
+    getGreMisSetting(IMPACT_VIEW_AUDIT_LOG_KEY),
+    getGreMisSetting(IMPACT_EMAIL_AUDIT_LOG_KEY),
+  ]);
+  return {
+    viewLogs: Array.isArray((viewRow?.value_json as Record<string, unknown> | null)?.entries)
+      ? ((viewRow?.value_json as Record<string, unknown>).entries as unknown[])
+      : [],
+    emailLogs: Array.isArray((emailRow?.value_json as Record<string, unknown> | null)?.entries)
+      ? ((emailRow?.value_json as Record<string, unknown>).entries as unknown[])
+      : [],
+  };
+}
+
+async function getGreMailTemplates() {
+  const [providerRow, curatorRow, solutionSeekerRow, needSeekerRow, inboundSyncRow, lshManagementRow] = await Promise.all([
+    getGreMisSetting("provider_intro_template"),
+    getGreMisSetting("curator_forward_template"),
+    getGreMisSetting("solution_seeker_intro_template"),
+    getGreMisSetting("need_seeker_intro_template"),
+    getGreMisSetting("inbound_auto_sync"),
+    getGreMisSetting(LSH_SETTINGS_KEY),
+  ]);
+  const inboundEnabledValue = (inboundSyncRow?.value_json as Record<string, unknown> | null)?.enabled;
+  const inboundEnabled = typeof inboundEnabledValue === "boolean" ? Boolean(inboundEnabledValue) : true;
+  const lshValue = lshManagementRow?.value_json && typeof lshManagementRow.value_json === "object"
+    ? lshManagementRow.value_json as Record<string, unknown>
+    : {};
+  if (!inboundEnabled) {
+    await upsertGreMisSetting(
+      "inbound_auto_sync",
+      null,
+      { enabled: true },
+      "system:auto-sync-default",
+    );
+  }
+
+  return {
+    providerIntroTemplate: normalizeGreMailTemplateLegacyPlaceholders(
+      requireString(providerRow?.value_text) || DEFAULT_PROVIDER_INTRO_TEMPLATE,
+      "provider",
+    ),
+    curatorForwardTemplate: normalizeGreMailTemplateLegacyPlaceholders(
+      requireString(curatorRow?.value_text) || DEFAULT_CURATOR_FORWARD_TEMPLATE,
+      "curator",
+    ),
+    solutionSeekerTemplate: normalizeGreMailTemplateLegacyPlaceholders(
+      requireString(solutionSeekerRow?.value_text) || DEFAULT_SOLUTION_SEEKER_TEMPLATE,
+      "needSeeker",
+    ),
+    needSeekerTemplate: normalizeGreMailTemplateLegacyPlaceholders(
+      requireString(needSeekerRow?.value_text) || DEFAULT_NEED_SEEKER_TEMPLATE,
+      "needSeeker",
+    ),
+    inboundAutoSyncEnabled: true,
+    lshContactEmails: normalizeEmailList(lshValue.contactEmails).length
+      ? normalizeEmailList(lshValue.contactEmails)
+      : DEFAULT_LSH_MANAGEMENT_SETTINGS.contactEmails,
+    lshHelpCcEmails: normalizeEmailList(lshValue.helpCcEmails).length
+      ? normalizeEmailList(lshValue.helpCcEmails)
+      : DEFAULT_LSH_MANAGEMENT_SETTINGS.helpCcEmails,
+    lshRequestSupportTemplate: requireString(lshValue.requestSupportDraft) || DEFAULT_LSH_MANAGEMENT_SETTINGS.requestSupportDraft,
+    lshEmailProviderTemplate: requireString(lshValue.emailProviderDraft) || DEFAULT_LSH_MANAGEMENT_SETTINGS.emailProviderDraft,
+  };
+}
+
+async function saveGreMailTemplates(
+  actorEmail: string,
+  providerIntroTemplate: string,
+  curatorForwardTemplate: string,
+  solutionSeekerTemplate: string,
+  needSeekerTemplate: string,
+  inboundAutoSyncEnabled: boolean | null,
+  lshContactEmails: unknown,
+  lshHelpCcEmails: unknown,
+  lshRequestSupportTemplate: string,
+  lshEmailProviderTemplate: string,
+) {
+  await upsertGreMisSetting(
+    "provider_intro_template",
+    normalizeGreMailTemplateLegacyPlaceholders(
+      requireString(providerIntroTemplate) || DEFAULT_PROVIDER_INTRO_TEMPLATE,
+      "provider",
+    ),
+    {},
+    actorEmail,
+  );
+  await upsertGreMisSetting(
+    "curator_forward_template",
+    normalizeGreMailTemplateLegacyPlaceholders(
+      requireString(curatorForwardTemplate) || DEFAULT_CURATOR_FORWARD_TEMPLATE,
+      "curator",
+    ),
+    {},
+    actorEmail,
+  );
+  await upsertGreMisSetting(
+    "solution_seeker_intro_template",
+    normalizeGreMailTemplateLegacyPlaceholders(
+      requireString(solutionSeekerTemplate) || DEFAULT_SOLUTION_SEEKER_TEMPLATE,
+      "needSeeker",
+    ),
+    {},
+    actorEmail,
+  );
+  await upsertGreMisSetting(
+    "need_seeker_intro_template",
+    normalizeGreMailTemplateLegacyPlaceholders(
+      requireString(needSeekerTemplate) || DEFAULT_NEED_SEEKER_TEMPLATE,
+      "needSeeker",
+    ),
+    {},
+    actorEmail,
+  );
+  if (typeof inboundAutoSyncEnabled === "boolean") {
+    await upsertGreMisSetting(
+      "inbound_auto_sync",
+      null,
+      { enabled: inboundAutoSyncEnabled },
+      actorEmail,
+    );
+  }
+  await upsertGreMisSetting(
+    LSH_SETTINGS_KEY,
+    null,
+    {
+      contactEmails: normalizeEmailList(lshContactEmails).length
+        ? normalizeEmailList(lshContactEmails)
+        : DEFAULT_LSH_MANAGEMENT_SETTINGS.contactEmails,
+      helpCcEmails: normalizeEmailList(lshHelpCcEmails).length
+        ? normalizeEmailList(lshHelpCcEmails)
+        : DEFAULT_LSH_MANAGEMENT_SETTINGS.helpCcEmails,
+      requestSupportDraft: requireString(lshRequestSupportTemplate) || DEFAULT_LSH_MANAGEMENT_SETTINGS.requestSupportDraft,
+      emailProviderDraft: requireString(lshEmailProviderTemplate) || DEFAULT_LSH_MANAGEMENT_SETTINGS.emailProviderDraft,
+    },
+    actorEmail,
+  );
+  return {
+    ok: true,
+    ...(await getGreMailTemplates()),
+  };
+}
+
+async function sendProviderIntro(
+  needId: string,
+  providerEmail: string,
+  actor: { id: string; name: string; email: string; role: string },
+  providerName = "",
+  offeringId = "",
+  mailDraft: Record<string, unknown> | null = null,
+) {
   const { data: need, error: needError } = await adminClient
     .from("gre_mis_needs")
-    .select("id, organization_name, seeker_email, contact_person, problem_statement, state, district, curated_need, gre_mis_curators:curator_id(email, display_name)")
+    .select("id, organization_name, seeker_email, contact_person, problem_statement, state, district, curated_need, curator_id, gre_mis_curators:curator_id(user_id, email, display_name)")
     .eq("id", needId)
     .single();
   if (needError || !need) throw new Error(needError?.message || "Need not found.");
   const curator = Array.isArray(need.gre_mis_curators) ? need.gre_mis_curators[0] : need.gre_mis_curators;
   const curatorEmail = requireString(curator?.email).toLowerCase();
+  const curatorUserId = requireString(curator?.user_id);
+  const actorRole = requireString(actor.role).toLowerCase();
+  const actorEmail = requireString(actor.email).toLowerCase();
+  const actorName = requireString(actor.name) || actorEmail;
+  const providerLabel = requireString(providerName) || "Solution Provider";
+  const seekerLabel = requireString(need.organization_name) || requireString(need.contact_person) || "the solution seeker";
+  const problemStatement = requireString(need.problem_statement) || "the shared problem statement";
+  const viewLink = offeringId
+    ? `${greMisBaseUrl}/offering-detail.html?offering_id=${encodeURIComponent(offeringId)}`
+    : greMisBaseUrl;
+  const isAssignedCurator = (
+    (curatorUserId && curatorUserId === requireString(actor.id)) ||
+    (curatorEmail && curatorEmail === actorEmail)
+  );
+  const shouldForwardToAssignedCurator = actorRole === "curator" || (
+    ["admin", "moderator"].includes(actorRole) &&
+    Boolean(curatorEmail) &&
+    !isAssignedCurator
+  );
 
-  const subject = `GRE introduction: ${need.organization_name} challenge for your consideration`;
-  const body = [
-    `Hello,`,
+  if (shouldForwardToAssignedCurator) {
+    if (!curatorEmail) throw new Error("No curator is assigned to this need yet.");
+    const draftTo = requireString(mailDraft?.to || curatorEmail).toLowerCase();
+    const draftCc = requireString(mailDraft?.cc || actorEmail).toLowerCase();
+    const subject = requireString(mailDraft?.subject) || `GRE review suggestion for ${seekerLabel}`;
+    const body = requireString(mailDraft?.body) || [
+      `Hello ${curator?.display_name || "Assigned Curator"},`,
+      "",
+      `For the needs of ${seekerLabel} for ${problemStatement}, i feel the solution ${viewLink} by ${providerLabel} may be of interest to you. Kindly review and do the needful.`,
+      "",
+      "Regards,",
+      actorName,
+    ].join("\n");
+
+    await sendEmail({
+      to: draftTo,
+      cc: draftCc,
+      subject,
+      body,
+      mailbox: "help",
+    });
+
+    await adminClient.from("gre_mis_email_log").insert({
+      need_id: need.id,
+      recipient_email: draftTo,
+      cc_email: draftCc,
+      subject,
+      body_preview: body.slice(0, 1000),
+      sent_by_email: actorEmail,
+    });
+    await appendGreMisAuditEntry(IMPACT_EMAIL_AUDIT_LOG_KEY, {
+      id: crypto.randomUUID(),
+      logged_at: new Date().toISOString(),
+      kind: "email",
+      surface: "gre-mis",
+      action: "email_to_curator",
+      counter_key: "connections_made",
+      sender_email: actorEmail,
+      sender_name: actorName,
+      sender_role: actorRole,
+      recipient_email: draftTo,
+      cc_email: draftCc,
+      reply_to: actorEmail,
+      subject,
+      item_id: requireString(offeringId),
+      item_label: providerLabel,
+      item_source: "gre-mis",
+      need_id: requireString(need.id),
+      provider_name: providerLabel,
+      seeker_name: seekerLabel,
+    }, actorEmail);
+
+    await adminClient.from("gre_mis_need_updates").insert({
+      need_id: need.id,
+      update_type: "provider_intro_curator_forwarded",
+      note: `Provider suggestion for ${providerEmail} was forwarded to the assigned curator ${draftTo}.`,
+      created_by_email: actorEmail,
+    });
+
+    return { ok: true, message: `Assigned curator notified from ${helpGmailSenderEmail}.` };
+  }
+
+  const subject = requireString(mailDraft?.subject) || `GRE introduction: ${seekerLabel} challenge for your consideration`;
+  const body = requireString(mailDraft?.body) || [
+    `Hello ${providerLabel},`,
     "",
-    "We are reaching out from Green Rural Economy regarding a challenge shared on the GRE platform.",
-    "",
-    `Organization: ${need.organization_name}`,
-    `Contact person: ${need.contact_person || "Not provided"}`,
-    `Location: ${need.state || "Not provided"}${need.district ? ` / ${need.district}` : ""}`,
-    `Need categories: ${(need.curated_need || []).join(", ") || "Not yet classified"}`,
-    "",
-    "Problem statement:",
-    `${need.problem_statement}`,
-    "",
-    "If this is relevant to your work, please reply to this email so we can coordinate next steps with the seeker.",
+    `We are reaching out to you from GRE platform to connect you with ${seekerLabel}, marked in copy of this mail. They have a need for ${problemStatement} and your solution of ${viewLink} may be of interest to them. We would suggest you to connect mutually and take this forward. Do reach out to us if you would like us to help facilitate the conversation.`,
     "",
     "Regards,",
-    "GRE Team",
+    "Team GRE",
   ].join("\n");
+  const ccEmail = requireString(mailDraft?.cc) || [requireString(need.seeker_email).toLowerCase(), curatorEmail].filter(Boolean).join(", ");
+  const toEmail = requireString(mailDraft?.to || providerEmail).toLowerCase();
 
   await sendEmail({
-    to: providerEmail,
-    cc: [need.seeker_email, curatorEmail].filter(Boolean).join(", "),
+    to: toEmail,
+    cc: ccEmail,
     subject,
     body,
+    mailbox: "help",
   });
 
   await adminClient.from("gre_mis_email_log").insert({
     need_id: need.id,
-    recipient_email: providerEmail,
-    cc_email: [need.seeker_email, curatorEmail].filter(Boolean).join(", "),
+    recipient_email: toEmail,
+    cc_email: ccEmail,
     subject,
     body_preview: body.slice(0, 1000),
     sent_by_email: actorEmail,
   });
+  await appendGreMisAuditEntry(IMPACT_EMAIL_AUDIT_LOG_KEY, {
+    id: crypto.randomUUID(),
+    logged_at: new Date().toISOString(),
+    kind: "email",
+    surface: "gre-mis",
+    action: "email_to_provider",
+    counter_key: "connections_made",
+    sender_email: actorEmail,
+    sender_name: actorName,
+    sender_role: actorRole,
+    recipient_email: toEmail,
+    cc_email: ccEmail,
+    reply_to: actorEmail,
+    subject,
+    item_id: requireString(offeringId),
+    item_label: providerLabel,
+    item_source: "gre-mis",
+    need_id: requireString(need.id),
+    provider_name: providerLabel,
+    seeker_name: seekerLabel,
+  }, actorEmail);
 
   await adminClient.from("gre_mis_need_updates").insert({
     need_id: need.id,
     update_type: "provider_intro_sent",
-    note: `Problem statement emailed to ${providerEmail} with seeker copied.`,
+    note: `Provider introduction sent to ${providerEmail} with seeker and assigned curator copied.`,
     created_by_email: actorEmail,
   });
 
-  return { ok: true, message: `Provider introduction email sent from ${gmailSenderEmail}.` };
+  return { ok: true, message: `Provider introduction email sent from ${helpGmailSenderEmail}.` };
+}
+
+async function sendSolutionSeekerIntro(
+  needId: string,
+  providerEmail: string,
+  actor: { id: string; name: string; email: string; role: string },
+  providerName = "",
+  offeringId = "",
+  mailDraft: Record<string, unknown> | null = null,
+) {
+  const { data: need, error: needError } = await adminClient
+    .from("gre_mis_needs")
+    .select("id, organization_name, seeker_email, contact_person, problem_statement, curation_notes, solutions_shared_count, curator_id, gre_mis_curators:curator_id(user_id, email, display_name)")
+    .eq("id", needId)
+    .single();
+  if (needError || !need) throw new Error(needError?.message || "Need not found.");
+
+  const seekerEmail = requireString(need.seeker_email).toLowerCase();
+  if (!seekerEmail) throw new Error("This need does not yet have a seeker email address.");
+
+  const curator = Array.isArray(need.gre_mis_curators) ? need.gre_mis_curators[0] : need.gre_mis_curators;
+  const curatorEmail = requireString(curator?.email).toLowerCase();
+  const actorEmail = requireString(actor.email).toLowerCase();
+  const seekerLabel = requireString(need.contact_person) || requireString(need.organization_name) || "Seeker";
+  const problemStatement = requireString(need.problem_statement) || "the stated need";
+  const providerLabel = requireString(providerName) || "Solution Provider";
+  const solutionName = requireString(mailDraft?.solutionName) || providerLabel;
+  const viewLink = offeringId
+    ? `${greMisBaseUrl}/offering-detail.html?offering_id=${encodeURIComponent(offeringId)}`
+    : greMisBaseUrl;
+  const templates = await getGreMailTemplates();
+  const subject = requireString(mailDraft?.subject) || `GRE solution identified for ${seekerLabel}`;
+  const body = requireString(mailDraft?.body) || normalizeGreMailTemplateLegacyPlaceholders(
+    renderGreMailTemplateText(templates.solutionSeekerTemplate || DEFAULT_SOLUTION_SEEKER_TEMPLATE, {
+      seekerLabel,
+      problemStatement,
+      providerName: providerLabel,
+      solutionName,
+      viewLink,
+    }),
+    "needSeeker",
+  );
+  const ccEmail = requireString(mailDraft?.cc) || ["help@greenruraleconomy.in", curatorEmail].filter(Boolean).join(", ");
+  const toEmail = requireString(mailDraft?.to || seekerEmail).toLowerCase();
+
+  await sendEmail({
+    to: toEmail,
+    cc: ccEmail,
+    subject,
+    body,
+    mailbox: "solution",
+  });
+
+  await adminClient.from("gre_mis_email_log").insert({
+    need_id: need.id,
+    recipient_email: toEmail,
+    cc_email: ccEmail,
+    subject,
+    body_preview: body.slice(0, 1000),
+    sent_by_email: actorEmail,
+  });
+  await appendGreMisAuditEntry(IMPACT_EMAIL_AUDIT_LOG_KEY, {
+    id: crypto.randomUUID(),
+    logged_at: new Date().toISOString(),
+    kind: "email",
+    surface: "gre-mis",
+    action: "email_to_seeker",
+    counter_key: "connections_made",
+    sender_email: actorEmail,
+    sender_name: actor.name,
+    sender_role: actor.role,
+    recipient_email: toEmail,
+    cc_email: ccEmail,
+    reply_to: actorEmail,
+    subject,
+    item_id: requireString(offeringId),
+    item_label: solutionName,
+    item_source: "gre-mis",
+    need_id: requireString(need.id),
+    provider_name: providerLabel,
+    seeker_name: seekerLabel,
+  }, actorEmail);
+
+  const nextNotes = appendSharedSolutionToCurationNotes(
+    requireString(need.curation_notes),
+    solutionName,
+    providerLabel,
+    viewLink,
+  );
+  const nextSharedCount = Math.max(parseNumber(need.solutions_shared_count, 0), 1);
+  await adminClient
+    .from("gre_mis_needs")
+    .update({
+      curation_notes: nextNotes || null,
+      solutions_shared_count: nextSharedCount,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", need.id);
+
+  await adminClient.from("gre_mis_need_updates").insert({
+    need_id: need.id,
+    update_type: "solution_shared_with_seeker",
+    note: `Solution ${solutionName} by ${providerLabel} was shared with seeker ${toEmail}.`,
+    created_by_email: actorEmail,
+  });
+
+  return { ok: true, message: `Seeker outreach email sent from ${solutionGmailSenderEmail}.` };
+}
+
+async function buildNeedSeekerIntroDraft(needId: string, grameeeAccessToken: string, grameeeUserSummary: unknown = null) {
+  const normalizedToken = requireString(grameeeAccessToken);
+  const authUser = normalizedToken
+    ? await resolveGrameeeAuthUser(normalizedToken)
+    : resolveGrameeeSummaryFallback(grameeeUserSummary);
+  if (!authUser) {
+    throw new Error("Your GramEEE login could not be verified. Please sign in again.");
+  }
+  if (authUser.user_metadata?.grameee_removed === true || authUser.app_metadata?.grameee_removed === true) {
+    throw new Error("This GramEEE account is no longer active.");
+  }
+
+  const userMetadata = (authUser.user_metadata || authUser.raw_user_meta_data || {}) as Record<string, unknown>;
+  const actorEmail = requireString(authUser.email).toLowerCase();
+  if (!actorEmail) throw new Error("Your GramEEE login is missing an email address.");
+  const actorName =
+    requireString(userMetadata.full_name) ||
+    requireString(userMetadata.first_name) ||
+    requireString(userMetadata.username) ||
+    actorEmail;
+  const actorPhone = requireString(userMetadata.phone);
+
+  const { data: need, error: needError } = await adminClient
+    .from("gre_mis_needs")
+    .select("id, organization_name, contact_person, seeker_email, state, district, problem_statement, ai_thematic_area, override_thematic_area, curator_id, gre_mis_curators:curator_id(email, display_name)")
+    .eq("id", needId)
+    .single();
+  if (needError || !need) throw new Error(needError?.message || "Need not found.");
+
+  const seekerEmail = requireString(need.seeker_email).toLowerCase();
+  if (!seekerEmail) throw new Error("This need does not yet have a seeker email address.");
+
+  const curator = Array.isArray(need.gre_mis_curators) ? need.gre_mis_curators[0] : need.gre_mis_curators;
+  const curatorEmail = requireString(curator?.email).toLowerCase();
+  const seekerLabel = requireString(need.contact_person) || requireString(need.organization_name) || "Solution Seeker";
+  const thematicArea =
+    requireString((need as Record<string, unknown>).override_thematic_area) ||
+    requireString((need as Record<string, unknown>).ai_thematic_area) ||
+    "this need";
+  const templates = await getGreMailTemplates();
+  const subject = `Response to your GramEEE GRE need on ${thematicArea}`;
+  const body = normalizeGreMailTemplateLegacyPlaceholders(
+    renderGreMailTemplateText(templates.needSeekerTemplate || DEFAULT_NEED_SEEKER_TEMPLATE, {
+      seekerLabel,
+      thematicArea,
+      actorName,
+      actorPhone,
+    }),
+    "needSeeker",
+  );
+  const ccEmail = [actorEmail, "solution@greenruraleconomy.in", curatorEmail]
+    .filter(Boolean)
+    .filter((value, index, list) => list.indexOf(value) === index)
+    .join(", ");
+
+  return {
+    needId: requireString(need.id),
+    actorEmail,
+    actorName,
+    seekerEmail,
+    seekerLabel,
+    thematicArea,
+    subject,
+    body,
+    ccEmail,
+    from: `Team GRE <${helpGmailSenderEmail}>`,
+    replyTo: actorEmail,
+  };
+}
+
+async function sendNeedSeekerIntro(needId: string, grameeeAccessToken: string, grameeeUserSummary: unknown = null) {
+  const draft = await buildNeedSeekerIntroDraft(needId, grameeeAccessToken, grameeeUserSummary);
+
+  await sendEmail({
+    to: draft.seekerEmail,
+    cc: draft.ccEmail,
+    subject: draft.subject,
+    body: draft.body,
+    mailbox: "help",
+  });
+
+  await adminClient.from("gre_mis_email_log").insert({
+    need_id: draft.needId,
+    recipient_email: draft.seekerEmail,
+    cc_email: draft.ccEmail,
+    subject: draft.subject,
+    body_preview: draft.body.slice(0, 1000),
+    sent_by_email: draft.actorEmail,
+  });
+  await appendGreMisAuditEntry(IMPACT_EMAIL_AUDIT_LOG_KEY, {
+    id: crypto.randomUUID(),
+    logged_at: new Date().toISOString(),
+    kind: "email",
+    surface: "needs-map",
+    action: "reach_out_to_seeker",
+    counter_key: "connections_made",
+    sender_email: draft.actorEmail,
+    sender_name: draft.actorName,
+    sender_role: "user",
+    recipient_email: draft.seekerEmail,
+    cc_email: draft.ccEmail,
+    reply_to: draft.actorEmail,
+    subject: draft.subject,
+    item_id: "",
+    item_label: draft.thematicArea,
+    item_source: "needs-map",
+    need_id: requireString(draft.needId),
+    seeker_name: draft.seekerLabel,
+  }, draft.actorEmail);
+
+  await adminClient.from("gre_mis_need_updates").insert({
+    need_id: draft.needId,
+    update_type: "needs_map_seeker_intro_sent",
+    note: `Needs Map outreach mail sent to seeker ${draft.seekerEmail} by ${draft.actorEmail}.`,
+    created_by_email: draft.actorEmail,
+  });
+
+  return { ok: true, message: `Seeker introduction email sent from ${helpGmailSenderEmail}.` };
 }
 
 async function sendCuratorMessage(
@@ -6939,6 +9295,24 @@ async function sendCuratorMessage(
     body_preview: body.slice(0, 1000),
     sent_by_email: actorEmail,
   });
+  await appendGreMisAuditEntry(IMPACT_EMAIL_AUDIT_LOG_KEY, {
+    id: crypto.randomUUID(),
+    logged_at: new Date().toISOString(),
+    kind: "email",
+    surface: "gre-mis",
+    action: "curator_message",
+    counter_key: "connections_made",
+    sender_email: actorEmail,
+    sender_name: actorName,
+    sender_role: "curator",
+    recipient_email: curatorEmail,
+    cc_email: actorEmail,
+    reply_to: actorEmail,
+    subject,
+    item_source: "gre-mis",
+    need_id: requireString(need.id),
+    seeker_name: requireString(need.contact_person) || requireString(need.organization_name),
+  }, actorEmail);
 
   return { ok: true, message: `Message sent to ${curator?.display_name || "the curator"}.` };
 }
@@ -6952,25 +9326,23 @@ Deno.serve(async (req) => {
     const payload = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const action = requireString(payload.action);
 
-    if (action === "userLogin") {
-      return jsonResponse(await userLogin(requireString(payload.identifier), requireString(payload.password)));
+    if (action === "searchLgdGeographies") {
+      return jsonResponse(await searchLgdGeographies(requireString(payload.query)));
     }
 
-    if (action === "registerUser") {
-      return jsonResponse(await registerUser(payload));
-    }
-
-    if (action === "requestPasswordReset") {
-      return jsonResponse(await requestPasswordReset(requireString(payload.email)));
-    }
-
-    if (action === "submitSharedForm") {
-      return jsonResponse(await submitFormSubmission(
-        requireString(payload.submissionType),
-        (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
-        requireString(payload.sourceMode) || "shared_link",
-        null,
-      ));
+    if (action === "translateTextBatch") {
+      const texts = asStringArray(payload.texts);
+      const source = requireString(payload.source) || "en";
+      const target = requireString(payload.target) || "hi";
+      return jsonResponse({
+        ok: true,
+        translations: await Promise.all(
+          texts.map(async (text) => ({
+            sourceText: text,
+            translatedText: await translateTextWithLibreTranslate(text, source, target),
+          })),
+        ),
+      });
     }
 
     if (action === "suggestSolutionTags") {
@@ -6984,6 +9356,31 @@ Deno.serve(async (req) => {
         (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
       ));
     }
+
+    if (action === "userLogin") {
+      return jsonResponse(await userLogin(requireString(payload.identifier), requireString(payload.password)));
+    }
+
+    if (action === "bridgeGrameeeSession") {
+      return jsonResponse(await bridgeGrameeeSession(requireString(payload.grameeeAccessToken)));
+    }
+
+    if (action === "registerUser") {
+      return jsonResponse(await registerUser(payload));
+    }
+
+    if (action === "requestPasswordReset") {
+      return jsonResponse(await requestPasswordReset(requireString(payload.email)));
+    }
+
+      if (action === "submitSharedForm") {
+        return jsonResponse(await submitFormSubmission(
+          requireString(payload.submissionType),
+          (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
+          requireString(payload.sourceMode) || "shared_link",
+          null,
+        ));
+      }
 
     if (action === "resetPassword") {
       return jsonResponse(await resetPassword(requireString(payload.email), requireString(payload.code), requireString(payload.newPassword)));
@@ -7032,7 +9429,31 @@ Deno.serve(async (req) => {
       return jsonResponse(await submitUpdateRequest(payload));
     }
 
-    const userCtx = await requireUserSession(req, requireString(payload.userSessionToken) || requireString(payload.adminSessionToken));
+    if (action === "sendNeedSeekerIntro") {
+      return jsonResponse(await sendNeedSeekerIntro(
+        requireString(payload.needId),
+        requireString(payload.grameeeAccessToken),
+        payload.grameeeUserSummary,
+      ));
+    }
+
+    if (action === "previewNeedSeekerIntro") {
+      return jsonResponse(await buildNeedSeekerIntroDraft(
+        requireString(payload.needId),
+        requireString(payload.grameeeAccessToken),
+        payload.grameeeUserSummary,
+      ));
+    }
+
+    if (action === "__debugNeedSyncService") {
+      return jsonResponse(await debugGreNeedSyncService(requireString(payload.needId)));
+    }
+
+    const userCtx = await requireUserSessionFromRequest(
+      req,
+      payload,
+      requireString(payload.userSessionToken) || requireString(payload.adminSessionToken),
+    );
     const actorEmail = requireString(userCtx.user.email).toLowerCase();
     const actorName = requireString(userCtx.user.full_name) || requireString(userCtx.user.first_name) || actorEmail;
 
@@ -7059,13 +9480,73 @@ Deno.serve(async (req) => {
     }
 
     if (action === "directCuratorUpdate") {
-      assertRoles(userCtx, ["curator", "admin"], "Curator or admin access is required.");
+      assertRoles(userCtx, ["curator", "moderator", "admin"], "Curator, moderator, or admin access is required.");
       return jsonResponse(await directCuratorUpdate(payload, userCtx));
     }
 
     if (action === "sendProviderIntro") {
-      assertRoles(userCtx, ["curator", "admin"], "Curator or admin access is required.");
-      return jsonResponse(await sendProviderIntro(requireString(payload.needId), requireString(payload.providerEmail), actorEmail));
+      assertRoles(userCtx, ["curator", "moderator", "admin"], "Curator, moderator, or admin access is required.");
+      return jsonResponse(await sendProviderIntro(
+        requireString(payload.needId),
+        requireString(payload.providerEmail),
+        {
+          id: requireString(userCtx.user.id),
+          name: actorName,
+          email: actorEmail,
+          role: requireString(userCtx.user.role),
+        },
+        requireString(payload.providerName),
+        requireString(payload.offeringId),
+        (payload.mailDraft && typeof payload.mailDraft === "object") ? payload.mailDraft as Record<string, unknown> : null,
+      ));
+    }
+
+    if (action === "sendSolutionSeekerIntro") {
+      assertRoles(userCtx, ["curator", "moderator", "admin"], "Curator, moderator, or admin access is required.");
+      return jsonResponse(await sendSolutionSeekerIntro(
+        requireString(payload.needId),
+        requireString(payload.providerEmail),
+        {
+          id: requireString(userCtx.user.id),
+          name: actorName,
+          email: actorEmail,
+          role: requireString(userCtx.user.role),
+        },
+        requireString(payload.providerName),
+        requireString(payload.offeringId),
+        (payload.mailDraft && typeof payload.mailDraft === "object") ? payload.mailDraft as Record<string, unknown> : null,
+      ));
+    }
+
+    if (action === "rejectNeedSuggestedQuestions") {
+      assertRoles(userCtx, ["curator", "moderator", "admin"], "Curator, moderator, or admin access is required.");
+      return jsonResponse(await rejectSuggestedQuestionsForNeed(requireString(payload.needId), actorEmail));
+    }
+
+    if (action === "downloadSeekerRequestTracker") {
+      assertRoles(userCtx, ["curator", "moderator", "admin"], "Curator, moderator, or admin access is required.");
+      return jsonResponse(await downloadSeekerRequestTracker(requireString(payload.seekerKey), Boolean(payload.includeClosed)));
+    }
+
+    if (action === "getMailTemplates") {
+      assertRoles(userCtx, ["moderator", "admin"], "Moderator or admin access is required.");
+      return jsonResponse(await getGreMailTemplates());
+    }
+
+    if (action === "saveMailTemplates") {
+      assertRoles(userCtx, ["admin"], "Admin login required.");
+      return jsonResponse(await saveGreMailTemplates(
+        actorEmail,
+        requireString(payload.providerIntroTemplate),
+        requireString(payload.curatorForwardTemplate),
+        requireString(payload.solutionSeekerTemplate),
+        requireString(payload.needSeekerTemplate),
+        typeof payload.inboundAutoSyncEnabled === "boolean" ? payload.inboundAutoSyncEnabled : null,
+        payload.lshContactEmails,
+        payload.lshHelpCcEmails,
+        requireString(payload.lshRequestSupportTemplate),
+        requireString(payload.lshEmailProviderTemplate),
+      ));
     }
 
     if (action === "updateUserRole") {
@@ -7088,11 +9569,36 @@ Deno.serve(async (req) => {
       return jsonResponse(await removeManagedUser(requireString(payload.userId), requireString(payload.removalMode) || "org_only"));
     }
 
-    const adminCtx = await requireAdminSession(req, requireString(payload.adminSessionToken));
+    const adminCtx = await requireAdminSessionFromRequest(req, payload, requireString(payload.adminSessionToken));
     const adminActorEmail = adminCtx.admin.email;
+    const adminActorRole = requireString(adminCtx.user.role).toLowerCase();
 
     if (action === "adminSnapshot") {
       return jsonResponse(await getAdminSnapshot());
+    }
+
+    if (action === "adminUsersSnapshot") {
+      return jsonResponse(await getAdminUsersSnapshot());
+    }
+
+    if (action === "adminMailImpactSnapshot") {
+      return jsonResponse(await getAdminMailImpactSnapshot());
+    }
+
+    if (action === "adminDataSyncSnapshot") {
+      return jsonResponse(await getAdminDataSyncSnapshot());
+    }
+
+    if (action === "adminApprovalsSnapshot") {
+      return jsonResponse(await getAdminApprovalsSnapshot());
+    }
+
+    if (action === "adminLocalSolutionsSnapshot") {
+      return jsonResponse(await getAdminLocalSolutionsSnapshot());
+    }
+
+    if (action === "adminLocalNeedsSnapshot") {
+      return jsonResponse(await getAdminLocalNeedsSnapshot());
     }
 
     if (action === "assignCurator") {
@@ -7100,10 +9606,16 @@ Deno.serve(async (req) => {
     }
 
     if (action === "approveNeed") {
+      if (isModeratorMisRole(adminActorRole) && requireString(payload.decision).toLowerCase() === "reject") {
+        throw new Error("Moderators cannot reject needs.");
+      }
       return jsonResponse(await approveNeed(requireString(payload.needId), requireString(payload.decision), requireString(payload.reviewNotes), adminActorEmail));
     }
 
     if (action === "reviewUpdateRequest") {
+      if (isModeratorMisRole(adminActorRole) && requireString(payload.decision).toLowerCase() === "reject") {
+        throw new Error("Moderators cannot reject curator updates.");
+      }
       return jsonResponse(await reviewUpdateRequest(requireString(payload.requestId), requireString(payload.decision), requireString(payload.reviewNotes), adminActorEmail));
     }
 
@@ -7112,6 +9624,9 @@ Deno.serve(async (req) => {
     }
 
     if (action === "reviewFormSubmission") {
+      if (isModeratorMisRole(adminActorRole) && requireString(payload.decision).toLowerCase() === "reject") {
+        throw new Error("Moderators cannot reject form submissions.");
+      }
       return jsonResponse(await approveFormSubmission(
         requireString(payload.submissionId),
         requireString(payload.decision),
@@ -7136,7 +9651,14 @@ Deno.serve(async (req) => {
       ));
     }
 
+    if (action === "getLocalSolutionDetail") {
+      return jsonResponse(await getLocalSolutionDetail(requireString(payload.offeringId)));
+    }
+
     if (action === "deleteLocalSolution") {
+      if (isModeratorMisRole(adminActorRole)) {
+        throw new Error("Moderators cannot delete local solutions.");
+      }
       return jsonResponse(await deleteLocalSolution(requireString(payload.offeringId)));
     }
 
@@ -7147,7 +9669,14 @@ Deno.serve(async (req) => {
       ));
     }
 
+    if (action === "getLocalNeedDetail") {
+      return jsonResponse(await getLocalNeedDetail(requireString(payload.needId)));
+    }
+
     if (action === "deleteLocalNeed") {
+      if (isModeratorMisRole(adminActorRole)) {
+        throw new Error("Moderators cannot delete local needs.");
+      }
       return jsonResponse(await deleteLocalNeed(requireString(payload.needId)));
     }
 
@@ -7179,6 +9708,10 @@ Deno.serve(async (req) => {
 
       if (action === "generateNeedSuggestedQuestions") {
         return jsonResponse(await generateSuggestedQuestionsForNeed(requireString(payload.needId), adminActorEmail));
+      }
+
+      if (action === "rejectNeedSuggestedQuestions") {
+        return jsonResponse(await rejectSuggestedQuestionsForNeed(requireString(payload.needId), adminActorEmail));
       }
 
       if (action === "saveNeedSuggestedQuestions") {

@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GRE MIS Dashboard</title>
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://js.puter.com/v2/"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const sharedForm = params.get("sharedForm") || "";
+      const publicForm = params.get("publicForm") || "";
+      const grameeeEmbed = params.get("grameeeEmbed") === "1";
+      if (sharedForm) document.documentElement.setAttribute("data-shared-form", sharedForm);
+      if (publicForm) document.documentElement.setAttribute("data-public-form", publicForm);
+      if (grameeeEmbed) document.documentElement.setAttribute("data-grameee-embed", "1");
+    }());
+  </script>
+  <style>
+    html[data-grameee-embed="1"] .grameee-site-header {
+      display: none !important;
+    }
+  </style>
+  <script src="https://grameee.org/supabase-config.js?v=20260519gre1"></script>
+  <script src="https://grameee.org/auth.js?v=20260531b" defer></script>
+  <script src="./config.js?v=20260517b"></script>
+  <link rel="stylesheet" href="./styles.css?v=20260602gre37" />
+</head>
+<body>
+  <header class="grameee-site-header">
+    <a class="grameee-brand" href="https://grameee.org/">
+      <strong>GramEEE</strong>
+      <small>Gram Eco Entrepreneur Ecosystem</small>
+    </a>
+    <nav class="grameee-site-nav" aria-label="GramEEE">
+      <a href="https://grameee.org/">About</a>
+      <a href="https://grameee.org/tools.html">Tools</a>
+      <a class="auth-only-link" data-privilege="ecosystem" href="https://ecosystem.grameee.org/" hidden>Eco System</a>
+      <a class="session-aware-link" href="https://askgre.grameee.org/">Ask GRE</a>
+      <a class="session-aware-link" href="https://supergre.grameee.org/">SuperGRE</a>
+      <a class="session-aware-link" href="https://solution.grameee.org/">Offer Solutions</a>
+      <a class="session-aware-link" href="https://help.grameee.org/">Ask Help</a>
+      <a class="auth-only-link" data-privilege="needsMap" href="https://needs.grameee.org/" hidden>Needs Map</a>
+      <a class="auth-only-link" href="https://place.grameee.org/" hidden>Place</a>
+      <a class="auth-only-link" data-privilege="gre" href="https://gre.grameee.org/" hidden>GRE</a>
+      <a data-auth-link href="https://grameee.org/login.html">Login</a>
+    </nav>
+  </header>
+  <div class="shell">
+    <section id="authGate" class="auth-gate panel">
+      <div class="auth-hero">
+        <div class="auth-brand">
+          <img src="https://gre.grameee.org/assets/gre-logo.png?v=20260519gre3" alt="GRE logo" class="auth-logo" />
+          <div class="auth-copy">
+            <p class="eyebrow">Green Rural Economy</p>
+            <h2>Welcome to the GRE MIS</h2>
+            <p class="auth-lede">Track live inbounds, understand curator movement, surface solution matches, and coordinate the day’s action from one cleaner workspace.</p>
+            <div class="auth-highlight-row">
+              <span class="auth-highlight">Live needs intelligence</span>
+              <span class="auth-highlight">Curator coordination</span>
+              <span class="auth-highlight">GRE sync workflows</span>
+            </div>
+          </div>
+        </div>
+        <article class="auth-login-card">
+          <div class="auth-login-head">
+            <p class="eyebrow">Access</p>
+            <h3>Use your GramEEE login</h3>
+            <p class="helper-text">
+              GRE MIS now follows the shared GramEEE login. Sign in from the top bar with a GramEEE account that has
+              <strong>admin</strong>, <strong>moderator</strong>, or <strong>curator</strong> access to continue.
+            </p>
+          </div>
+          <p id="userLoginStatus" class="helper-text auth-status"></p>
+        </article>
+      </div>
+    </section>
+
+    <section id="appShell" class="app-shell hidden">
+    <header class="masthead">
+      <div class="brand-block">
+        <img src="https://gre.grameee.org/assets/gre-logo.png?v=20260519gre3" alt="GRE logo" class="brand-logo" />
+        <div class="brand-copy">
+          <p class="eyebrow">Green Rural Economy</p>
+          <h1>GRE MIS Control Tower</h1>
+          <p class="lede">Live Operating Dashboard for Inbound Needs, Curator Action, Admin Approvals, Solution Matching, and Closure Tracking</p>
+        </div>
+      </div>
+      <div class="masthead-account-panel">
+        <div class="hero-account-inline masthead-account-inline">
+          <span id="accountRoleChip" class="chip muted">User</span>
+          <strong id="accountName">GRE MIS User</strong>
+        </div>
+        <div class="masthead-control-row">
+          <button id="closedToggleBtn" class="btn btn-secondary btn-compact">Show Closed: Off</button>
+          <button id="refreshBtn" class="btn btn-secondary btn-compact">Refresh & Reset</button>
+        </div>
+      </div>
+    </header>
+
+    <nav class="view-tabs">
+      <button class="tab active" data-view="overview">Overview</button>
+      <button class="tab" data-view="operations">Operations Desk</button>
+      <button class="tab hidden" data-view="admin">Management Desk</button>
+    </nav>
+
+    <main>
+      <section id="overviewView" class="view active">
+        <div class="overview-top-stack">
+          <div id="metricsGrid" class="metrics-grid"></div>
+          <div class="overview-insight-grid">
+            <section class="panel panel-large">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Pipeline Health</p>
+                  <h3>Need Status and Bottlenecks</h3>
+                </div>
+              </div>
+              <div id="pipelineBoard" class="pipeline-board"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Curator Allocation</p>
+                  <h3>Workload Distribution</h3>
+                </div>
+              </div>
+              <div id="workloadChart" class="bar-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">State Demand</p>
+                  <h3>Where Needs Are Concentrated</h3>
+                </div>
+              </div>
+              <div id="stateChart" class="bar-list"></div>
+            </section>
+
+            <section class="panel panel-large">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Category Signals</p>
+                  <h3>Most Common Problem Themes</h3>
+                </div>
+              </div>
+              <div id="categoryChart" class="tag-cloud"></div>
+            </section>
+          </div>
+        </div>
+
+        <section class="panel overview-drilldown-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Category Cases</p>
+              <h3>Focused Case List</h3>
+            </div>
+          </div>
+          <div id="pipelineDrilldown" class="pipeline-drilldown"></div>
+        </section>
+      </section>
+
+      <section id="operationsView" class="view">
+        <div class="operations-stack">
+          <section class="panel operations-filter-panel">
+            <div class="operations-filter-layout">
+              <div class="operations-filter-sidebar">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">Filters</p>
+                    <h3>Need Queue</h3>
+                  </div>
+                </div>
+                <div class="filters-grid operations-filters-grid">
+                  <label>
+                    <span>Status</span>
+                    <select id="statusFilter"></select>
+                  </label>
+                  <label>
+                    <span>Curator</span>
+                    <select id="curatorFilter"></select>
+                  </label>
+                  <label>
+                    <span>State</span>
+                    <select id="stateFilter"></select>
+                  </label>
+                  <label>
+                    <span>Search</span>
+                    <input id="searchFilter" type="search" placeholder="Search organisation, challenge, category" />
+                  </label>
+                </div>
+              </div>
+              <div class="operations-queue-stage">
+                <div id="needsQueue" class="queue-rail"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel panel-detail operations-detail-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Selected Need</p>
+                <h3>Journey Detail</h3>
+              </div>
+            </div>
+            <div id="needDetail" class="empty-state">Choose a need from the queue to inspect the current status, notes, problem statement, and next actions.</div>
+          </section>
+
+          <section class="panel panel-wide">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">GRE Knowledge Match</p>
+                <h3>Live Offerings, Solutions, and Providers</h3>
+              </div>
+            </div>
+            <div id="matchResults" class="match-grid"></div>
+          </section>
+        </div>
+      </section>
+
+        <section id="solutionView" class="view">
+          <div class="operations-grid intake-grid">
+            <section class="panel panel-detail">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Solution Upload</p>
+                  <h3>Add Solution to GRE Review Queue</h3>
+                </div>
+              </div>
+              <form id="solutionSubmissionForm" class="form-grid solution-form-grid">
+                <div class="form-section wide">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Organisation</p>
+                    <h4>Organisation and Submission Contact</h4>
+                  </div>
+                  <div class="form-grid">
+                    <label>
+                      <span>Existing Organisation</span>
+                      <select id="solutionTraderSelect" name="existing_trader_id"></select>
+                    </label>
+                    <label>
+                      <span>Organisation Name</span>
+                      <input name="organization_name" id="solutionOrgName" required />
+                    </label>
+                    <label>
+                      <span>Contact Person</span>
+                      <input name="submitter_name" />
+                    </label>
+                    <label>
+                      <span>Contact Email</span>
+                      <input name="submitter_email" type="email" required />
+                    </label>
+                    <label>
+                      <span>Contact Phone</span>
+                      <input name="submitter_phone" />
+                    </label>
+                  </div>
+                </div>
+
+                <div class="form-section wide">
+                <div class="form-section-head">
+                  <p class="eyebrow">Offering</p>
+                  <h4>Offering Structure</h4>
+                </div>
+                <div class="form-grid">
+                    <label class="hidden-accessible-field">
+                      <span>Offering Category</span>
+                      <select id="solutionOfferingCategory" name="offering_category" required>
+                        <option value="">Select</option>
+                        <option value="Service offerings">Service</option>
+                        <option value="Product offerings">Product</option>
+                        <option value="Knowledge offerings">Knowledge</option>
+                      </select>
+                    </label>
+                    <label class="hidden-accessible-field">
+                      <span>Offering Type</span>
+                      <select id="solutionOfferingType" name="offering_type" required></select>
+                    </label>
+                    <div class="wide choice-block">
+                      <span class="field-label">Offering Type</span>
+                      <div id="solutionOfferingButtonGrid" class="offering-button-grid" aria-label="Solution offering type selection"></div>
+                    </div>
+                    <label>
+                      <span>Offering Name</span>
+                      <input name="offering_name" required />
+                    </label>
+                    <label class="wide">
+                      <span>Offering Description</span>
+                      <textarea name="about_offering_text" rows="4" required></textarea>
+                    </label>
+                  </div>
+                </div>
+
+                <div id="productOfferingFields" class="form-section wide conditional-offering-section" data-offering-kind="Product offerings">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Product Offering</p>
+                    <h4>Product Details</h4>
+                  </div>
+                  <div class="form-grid">
+                    <label>
+                      <span>Grade/Capacity</span>
+                      <input name="grade_capacity" />
+                    </label>
+                    <label>
+                      <span>Cost</span>
+                      <input name="product_cost" />
+                    </label>
+                    <label class="inline-check">
+                      <input type="checkbox" name="product_cost_quote_on_scope" value="yes" />
+                      <span>Can be quoted after finalising scope</span>
+                    </label>
+                    <label>
+                      <span>Lead Time</span>
+                      <input name="lead_time" />
+                    </label>
+                    <label>
+                      <span>Product Brochure</span>
+                      <input name="product_brochure_upload" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png" />
+                    </label>
+                    <label class="wide">
+                      <span>Support Services</span>
+                      <textarea name="support_details" rows="3"></textarea>
+                    </label>
+                    <label class="wide">
+                      <span>Contact Details for Product</span>
+                      <textarea name="product_contact_details" rows="3" placeholder="Use this if the product contact differs from the organisation contact"></textarea>
+                    </label>
+                  </div>
+                </div>
+
+                <div id="serviceOfferingFields" class="form-section wide conditional-offering-section" data-offering-kind="Service offerings">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Service Offering</p>
+                    <h4>Service Delivery Details</h4>
+                  </div>
+                  <div class="form-grid">
+                    <label>
+                      <span>Facilitator Name</span>
+                      <input name="trainer_name" />
+                    </label>
+                    <label>
+                      <span>Facilitator Email Address</span>
+                      <input name="trainer_email" type="email" />
+                    </label>
+                    <label>
+                      <span>Facilitator Phone Number</span>
+                      <input name="trainer_phone" />
+                    </label>
+                    <label class="wide">
+                      <span>Facilitator Details</span>
+                      <textarea name="trainer_details_text" rows="3"></textarea>
+                    </label>
+                    <div class="wide choice-block">
+                      <span class="field-label">Languages</span>
+                      <div id="solutionLanguagesGroup" class="checkbox-grid choice-grid choice-grid-2 language-choice-grid"></div>
+                    </div>
+                    <div class="wide choice-block">
+                      <span class="field-label">Geographies</span>
+                      <div class="tag-entry-row geography-entry-row">
+                        <input id="solutionGeographyEntry" list="solutionGeographyOptions" placeholder="Search a block, city, state, or country" />
+                        <button type="button" id="addSolutionGeographyBtn" class="btn btn-secondary btn-compact">Add Location</button>
+                      </div>
+                      <div id="solutionGeographySuggestions" class="inline-suggestion-list"></div>
+                      <input type="hidden" name="geographies" id="solutionGeographies" />
+                      <div id="solutionGeographyChips" class="tag-cloud tag-chip-editor"></div>
+                    </div>
+                    <label>
+                      <span>Duration</span>
+                      <input name="duration" />
+                    </label>
+                    <label>
+                      <span>Duration Units</span>
+                      <select name="duration_unit">
+                        <option value="">Select</option>
+                        <option value="Days">Days</option>
+                        <option value="Hours">Hours</option>
+                        <option value="Months">Months</option>
+                        <option value="Weeks">Weeks</option>
+                      </select>
+                    </label>
+                    <label class="wide">
+                      <span>Prerequisites - Participants and Training</span>
+                      <textarea name="prerequisites" rows="3"></textarea>
+                    </label>
+                    <div class="wide choice-block">
+                      <span class="field-label">Location Availability</span>
+                      <div class="checkbox-grid choice-grid choice-grid-2">
+                        <label><input type="checkbox" name="location_availability" value="At Service Provider" /><span>At Service Provider</span></label>
+                        <label><input type="checkbox" name="location_availability" value="At Service Seeker" /><span>At Service Seeker</span></label>
+                        <label><input type="checkbox" name="location_availability" value="Others" /><span>Others</span></label>
+                      </div>
+                    </div>
+                    <label>
+                      <span>Cost</span>
+                      <input name="service_cost" />
+                    </label>
+                    <label>
+                      <span>Cost Units</span>
+                      <select name="service_cost_unit">
+                        <option value="">Select</option>
+                        <option value="Can be quoted after finalising scope">Can be quoted after finalising scope</option>
+                        <option value="Per day">Per day</option>
+                        <option value="Per hour">Per hour</option>
+                        <option value="Per person">Per person</option>
+                      </select>
+                    </label>
+                    <label class="wide">
+                      <span>Remarks on Cost</span>
+                      <textarea name="cost_remarks" rows="2"></textarea>
+                    </label>
+                    <label>
+                      <span>Support Post Service</span>
+                      <select name="support_post_service">
+                        <option value="">Select</option>
+                        <option value="Not Provided if outside the service location">Not Provided</option>
+                        <option value="Yes,Provided if in the service location">Provided, if in the Service Location</option>
+                        <option value="Yes, Provided if in the service location and outside the service location">Provided, for both Service Location and Outside Service Location</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Support Post Service Cost</span>
+                      <select name="support_post_service_cost">
+                        <option value="">Select</option>
+                        <option value="No Cost, if in the service location and outside the service location">No Cost</option>
+                        <option value="No Cost if in the service location">No Cost if in Service Location, Additional Cost if Outside Service Location</option>
+                        <option value="Additional cost apply if in the service location">Additional Cost for both Service Location and Outside Service Location</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Is it Offered Online / Offline</span>
+                      <select name="delivery_mode">
+                        <option value="">Select</option>
+                        <option value="Online">Online</option>
+                        <option value="Offline">Offline</option>
+                        <option value="Online & Offline">Online & Offline</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Certification Offered</span>
+                      <select name="certification_offered">
+                        <option value="Not Provided" selected>Not Provided</option>
+                        <option value="Provided">Provided</option>
+                      </select>
+                    </label>
+                    <label class="wide">
+                      <span>Service Offering Brochure</span>
+                      <input name="service_brochure_upload" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png" />
+                    </label>
+                  </div>
+                </div>
+
+                <div id="knowledgeOfferingFields" class="form-section wide conditional-offering-section" data-offering-kind="Knowledge offerings">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Knowledge Offering</p>
+                    <h4>Knowledge Resource Details</h4>
+                  </div>
+                  <div class="form-grid">
+                    <label class="wide">
+                      <span>Knowledge Offering Content</span>
+                      <input name="knowledge_content_upload" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.mp4" />
+                    </label>
+                    <label class="wide">
+                      <span>Knowledge Offering Content Link</span>
+                      <input name="knowledge_content_link" type="url" placeholder="https://..." />
+                    </label>
+                    <label class="wide">
+                      <span>Contact Details</span>
+                      <textarea name="contact_details" rows="3"></textarea>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="form-section wide">
+                  <div class="form-section-head">
+                    <p class="eyebrow">Media and Tags</p>
+                    <h4>Supporting Assets</h4>
+                  </div>
+                  <div class="form-grid">
+                    <label class="wide">
+                      <span>Offering Image</span>
+                      <input name="offering_image_upload" type="file" accept=".jpg,.jpeg,.png,.webp" />
+                    </label>
+                    <div class="wide choice-block">
+                      <span>Tags</span>
+                      <div class="tag-entry-shell">
+                        <input id="solutionTagEntry" list="solutionTagOptions" placeholder="Select or type a tag, then press Enter" />
+                        <button type="button" id="addSolutionTagBtn" class="btn btn-secondary btn-compact">Add Tag</button>
+                        <div class="tag-ai-stack">
+                          <button type="button" id="generateSolutionTagsPuterBtn" class="btn btn-secondary btn-compact">Use own AI with Puter for Tags</button>
+                        </div>
+                      </div>
+                      <input type="hidden" name="tags" id="solutionTagsInput" required />
+                      <p class="helper-text">Tags are compulsory for discovery. Generate a first draft or add them manually.</p>
+                      <div id="solutionTagChips" class="tag-cloud tag-chip-editor"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="wide intake-actions">
+                  <button type="submit" class="btn btn-primary">Submit Solution for Approval</button>
+                  <button type="button" id="shareSolutionFormBtn" class="btn btn-secondary">Share Page Link</button>
+                </div>
+                <p id="solutionSubmissionStatus" class="helper-text wide"></p>
+              </form>
+              <datalist id="solutionGeographyOptions"></datalist>
+              <datalist id="solutionTagOptions"></datalist>
+            </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Sharing</p>
+                <h3>External Submission Link</h3>
+              </div>
+            </div>
+            <div id="solutionSharePanel" class="stack-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="need-intakeView" class="view">
+        <div class="operations-grid intake-grid">
+          <section class="panel panel-detail">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Request Solution</p>
+                <h3>Need Help</h3>
+              </div>
+            </div>
+            <form id="needSubmissionForm" class="form-grid solution-form-grid">
+              <section class="form-section wide">
+                <div class="form-section-head">
+                  <p class="eyebrow">Need Help</p>
+                  <h4>Account and Contact</h4>
+                </div>
+                <div class="form-grid">
+                  <label class="wide">
+                    <span>GRE Account</span>
+                    <select id="needTraderSelect" name="existing_trader_id" required></select>
+                  </label>
+                  <label>
+                    <span>Organisation Name</span>
+                    <input name="organization_name" id="needOrgName" required />
+                  </label>
+                  <label>
+                    <span>Contact Person</span>
+                    <input name="contact_person" required />
+                  </label>
+                  <label>
+                    <span>Email</span>
+                    <input name="seeker_email" type="email" required />
+                  </label>
+                  <label>
+                    <span>Phone</span>
+                    <input name="seeker_phone" />
+                  </label>
+                </div>
+              </section>
+
+              <section class="form-section wide">
+                <div class="form-section-head">
+                  <p class="eyebrow">Need Detail</p>
+                  <h4>Classification and Matching Inputs</h4>
+                </div>
+                <div class="form-grid">
+                  <label class="hidden-accessible-field">
+                    <span>Need Category</span>
+                    <select id="needOfferingCategory" name="offering_category">
+                      <option value="">Select</option>
+                      <option value="Service offerings">Service</option>
+                      <option value="Product offerings">Product</option>
+                      <option value="Knowledge offerings">Knowledge</option>
+                    </select>
+                  </label>
+                  <label class="hidden-accessible-field">
+                    <span>Need Type</span>
+                    <select id="needOfferingType" name="offering_type"></select>
+                  </label>
+                  <div class="wide choice-block">
+                    <span class="field-label">Need Type</span>
+                    <div id="needOfferingButtonGrid" class="offering-button-grid" aria-label="Need type selection"></div>
+                  </div>
+                  <label class="wide">
+                    <span>Thematic Area</span>
+                    <input name="thematic_area" placeholder="Dairy, Solar, Soap, Wild Mango" />
+                  </label>
+                  <label class="wide">
+                    <span>Need Statement</span>
+                    <textarea name="problem_statement" rows="6" required></textarea>
+                  </label>
+                  <div class="wide choice-block">
+                    <span class="field-label">Place of Deployment</span>
+                    <div class="tag-entry-row geography-entry-row">
+                      <input id="needDeploymentEntry" list="needDeploymentOptions" placeholder="Search village, block, city, district, state, or country" />
+                      <button type="button" id="addNeedDeploymentBtn" class="btn btn-secondary btn-compact">Add Location</button>
+                    </div>
+                    <div id="needDeploymentSuggestions" class="inline-suggestion-list"></div>
+                    <input type="hidden" name="deployment_locations" id="needDeploymentLocations" />
+                    <div id="needDeploymentChips" class="tag-cloud tag-chip-editor"></div>
+                    <datalist id="needDeploymentOptions"></datalist>
+                  </div>
+                  <div class="wide choice-block broadcast-choice-block">
+                    <span class="field-label">Broadcast to Ecosystem</span>
+                    <label class="broadcast-choice-row">
+                      <input type="checkbox" name="broadcast_to_ecosystem" value="true" checked />
+                      <span>Allow this need to be broadcast wider if needed</span>
+                    </label>
+                  </div>
+                </div>
+              </section>
+
+              <div class="wide intake-actions">
+                <button type="submit" class="btn btn-primary">Need Help</button>
+                <button type="button" id="shareNeedFormBtn" class="btn btn-secondary">Share Page Link</button>
+              </div>
+              <p id="needSubmissionStatus" class="helper-text wide"></p>
+            </form>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Sharing</p>
+                <h3>External Submission Link</h3>
+              </div>
+            </div>
+            <div id="needSharePanel" class="stack-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="adminView" class="view">
+        <section id="heroStrip" class="hero-strip">
+          <article class="hero-summary">
+            <p class="eyebrow">Live Dataset</p>
+            <h2 id="datasetHeadline">Loading GRE inbound records…</h2>
+            <div id="datasetSubline" class="dataset-stat-grid"></div>
+          </article>
+        </section>
+        <div id="metricsGridAdmin" class="metrics-grid hidden"></div>
+        <div class="admin-grid admin-grid-main">
+          <section class="panel admin-sync-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Inbound Sync</p>
+                <h3>Inbound Intake and Need Intelligence</h3>
+              </div>
+            </div>
+            <div class="admin-sync-stack">
+              <div class="admin-sync-block">
+                <label>
+                  <span>Inbound Workbook</span>
+                  <input id="inboundWorkbookFile" type="file" accept=".xlsx,.xls" />
+                </label>
+              </div>
+              <div class="admin-sync-block">
+                <label>
+                  <span>AI Engine</span>
+                  <select id="aiProviderSelect">
+                    <option value="openai">OpenAI</option>
+                    <option value="gemini">Gemini</option>
+                  </select>
+                </label>
+              </div>
+              <div class="admin-sync-block">
+                <label class="inline-check admin-sync-inline-check">
+                  <input id="inboundAutoSyncEnabled" type="checkbox" />
+                  <span>Enable daily GRE inbound auto-sync at 6:00 AM IST</span>
+                </label>
+              </div>
+              <div class="admin-sync-actions">
+                <button id="uploadInboundBtn" class="btn btn-primary">Upload Workbook and Sync</button>
+                <button id="syncGreInboundsBtn" class="btn btn-secondary">Pull Latest Inbounds from GRE</button>
+                <button id="refreshAiBtn" class="btn btn-secondary">Refresh Need AI Signals</button>
+              </div>
+            </div>
+            <p id="syncStatus" class="helper-text"></p>
+          </section>
+
+          <section class="panel admin-sync-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Mail Templates</p>
+                <h3>Provider and Curator Outreach Copy</h3>
+              </div>
+            </div>
+            <div class="admin-sync-stack">
+              <label>
+                <span>Email to Provider Template</span>
+                <textarea id="providerIntroTemplate" rows="8" placeholder="Provider outreach template"></textarea>
+              </label>
+              <label>
+                <span>Email to Curator Template</span>
+                <textarea id="curatorForwardTemplate" rows="7" placeholder="Curator-forward template"></textarea>
+              </label>
+              <label>
+                <span>Email to Seeker Template</span>
+                <textarea id="solutionSeekerTemplate" rows="8" placeholder="Suggested solution to seeker template"></textarea>
+              </label>
+              <label>
+                <span>Reach out to Seeker Template</span>
+                <textarea id="needSeekerTemplate" rows="7" placeholder="Needs Map seeker outreach template"></textarea>
+              </label>
+              <label>
+                <span>LSH Contact Emails</span>
+                <input id="lshContactEmails" type="text" placeholder="subekkumar@pradan.net, another@domain.org" />
+              </label>
+              <label>
+                <span>LSH Support CC Emails</span>
+                <input id="lshHelpCcEmails" type="text" placeholder="help@greenruraleconomy.in" />
+              </label>
+              <label>
+                <span>LSH Request Support Draft</span>
+                <textarea id="lshRequestSupportTemplate" rows="7" placeholder="Livestock Solutions Hub request support template"></textarea>
+              </label>
+              <label>
+                <span>LSH Email Provider Draft</span>
+                <textarea id="lshEmailProviderTemplate" rows="7" placeholder="Livestock Solutions Hub email provider template"></textarea>
+              </label>
+              <div class="admin-sync-actions">
+                <button id="saveMailTemplatesBtn" class="btn btn-primary">Save Mail Templates</button>
+              </div>
+            </div>
+            <p id="mailTemplateStatus" class="helper-text"></p>
+          </section>
+
+          <section class="panel admin-sync-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Impact Audit</p>
+                <h3>Mail Triggers and Details Opens</h3>
+              </div>
+            </div>
+            <div class="admin-sync-stack">
+              <label>
+                <span>Search logs</span>
+                <input id="impactAuditSearch" type="search" placeholder="Search by sender, recipient, solution, surface, subject, date context" />
+              </label>
+              <div class="audit-log-grid">
+                <section class="audit-log-panel">
+                  <div class="panel-head panel-head-tight">
+                    <div>
+                      <p class="eyebrow">Mail Triggers</p>
+                      <h4>Counter-changing mail actions</h4>
+                    </div>
+                  </div>
+                  <p id="impactEmailLogMeta" class="helper-text"></p>
+                  <div id="impactEmailLogList" class="stack-list"></div>
+                </section>
+                <section class="audit-log-panel">
+                  <div class="panel-head panel-head-tight">
+                    <div>
+                      <p class="eyebrow">Details and Portal Opens</p>
+                      <h4>Discovery actions and follow-through</h4>
+                    </div>
+                  </div>
+                  <p id="impactViewLogMeta" class="helper-text"></p>
+                  <div id="impactViewLogList" class="stack-list"></div>
+                </section>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel admin-sync-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">GRE Chatbot Data</p>
+                <h3>Supplier and Solution Exports</h3>
+              </div>
+            </div>
+            <div class="admin-sync-stack">
+              <div class="admin-sync-block">
+                <p class="helper-text">Use these actions to refresh the supplier, solution, and offering exports that support GRE knowledge search and chatbot responses.</p>
+              </div>
+              <div class="admin-sync-actions">
+                <button id="syncGreChatbotBtn" class="btn btn-primary">Refresh Chatbot Dataset</button>
+                <button id="downloadGreTraderBtn" class="btn btn-secondary">Download Trader Data</button>
+                <button id="downloadGreSolutionBtn" class="btn btn-secondary">Download Solution Data</button>
+              </div>
+            </div>
+            <p id="chatbotSyncStatus" class="helper-text"></p>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Users</p>
+                <h3>User and Curator Management</h3>
+              </div>
+              <div class="card-actions">
+                <button id="refreshUserDirectoryBtn" class="btn btn-secondary">Refresh Users</button>
+              </div>
+            </div>
+            <div id="userManagementList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Local Solutions</p>
+                <h3>Supabase Solution Management</h3>
+              </div>
+            </div>
+            <div class="local-solution-toolbar">
+              <label>
+                <span>Search Solution</span>
+                <input id="localSolutionSearch" type="search" placeholder="Search offering, solution, tag, provider" />
+              </label>
+              <label>
+                <span>Solution Provider</span>
+                <select id="localSolutionProviderFilter">
+                  <option value="all">All solution providers</option>
+                </select>
+              </label>
+            </div>
+            <div id="localSolutionsList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Local Needs</p>
+                <h3>Supabase Need Management</h3>
+              </div>
+            </div>
+            <div class="local-solution-toolbar">
+              <label>
+                <span>Search Need</span>
+                <input id="localNeedSearch" type="search" placeholder="Search organisation, statement, thematic area, keyword" />
+              </label>
+              <label>
+                <span>Need Category</span>
+                <select id="localNeedCategoryFilter">
+                  <option value="all">All need categories</option>
+                </select>
+              </label>
+            </div>
+            <div id="localNeedsList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Pending Intake</p>
+                <h3>Needs Awaiting Admin Approval</h3>
+              </div>
+            </div>
+            <div id="pendingNeedsList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Curator Requests</p>
+                <h3>Status Updates Awaiting Approval</h3>
+              </div>
+            </div>
+            <div id="pendingUpdatesList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Shared Forms</p>
+                <h3>Pending Need and Solution Submissions</h3>
+              </div>
+            </div>
+            <div id="pendingFormSubmissionsList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Match QA</p>
+                <h3>Conflict Cases and Classification Review</h3>
+              </div>
+            </div>
+            <div id="aiReviewList" class="stack-list"></div>
+          </section>
+
+        </div>
+      </section>
+    </main>
+    </section>
+  </div>
+
+  <dialog id="needDialog" class="modal">
+    <form id="needForm" class="modal-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">New Inbound Need</p>
+          <h3>Submit for Admin Approval</h3>
+        </div>
+        <button type="button" id="closeNeedDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div class="form-grid">
+        <label><span>Seeker Organisation</span><input name="organization_name" required /></label>
+        <label><span>Contact Person</span><input name="contact_person" required /></label>
+        <label><span>Email</span><input name="seeker_email" type="email" required /></label>
+        <label><span>Phone</span><input name="seeker_phone" /></label>
+        <label><span>State</span><input name="state" required /></label>
+        <label><span>District</span><input name="district" /></label>
+        <label class="wide"><span>Challenge / Need Statement</span><textarea name="problem_statement" rows="5" required></textarea></label>
+        <label class="wide"><span>Initial Categories</span><input name="categories" placeholder="Capacity building, Training" /></label>
+      </div>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary">Submit to Admin Queue</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="missingOrgDialog" class="modal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Supplier Missing</p>
+          <h3>Create the Organisation on GRE First</h3>
+        </div>
+        <button type="button" id="closeMissingOrgDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <p id="missingOrgText" class="helper-text">This form can sync only for organisations already present in the approved GRE supplier list. Please create the organisation account on the GRE platform first, then return and submit the form.</p>
+    </div>
+  </dialog>
+
+  <dialog id="registerDialog" class="modal">
+    <form id="registerUserForm" class="modal-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Create Account</p>
+          <h3>Register New User</h3>
+        </div>
+        <button type="button" id="closeRegisterDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div class="form-grid">
+        <label><span>First Name</span><input name="first_name" required /></label>
+        <label><span>Full Name</span><input name="full_name" required /></label>
+        <label><span>Email</span><input name="email" type="email" required /></label>
+        <label><span>Phone</span><input name="phone" /></label>
+        <label class="wide"><span>Password</span><input name="password" type="password" required /></label>
+      </div>
+      <p id="registerStatus" class="helper-text"></p>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary">Create Account</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="passwordHelpDialog" class="modal">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Password Help</p>
+          <h3>Reset Access</h3>
+        </div>
+        <button type="button" id="closePasswordHelpDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div class="auth-support-grid">
+        <form id="requestResetForm" class="action-form auth-support-card">
+          <h4>Request Reset Code</h4>
+          <label><span>Email for Reset Code</span><input name="email" type="email" required /></label>
+          <div class="card-actions">
+            <button type="submit" class="btn btn-secondary">Send Reset Code</button>
+          </div>
+        </form>
+        <form id="resetPasswordForm" class="action-form auth-support-card">
+          <h4>Set New Password</h4>
+          <label><span>Email</span><input name="email" type="email" required /></label>
+          <label><span>Reset Code</span><input name="code" required /></label>
+          <label><span>New Password</span><input name="new_password" type="password" required /></label>
+          <div class="card-actions">
+            <button type="submit" class="btn btn-primary">Reset Password</button>
+          </div>
+        </form>
+      </div>
+      <p id="resetStatus" class="helper-text"></p>
+    </div>
+  </dialog>
+
+  <dialog id="workbenchDialog" class="modal">
+    <article class="panel modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Action Workbench</p>
+          <h3>Curator and Admin Actions</h3>
+        </div>
+        <button type="button" id="closeWorkbenchDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div id="actionWorkbench" class="stack-list"></div>
+    </article>
+  </dialog>
+
+  <dialog id="matchDetailDialog" class="modal">
+    <article class="panel modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">GRE Knowledge Match</p>
+          <h3 id="matchDetailTitle">Match Details</h3>
+        </div>
+        <button type="button" id="closeMatchDetailDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div id="matchDetailBody" class="need-detail-stack"></div>
+    </article>
+  </dialog>
+
+  <dialog id="mailReviewDialog" class="modal">
+    <article class="modal-card modal-card-wide mail-review-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow" id="mailReviewEyebrow">Provider Outreach</p>
+          <h3 id="mailReviewTitle">Review the GRE outreach email</h3>
+        </div>
+        <button type="button" id="closeMailReviewDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div class="mail-review-grid">
+        <article class="mail-review-meta-card">
+          <span>From</span>
+          <strong id="mailReviewFrom"></strong>
+        </article>
+        <article class="mail-review-meta-card">
+          <span>To</span>
+          <strong id="mailReviewTo"></strong>
+        </article>
+        <article class="mail-review-meta-card">
+          <span>Cc</span>
+          <strong id="mailReviewCc"></strong>
+        </article>
+        <article class="mail-review-meta-card">
+          <span>Reply-To</span>
+          <strong id="mailReviewReplyTo"></strong>
+        </article>
+      </div>
+      <div class="mail-review-body-shell">
+        <span>Mail Text</span>
+        <div id="mailReviewBody" class="mail-review-body"></div>
+      </div>
+      <p id="mailReviewStatus" class="helper-text"></p>
+      <div class="modal-actions">
+        <button type="button" id="confirmMailReviewBtn" class="btn btn-primary">Send</button>
+        <button type="button" id="cancelMailReviewBtn" class="btn btn-secondary">Cancel</button>
+      </div>
+    </article>
+  </dialog>
+
+  <dialog id="submissionReviewDialog" class="modal">
+    <form id="submissionReviewForm" class="modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Shared Form Review</p>
+          <h3 id="submissionReviewTitle">View and Edit Submission</h3>
+        </div>
+        <button type="button" id="closeSubmissionReviewDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div id="submissionReviewMeta" class="detail-list review-meta-list"></div>
+      <div class="form-grid">
+        <input type="hidden" name="submission_id" />
+        <label>
+          <span>Organisation Name</span>
+          <input name="organization_name" required />
+        </label>
+        <label>
+          <span>Approved GRE Supplier</span>
+          <select id="submissionReviewTraderSelect" name="existing_trader_id" required></select>
+        </label>
+        <label class="wide">
+          <span>Admin Review Notes</span>
+          <textarea name="admin_review_notes" rows="3" placeholder="Optional notes for the submission record"></textarea>
+        </label>
+      </div>
+        <section class="panel panel-soft">
+          <div class="panel-head panel-head-tight">
+            <div>
+              <p class="eyebrow">Editable Fields</p>
+              <h4 id="submissionStructuredTitle">Submission Details</h4>
+            </div>
+          </div>
+          <div id="submissionReviewNeedTools" class="card-actions hidden">
+            <button type="button" id="generateSubmissionNeedKeywordsBtn" class="btn btn-secondary">AI Assisted Keyword</button>
+            <button type="button" id="generateSubmissionNeedKeywordsPuterBtn" class="btn btn-secondary">Use Puter for Keywords</button>
+            <span id="submissionNeedToolsStatus" class="helper-text"></span>
+          </div>
+          <div id="submissionReviewFields" class="form-grid"></div>
+        </section>
+      <section id="submissionReviewAttachmentsSection" class="panel panel-soft">
+        <div class="panel-head panel-head-tight">
+          <div>
+            <p class="eyebrow">Attachments</p>
+            <h4>Current Files and Replacements</h4>
+          </div>
+        </div>
+        <div id="submissionReviewAttachments" class="form-grid"></div>
+      </section>
+      <details class="submission-json-panel">
+        <summary>Advanced JSON View</summary>
+        <label class="wide">
+          <span>Submission Payload</span>
+          <textarea id="submissionPayloadEditor" name="payload_json" rows="18" spellcheck="false"></textarea>
+        </label>
+      </details>
+      <p id="submissionReviewStatus" class="helper-text"></p>
+      <div class="modal-actions modal-actions-spread">
+        <button type="button" id="saveSubmissionReviewBtn" class="btn btn-secondary">Save Changes</button>
+        <div class="card-actions">
+          <button type="button" id="rejectSubmissionReviewBtn" class="btn btn-danger">Reject</button>
+          <button type="button" id="approveSubmissionReviewBtn" class="btn btn-primary">Approve</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="localSolutionReviewDialog" class="modal">
+    <form id="localSolutionReviewForm" class="modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Local Solution Review</p>
+          <h3>Edit Supabase Solution</h3>
+        </div>
+        <button type="button" id="closeLocalSolutionReviewDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div id="localSolutionReviewMeta" class="detail-list review-meta-list"></div>
+      <div class="form-grid">
+        <input type="hidden" name="offering_id" />
+        <label><span>Organisation Name</span><input name="organization_name" /></label>
+        <label><span>Contact Name</span><input name="submitter_name" /></label>
+        <label><span>Contact Email</span><input name="submitter_email" type="email" /></label>
+        <label><span>Contact Phone</span><input name="submitter_phone" /></label>
+        <label><span>Solution Name</span><input name="solution_name" /></label>
+        <label><span>Offering Category</span><input name="offering_category" /></label>
+        <label><span>Offering Type</span><input name="offering_type" /></label>
+        <label><span>Offering Name</span><input name="offering_name" /></label>
+        <label class="wide"><span>Solution Description</span><textarea name="about_solution_text" rows="3"></textarea></label>
+        <label class="wide"><span>Offering Description</span><textarea name="about_offering_text" rows="4"></textarea></label>
+        <label><span>Facilitator Name</span><input name="trainer_name" /></label>
+        <label><span>Facilitator Email</span><input name="trainer_email" type="email" /></label>
+        <label><span>Facilitator Phone</span><input name="trainer_phone" /></label>
+        <label class="wide"><span>Facilitator Details</span><textarea name="trainer_details_text" rows="3"></textarea></label>
+        <label class="wide"><span>Languages</span><input name="languages" placeholder="Comma-separated" /></label>
+        <label class="wide"><span>Geographies</span><textarea name="geographies" rows="2" placeholder="Separate geographies with semicolons"></textarea></label>
+        <label><span>Duration</span><input name="duration" /></label>
+        <label><span>Duration Units</span><input name="duration_unit" /></label>
+        <label class="wide"><span>Prerequisites - Participants and Training</span><textarea name="prerequisites" rows="3"></textarea></label>
+        <label class="wide"><span>Location Availability</span><input name="location_availability" placeholder="Comma-separated" /></label>
+        <label><span>Service Cost</span><input name="service_cost" /></label>
+        <label><span>Service Cost Units</span><input name="service_cost_unit" /></label>
+        <label class="wide"><span>Remarks on Cost</span><textarea name="cost_remarks" rows="2"></textarea></label>
+        <label><span>Support Post Service</span><input name="support_post_service" /></label>
+        <label><span>Support Post Service Cost</span><input name="support_post_service_cost" /></label>
+        <label><span>Delivery Mode</span><input name="delivery_mode" /></label>
+        <label><span>Certification Offered</span><input name="certification_offered" /></label>
+        <label><span>Product Cost</span><input name="product_cost" /></label>
+        <label><span>Grade/Capacity</span><input name="grade_capacity" /></label>
+        <label><span>Lead Time</span><input name="lead_time" /></label>
+        <label class="wide"><span>Support Details</span><textarea name="support_details" rows="3"></textarea></label>
+        <label class="wide"><span>Contact Details</span><textarea name="contact_details" rows="3"></textarea></label>
+        <label class="wide"><span>Tags</span><input name="tags" placeholder="Comma-separated" /></label>
+      </div>
+      <section class="panel panel-soft">
+        <div class="panel-head panel-head-tight">
+          <div>
+            <p class="eyebrow">Attachments</p>
+            <h4>Current Files and Replacements</h4>
+          </div>
+        </div>
+        <div id="localSolutionReviewAttachments" class="form-grid"></div>
+      </section>
+      <p id="localSolutionReviewStatus" class="helper-text"></p>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary">Save Solution</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="localNeedReviewDialog" class="modal">
+    <form id="localNeedReviewForm" class="modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Local Need Review</p>
+          <h3>Edit Local Need</h3>
+        </div>
+        <button type="button" id="closeLocalNeedReviewDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div id="localNeedReviewMeta" class="detail-list review-meta-list"></div>
+      <div class="form-grid">
+        <input type="hidden" name="need_id" />
+        <label>
+          <span>Organisation Name</span>
+          <input name="organization_name" required />
+        </label>
+        <label>
+          <span>Contact Person</span>
+          <input name="contact_person" />
+        </label>
+        <label>
+          <span>Email</span>
+          <input name="seeker_email" type="email" required />
+        </label>
+        <label>
+          <span>Phone</span>
+          <input name="seeker_phone" />
+        </label>
+        <label>
+          <span>Need Category</span>
+          <select name="submitted_offering_category">
+            <option value="Service offerings">Service</option>
+            <option value="Product offerings">Product</option>
+            <option value="Knowledge offerings">Knowledge</option>
+          </select>
+        </label>
+        <label>
+          <span>Need Type</span>
+          <input name="submitted_offering_type" />
+        </label>
+        <label class="wide">
+          <span>Thematic Area</span>
+          <input name="submitted_thematic_area" />
+        </label>
+        <label class="wide">
+          <span>Place of Deployment</span>
+          <textarea name="deployment_locations" rows="3"></textarea>
+        </label>
+        <label class="wide">
+          <span>Keywords for Need Statement</span>
+          <textarea name="submitted_keywords" rows="3"></textarea>
+        </label>
+        <label class="wide">
+          <span>Need Statement</span>
+          <textarea name="problem_statement" rows="6" required></textarea>
+        </label>
+      </div>
+      <p id="localNeedReviewStatus" class="helper-text"></p>
+      <div class="modal-actions modal-actions-spread">
+        <button type="button" id="deleteLocalNeedBtn" class="btn btn-danger">Delete Need</button>
+        <button type="submit" class="btn btn-primary">Save Need</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./app.js?v=20260602gre37"></script>
+</body>
+</html>

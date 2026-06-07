@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GRE Offering Detail</title>
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://grameee.org/supabase-config.js?v=20260519gre1"></script>
+  <script src="https://grameee.org/auth.js?v=20260519gre1" defer></script>
+  <script src="./config.js?v=20260508c"></script>
+  <style>
+    :root {
+      --bg: #f4f7f1;
+      --panel: #ffffff;
+      --ink: #1f2b1f;
+      --muted: #5e6d5e;
+      --line: rgba(45, 85, 54, 0.14);
+      --green: #2e6a3c;
+      --green-soft: rgba(46, 106, 60, 0.12);
+      --shadow: 0 18px 40px rgba(28, 62, 36, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Manrope", "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f7fbf4, #eef4ea);
+      color: var(--ink);
+    }
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+    .grameee-site-header {
+      width: min(1280px, calc(100vw - 32px));
+      margin: 24px auto 0;
+      padding: 16px 22px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      position: sticky;
+      top: 12px;
+      z-index: 40;
+      background: rgba(247, 252, 247, 0.84);
+      backdrop-filter: blur(18px);
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      border-radius: 22px;
+      box-shadow: 0 10px 26px rgba(36, 73, 45, 0.08);
+    }
+    .grameee-brand {
+      display: inline-flex;
+      flex-direction: column;
+      color: #173b36;
+      max-width: 320px;
+    }
+    .grameee-brand strong {
+      display: block;
+      font-family: "Libre Baskerville", Georgia, serif;
+      font-size: 1rem;
+    }
+    .grameee-brand small {
+      display: block;
+      color: #5e746a;
+      font-size: 0.82rem;
+    }
+    .grameee-site-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      font-size: 0.95rem;
+      color: #5e746a;
+      align-items: center;
+    }
+    .grameee-site-nav a:hover,
+    .grameee-site-nav a:focus-visible,
+    .grameee-user-trigger:hover,
+    .grameee-user-trigger:focus-visible {
+      color: #1f5b37;
+    }
+    .grameee-user-menu { position: relative; }
+    .grameee-user-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      list-style: none;
+      cursor: pointer;
+      color: #1f5b37;
+      font-weight: 600;
+    }
+    .grameee-user-trigger::-webkit-details-marker { display: none; }
+    .grameee-user-dropdown {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      min-width: 220px;
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+      border-radius: 16px;
+      background: rgba(247, 252, 247, 0.98);
+      border: 1px solid rgba(36, 73, 45, 0.1);
+      box-shadow: 0 14px 28px rgba(36, 73, 45, 0.12);
+      z-index: 45;
+    }
+    .grameee-user-action {
+      appearance: none;
+      border: none;
+      background: none;
+      text-align: left;
+      padding: 10px 12px;
+      border-radius: 12px;
+      font: inherit;
+      color: #22313f;
+      cursor: pointer;
+    }
+    .grameee-user-action:hover,
+    .grameee-user-action:focus-visible {
+      background: #eef6ef;
+      color: #1f5b37;
+    }
+    .page-shell {
+      width: min(1280px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 48px;
+    }
+    .hero,
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .hero {
+      padding: 24px 28px;
+    }
+    .detail-hero-top,
+    .page-bottom-actions,
+    .actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .detail-hero-top {
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .hero h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 3vw, 2.75rem);
+      line-height: 1.08;
+    }
+    .hero-copy,
+    .section-copy,
+    .notice {
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 1rem;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+      gap: 22px;
+      margin-top: 24px;
+      align-items: start;
+    }
+    .stack {
+      display: grid;
+      gap: 22px;
+    }
+    .panel-pad {
+      padding: 24px 26px;
+    }
+    .section-title {
+      margin: 0 0 8px;
+      font-size: 1.24rem;
+    }
+    .detail-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+    }
+    .detail-table th,
+    .detail-table td {
+      text-align: left;
+      vertical-align: top;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .detail-table th {
+      width: 34%;
+      color: var(--muted);
+      font-size: 0.84rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding-right: 18px;
+    }
+    .detail-table td {
+      font-size: 0.98rem;
+      line-height: 1.55;
+    }
+    .detail-table tr:last-child th,
+    .detail-table tr:last-child td {
+      border-bottom: none;
+    }
+    .btn,
+    .result-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 44px;
+      padding: 0 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(46, 106, 60, 0.18);
+      background: #fff;
+      color: var(--green);
+      text-decoration: none;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn.hero-link {
+      color: var(--ink);
+    }
+    .result-link {
+      min-height: auto;
+      padding: 8px 12px;
+    }
+    .page-bottom-actions {
+      margin-top: 22px;
+      justify-content: flex-start;
+    }
+    .empty {
+      min-height: 280px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      color: var(--muted);
+    }
+    @media (max-width: 920px) {
+      .grameee-site-header {
+        width: min(100vw - 20px, 1280px);
+        padding: 14px 16px;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .grameee-site-nav {
+        gap: 14px;
+      }
+      .page-shell {
+        width: min(100vw - 20px, 1280px);
+        padding: 16px 0 30px;
+      }
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+      .detail-hero-top {
+        justify-content: flex-start;
+      }
+      .detail-table th,
+      .detail-table td {
+        display: block;
+        width: 100%;
+      }
+      .detail-table th {
+        padding-bottom: 4px;
+        border-bottom: none;
+      }
+      .detail-table td {
+        padding-top: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="grameee-site-header">
+    <a class="grameee-brand" href="https://grameee.org/">
+      <strong>GramEEE</strong>
+      <small>Gram Eco Entrepreneur Ecosystem</small>
+    </a>
+    <nav class="grameee-site-nav" aria-label="GramEEE">
+      <a href="https://grameee.org/">About</a>
+      <a href="https://grameee.org/tools.html">Tools</a>
+      <a class="auth-only-link" data-privilege="ecosystem" href="https://ecosystem.grameee.org/" hidden>Eco System</a>
+      <a class="auth-only-link" data-privilege="askGre" href="https://askgre.grameee.org/" hidden>Ask GRE</a>
+      <a class="auth-only-link" data-privilege="offerSolutions" href="https://solution.grameee.org/" hidden>Offer Solutions</a>
+      <a class="auth-only-link" data-privilege="askHelp" href="https://help.grameee.org/" hidden>Ask Help</a>
+      <a class="auth-only-link" data-privilege="needsMap" href="https://needs.grameee.org/" hidden>Needs Map</a>
+      <a class="auth-only-link" data-privilege="gre" href="https://gre.grameee.org/" hidden>GRE</a>
+      <a data-login-link href="https://grameee.org/login.html">Login</a>
+    </nav>
+  </header>
+  <main class="page-shell">
+    <div id="offeringDetailMount" class="hero empty">Loading offering details…</div>
+  </main>
+
+  <script type="module">
+    const APP_CONFIG = window.APP_CONFIG || {};
+    const mount = document.getElementById("offeringDetailMount");
+    const params = new URLSearchParams(window.location.search);
+    const offeringId = params.get("offering_id");
+
+    const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#39;",
+    }[char]));
+
+    const normalizeText = (value) => value === null || value === undefined ? "" : String(value).trim();
+    const parseArray = (value) => Array.isArray(value) ? value.filter(Boolean) : typeof value === "string" ? value.split(/[;,|]/).map((item) => item.trim()).filter(Boolean) : [];
+    const parseContactDetailParts = (value) => {
+      const text = normalizeText(value);
+      if (!text) return { text: "", name: "", email: "", phone: "" };
+      const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+      const phoneMatch = text.match(/(?:\+?\d[\d\s().-]{7,}\d)/);
+      const lines = text.split(/\r?\n|[,;|]/).map((item) => normalizeText(item)).filter(Boolean);
+      const firstLine = lines[0] || "";
+      const looksLikeName = firstLine && !/@/.test(firstLine) && !/\d{5,}/.test(firstLine);
+      return {
+        text,
+        name: looksLikeName ? firstLine : "",
+        email: emailMatch ? emailMatch[0] : "",
+        phone: phoneMatch ? phoneMatch[0].trim() : "",
+      };
+    };
+
+    function buildRow(label, value, isLink = false) {
+      const clean = Array.isArray(value) ? value.join(", ") : normalizeText(value);
+      if (!clean) return "";
+      return `<tr><th>${esc(label)}</th><td>${isLink ? `<a class="result-link" href="${esc(clean)}" target="_blank" rel="noreferrer">Open link</a>` : esc(clean)}</td></tr>`;
+    }
+
+    function renderDetail(match) {
+      const offeringName = normalizeText(match.offering_name || match.solution?.solution_name || "Unnamed offering");
+      const providerName = normalizeText(match.trader?.organisation_name || match.trader?.trader_name || "Provider not mapped");
+      const heroCopy = normalizeText(match.about_offering_text || match.solution?.about_solution_text || "No description is available for this offering yet.");
+      const solutionText = normalizeText(match.solution?.about_solution_text || match.about_offering_text || "No additional solution description is available.");
+      const greHref = normalizeText(match.gre_link || "");
+      const contactParts = parseContactDetailParts(match.contact_details);
+      const isProductOffering = /product/i.test(normalizeText(match.offering_group || match.offering_category));
+      const offeringRows = [
+        buildRow("Offering Category", match.offering_category),
+        buildRow("Offering Group", match.offering_group || match.ai_offering_kind),
+        buildRow("Offering Type", match.offering_type),
+        buildRow("6M Domain", match.domain_6m),
+        buildRow("Primary Value Chain", match.primary_valuechain),
+        buildRow("Primary Application", match.primary_application),
+        buildRow("All Value Chains", parseArray(match.valuechains)),
+        buildRow("All Applications", parseArray(match.applications)),
+        buildRow("Tags", parseArray(match.tags)),
+        buildRow("Audience", match.audience),
+        buildRow("Grade or Capacity", match.grade_or_capacity || match.capacity),
+        buildRow("Product Cost", match.product_cost || match.cost),
+        buildRow("Lead Time", match.lead_time),
+        buildRow("Support Details", match.support_details),
+        buildRow("Product Contact Details", match.contact_details),
+        buildRow("Product Brochure", match.product_brochure || match.brochure_link || match.document_link, true),
+      ].filter(Boolean).join("");
+
+      const providerRows = [
+        buildRow("Solution Name", match.solution?.solution_name || offeringName),
+        buildRow("Provider", providerName),
+        buildRow("Association Status", match.trader?.association_status),
+        buildRow("Email", isProductOffering ? (contactParts.email || match.trader?.email) : match.trader?.email),
+        buildRow("Website", match.trader?.website, true),
+        buildRow("Phone", isProductOffering ? (contactParts.phone || match.trader?.mobile || match.trader?.phone) : (match.trader?.mobile || match.trader?.phone || match.contact_details)),
+        buildRow("Point of Contact", isProductOffering ? (contactParts.name || match.trader?.poc_name || match.point_of_contact || match.contact_person) : (match.trader?.poc_name || match.point_of_contact || match.contact_person)),
+        buildRow("Contact Details", isProductOffering ? match.contact_details : ""),
+        buildRow("Tagline", match.tagline),
+      ].filter(Boolean).join("");
+
+      mount.className = "";
+      mount.innerHTML = `
+        <section class="hero">
+          <div class="detail-hero-top">
+            <a class="btn hero-link" href="./">Back to Search</a>
+            ${greHref ? `<a class="btn hero-link" href="${esc(greHref)}" target="_blank" rel="noreferrer">View on GRE</a>` : ""}
+          </div>
+          <h1>${esc(offeringName)}</h1>
+          <p class="hero-copy">${esc(heroCopy)}</p>
+        </section>
+        <section class="detail-grid">
+          <section class="panel panel-pad">
+            <h2 class="section-title">Offering Details</h2>
+            <p class="section-copy">Only the parameters relevant to this offering are shown below.</p>
+            <table class="detail-table"><tbody>${offeringRows || `<tr><th>Offering Details</th><td>Not available</td></tr>`}</tbody></table>
+          </section>
+          <section class="stack">
+            <section class="panel panel-pad">
+              <h2 class="section-title">Provider and Solution</h2>
+              <table class="detail-table"><tbody>${providerRows || `<tr><th>Provider and Solution</th><td>Not available</td></tr>`}</tbody></table>
+              <div style="margin-top:18px">
+                <h3 class="section-title">About the Solution</h3>
+                <p class="section-copy" style="margin-bottom:0">${esc(solutionText)}</p>
+              </div>
+            </section>
+          </section>
+        </section>
+        <div class="page-bottom-actions">
+          <a class="btn hero-link" href="./">Back to Search</a>
+        </div>
+      `;
+    }
+
+    async function loadFromSupabase() {
+      if (!APP_CONFIG.SUPABASE_URL || !APP_CONFIG.SUPABASE_ANON_KEY || !window.supabase?.createClient) {
+        throw new Error("Supabase is not configured.");
+      }
+      const client = window.supabase.createClient(APP_CONFIG.SUPABASE_URL, APP_CONFIG.SUPABASE_ANON_KEY);
+      const { data: offering, error } = await client.from("offerings").select("*").eq("offering_id", offeringId).maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!offering) throw new Error("Offering not found.");
+
+      const [traderRes, solutionRes] = await Promise.all([
+        offering.trader_id ? client.from("traders").select("*").eq("trader_id", offering.trader_id).maybeSingle() : Promise.resolve({ data: null }),
+        offering.solution_id ? client.from("solutions").select("*").eq("solution_id", offering.solution_id).maybeSingle() : Promise.resolve({ data: null }),
+      ]);
+
+      return {
+        ...offering,
+        trader: traderRes.data || null,
+        solution: solutionRes.data || null,
+      };
+    }
+
+    async function init() {
+      if (!offeringId) {
+        mount.className = "hero empty";
+        mount.textContent = "No offering id was provided.";
+        return;
+      }
+
+      try {
+        const cached = sessionStorage.getItem(`gre-match-${offeringId}`);
+        if (cached) {
+          renderDetail(JSON.parse(cached));
+          return;
+        }
+      } catch {}
+
+      try {
+        const match = await loadFromSupabase();
+        renderDetail(match);
+      } catch (error) {
+        mount.className = "hero empty";
+        mount.textContent = error.message || "Could not load offering details.";
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GRE MIS Admin Sync</title>
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://js.puter.com/v2/"></script>
+  <script src="./grameee-gre-bar.js?v=20260519a" defer></script>
+  <script src="./config.js?v=20260511a"></script>
+  <link rel="stylesheet" href="./styles.css?v=20260511a" />
+</head>
+<body class="admin-page">
+  <header class="grameee-site-header">
+    <a class="grameee-brand" href="https://grameee.org/">
+      <strong>GramEEE</strong>
+      <small>Gram Eco Entrepreneur Ecosystem</small>
+    </a>
+    <nav class="grameee-site-nav" aria-label="GramEEE">
+      <a href="https://grameee.org/">About</a>
+      <a href="https://grameee.org/tools.html">Tools</a>
+      <a href="https://ecosystem.grameee.org/">Eco System</a>
+      <a href="https://askgre.grameee.org/">Ask GRE</a>
+      <a href="https://solution.grameee.org/">Offer Solutions</a>
+      <a href="https://help.grameee.org/">Ask Help</a>
+      <a href="https://needs.grameee.org/">Needs Map</a>
+      <a data-login-link href="https://grameee.org/login.html">Login</a>
+      <div class="grameee-auth-slot" data-gre-auth-slot hidden></div>
+    </nav>
+  </header>
+  <div class="shell">
+    <header class="masthead masthead-admin">
+      <div class="brand-block">
+        <img src="./assets/gre-logo.png" alt="GRE logo" class="brand-logo" />
+        <div>
+          <p class="eyebrow">Green Rural Economy</p>
+          <h1>Admin Sync</h1>
+          <p class="lede">Approval workspace for intake review, curator-submitted updates, GRE sync, and chatbot dataset refresh.</p>
+        </div>
+      </div>
+      <div class="hero-actions">
+        <a href="./index.html" class="btn btn-secondary">Back to Dashboard</a>
+      </div>
+    </header>
+
+    <main>
+      <section id="adminView" class="view active">
+        <div class="admin-grid admin-grid-top">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Admin Login</p>
+                <h3>Admin Sync</h3>
+              </div>
+              <span id="adminStatusChip" class="chip muted">Locked</span>
+            </div>
+            <form id="adminLoginForm" class="action-form">
+              <label>
+                <span>Username</span>
+                <input name="username" value="admin" readonly />
+              </label>
+              <label>
+                <span>Admin Password</span>
+                <input name="password" type="password" placeholder="Enter admin password" required />
+              </label>
+              <div class="card-actions">
+                <button type="submit" class="btn btn-primary">Sign In</button>
+                <button type="button" id="adminLogoutBtn" class="btn btn-secondary hidden">Sign Out</button>
+                <button type="button" id="refreshBtn" class="btn btn-secondary">Refresh Snapshot</button>
+              </div>
+              <p id="loginStatus" class="helper-text"></p>
+            </form>
+            <p id="adminStatusText" class="helper-text">Admin approval is required for new intake records and curator-submitted status updates.</p>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Session</p>
+                <h3>Admin Snapshot</h3>
+              </div>
+            </div>
+            <div id="sessionPanel" class="stack-list hidden">
+              <article class="stack-card">
+                <div class="status-row">
+                  <span class="status-pill good">Signed in</span>
+                </div>
+                <p id="datasetHeadline" class="helper-text">Admin sync workspace for approvals, GRE refresh, and chatbot data sync.</p>
+                <p id="datasetSubline" class="helper-text"></p>
+                <p id="sessionStatus" class="helper-text"></p>
+              </article>
+            </div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Conflict Assist</p>
+                <h3>Puter Review Route</h3>
+              </div>
+            </div>
+            <div class="taxonomy-grid">
+              <label>
+                <span>Puter Model</span>
+                <select id="puterModelSelect">
+                  <option value="">Default Puter model</option>
+                </select>
+              </label>
+              <div></div>
+              <button id="refreshPuterModelsBtn" class="btn btn-secondary">Refresh Puter Models</button>
+            </div>
+            <p id="puterStatus" class="helper-text">Use Puter review for flagged or weak classifications, then accept each recommendation field only if it is correct.</p>
+          </section>
+        </div>
+
+        <div id="metricsGrid" class="metrics-grid"></div>
+        <div class="admin-grid admin-grid-main">
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Inbound Sync</p>
+                <h3>Inbound Intake</h3>
+              </div>
+            </div>
+            <div class="taxonomy-grid">
+              <label>
+                <span>Inbound Workbook</span>
+                <input id="inboundWorkbookFile" type="file" accept=".xlsx,.xls" />
+              </label>
+              <label>
+                <span>AI Engine</span>
+                <select id="aiProviderSelect">
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="deepseek">DeepSeek</option>
+                </select>
+              </label>
+              <button id="uploadInboundBtn" class="btn btn-primary">Upload and Sync</button>
+              <button id="syncGreInboundsBtn" class="btn btn-secondary">Sync Latest from GRE</button>
+              <button id="refreshAiBtn" class="btn btn-secondary">Refresh AI Signals</button>
+            </div>
+            <p id="syncStatus" class="helper-text">Uploads add new inbounds, update changed rows for existing request IDs, and refresh AI need intelligence.</p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">GRE Chatbot Data</p>
+                <h3>Supplier and Solution Exports</h3>
+              </div>
+            </div>
+            <div class="taxonomy-grid">
+              <button id="syncGreChatbotBtn" class="btn btn-primary">Refresh Chatbot Dataset</button>
+              <button id="downloadGreTraderBtn" class="btn btn-secondary">Download Trader Data</button>
+              <button id="downloadGreSolutionBtn" class="btn btn-secondary">Download Solution Data</button>
+            </div>
+            <p id="chatbotSyncStatus" class="helper-text">Fetch the live GRE trader and solution exports, then update the GRE Chatbot Supabase dataset.</p>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Pending Intake</p>
+                <h3>Needs Awaiting Admin Approval</h3>
+              </div>
+            </div>
+            <div id="pendingNeedsList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Curator Requests</p>
+                <h3>Status Updates Awaiting Approval</h3>
+              </div>
+            </div>
+            <div id="pendingUpdatesList" class="stack-list"></div>
+          </section>
+
+          <section class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Match QA</p>
+                <h3>Conflict Cases and Classification Review</h3>
+              </div>
+            </div>
+            <div id="aiReviewList" class="stack-list"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js?v=20260511a"></script>
+</body>
+</html>
