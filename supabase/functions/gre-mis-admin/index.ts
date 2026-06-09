@@ -7568,36 +7568,57 @@ async function applyChatbotImportBundle(
       if (error) throw new Error(error.message);
     }
 
-    for (const rows of chunkArray(bundle.offerings)) {
-      const rowsWithImport = rows.map((row) => {
-        const cleanRow = { ...row };
-        const rawPayload = cleanRow.raw_payload as Record<string, unknown> | undefined;
-        if (rawPayload && typeof rawPayload === "object") {
-          const hasAnyColumn = (aliases: string[]) =>
-            aliases.some((alias) => Object.prototype.hasOwnProperty.call(rawPayload, alias));
-          if (!hasAnyColumn(["Service offering Brochure", "Service Offering Brochure", "Service Brochure", "ServiceBrochure"]))
-            delete cleanRow.service_brochure_url;
-          if (!hasAnyColumn(["Product Brochure", "Product Brochure URL", "Product Brochure Url", "ProductBrochure"]))
-            delete cleanRow.product_brochure_url;
-          if (!hasAnyColumn(["Knowledge Offering Content", "Knowledge Content URL", "Knowledge Content Url", "Knowledge Offering Content URL", "Knowledge Offering Content Url", "KnowledgeContent"]))
-            delete cleanRow.knowledge_content_url;
-          if (!hasAnyColumn(["Offering Link on GRE", "GRE Link", "Offering GRE Link", "Offering Link", "OfferingLinkOnGRE"]))
-            delete cleanRow.gre_link;
-        }
-        const existing = existingOfferingMap.get(requireString(cleanRow.offering_id)) as Record<string, unknown> | undefined;
-        if (existing) {
-          const existingRawPayload = existing.raw_payload as Record<string, unknown> | undefined;
-          const manualFields = (existingRawPayload?.last_manual_edit as Record<string, unknown> | undefined)?.manual_fields as string[] | undefined;
-          if (manualFields?.length) {
-            for (const field of manualFields) {
-              delete cleanRow[field];
+    const changedOfferings = bundle.offerings.filter((row) => {
+      const id = requireString(row.offering_id);
+      return id && changedOfferingIds.includes(id);
+    });
+    if (changedOfferings.length) {
+      for (const rows of chunkArray(changedOfferings)) {
+        const rowsWithImport = rows.map((row) => {
+          const cleanRow = { ...row };
+          const rawPayload = cleanRow.raw_payload as Record<string, unknown> | undefined;
+          if (rawPayload && typeof rawPayload === "object") {
+            const hasAnyColumn = (aliases: string[]) =>
+              aliases.some((alias) => Object.prototype.hasOwnProperty.call(rawPayload, alias));
+            if (!hasAnyColumn(["Service offering Brochure", "Service Offering Brochure", "Service Brochure", "ServiceBrochure"]))
+              delete cleanRow.service_brochure_url;
+            if (!hasAnyColumn(["Product Brochure", "Product Brochure URL", "Product Brochure Url", "ProductBrochure"]))
+              delete cleanRow.product_brochure_url;
+            if (!hasAnyColumn(["Knowledge Offering Content", "Knowledge Content URL", "Knowledge Content Url", "Knowledge Offering Content URL", "Knowledge Offering Content Url", "KnowledgeContent"]))
+              delete cleanRow.knowledge_content_url;
+            if (!hasAnyColumn(["Offering Link on GRE", "GRE Link", "Offering GRE Link", "Offering Link", "OfferingLinkOnGRE"]))
+              delete cleanRow.gre_link;
+          }
+          const existing = existingOfferingMap.get(requireString(cleanRow.offering_id)) as Record<string, unknown> | undefined;
+          if (existing) {
+            const existingRawPayload = existing.raw_payload as Record<string, unknown> | undefined;
+            const manualFields = (existingRawPayload?.last_manual_edit as Record<string, unknown> | undefined)?.manual_fields as string[] | undefined;
+            if (manualFields?.length) {
+              for (const field of manualFields) {
+                delete cleanRow[field];
+              }
             }
           }
-        }
-        return { ...cleanRow, last_import_id: importId };
-      });
-      const { error } = await adminClient.from("offerings").upsert(rowsWithImport, { onConflict: "offering_id" });
-      if (error) throw new Error(error.message);
+          return { ...cleanRow, last_import_id: importId };
+        });
+        const { error } = await adminClient.from("offerings").upsert(rowsWithImport, { onConflict: "offering_id" });
+        if (error) throw new Error(error.message);
+      }
+    }
+    const unchangedOfferingIds = bundle.offerings
+      .filter((row) => {
+        const id = requireString(row.offering_id);
+        return id && !changedOfferingIds.includes(id);
+      })
+      .map((row) => requireString(row.offering_id));
+    if (unchangedOfferingIds.length) {
+      for (const ids of chunkArray(unchangedOfferingIds)) {
+        const { error } = await adminClient
+          .from("offerings")
+          .update({ last_import_id: importId })
+          .in("offering_id", ids);
+        if (error) throw new Error(error.message);
+      }
     }
 
     if (changedOfferingIds.length) {
