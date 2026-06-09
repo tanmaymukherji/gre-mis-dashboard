@@ -7496,6 +7496,7 @@ async function applyChatbotImportBundle(
   },
   fileNames: { solutionFileName: string; traderFileName: string },
   provider: string,
+  skipEnrichment = false,
 ) {
   const { data: importRow, error: importError } = await adminClient
     .from("data_imports")
@@ -7622,7 +7623,7 @@ async function applyChatbotImportBundle(
       }
     }
 
-    if (changedOfferingIds.length) {
+    if (changedOfferingIds.length && !skipEnrichment) {
       const { data: offeringRows, error: offeringError } = await adminClient
         .from("offerings")
         .select("*")
@@ -7934,7 +7935,7 @@ async function uploadChatbotNormalized(
   const summary = await applyChatbotImportBundle(bundle, {
     solutionFileName: solutionFileName || "normalized_solutions.json",
     traderFileName: traderFileName || "normalized_traders.json",
-  }, provider);
+  }, provider, true);
   return { ok: true, summary };
 }
 
