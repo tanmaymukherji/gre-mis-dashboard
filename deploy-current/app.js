@@ -3558,6 +3558,10 @@ class GreMisStore {
     return this.callAdmin("uploadChatbotNormalized", { traders, solutions, offerings, solutionFileName, traderFileName, aiProvider }, true);
   }
 
+  async refreshChatbotIntelligence(aiProvider) {
+    return this.callAdmin("refreshChatbotIntelligence", { aiProvider }, true);
+  }
+
   async downloadSeekerRequestTracker(seekerKey, includeClosed = false) {
     return this.callAdmin("downloadSeekerRequestTracker", { seekerKey, includeClosed });
   }
@@ -9037,6 +9041,19 @@ function bindStaticEvents() {
     const result = await store.downloadGreChatbotReport("solution");
     downloadBase64Workbook(result.download);
     if (statusEl) statusEl.textContent = `Downloaded ${result.download?.fileName || "solution workbook"}.`;
+  }));
+
+  byId("refreshChatbotAiBtn")?.addEventListener("click", safeAsync(async () => {
+    if (!hasAdminLikeAccess()) {
+      toast("Login as admin or moderator first.");
+      return;
+    }
+    const statusEl = byId("chatbotSyncStatus");
+    const provider = byId("aiProviderSelect")?.value || "openai";
+    if (statusEl) statusEl.textContent = "Refreshing AI signals for uploaded offerings...";
+    const result = await store.refreshChatbotIntelligence(provider);
+    if (statusEl) statusEl.textContent = result.message || `AI signals refreshed for ${result.aiUpdatedCount || 0} offerings.`;
+    toast("Chatbot AI signals refreshed.");
   }));
 
   byId("downloadRequestTrackerBtn")?.addEventListener("click", safeAsync(async () => {

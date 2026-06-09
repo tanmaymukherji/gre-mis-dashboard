@@ -8138,6 +8138,44 @@ async function refreshNeedIntelligence(actorEmail: string, provider: string) {
   };
 }
 
+async function refreshChatbotIntelligence(provider: string) {
+  const { data: existing, error } = await adminClient
+    .from("offerings")
+    .select("offering_id, solution_id, trader_id, ai_enriched_at")
+    .filter("ai_enriched_at", "is", null)
+    .limit(250);
+
+  if (error) throw new Error(error.message);
+  const toEnrich = existing || [];
+  if (!toEnrich.length) return { ok: true, aiUpdatedCount: 0, message: "All offerings already have AI enrichment." };
+
+  const solutionIds = uniqueStrings(toEnrich.map((r) => requireString(r.solution_id)));
+  const traderIds = uniqueStrings(toEnrich.map((r) => requireString(r.trader_id)));
+  const [{ data: solutionRows }, { data: traderRows }] = await Promise.all([
+    solutionIds.length ? adminClient.from("solutions").select("*").in("solution_id", solutionIds) : Promise.resolve({ data: [] }),
+    traderIds.length ? adminClient.from("traders").select("*").in("trader_id", traderIds) : Promise.resolve({ data: [] }),
+  ]);
+  const solutionMap = new Map((solutionRows || []).map((r) => [requireString(r.solution_id), r]));
+  const traderMap = new Map((traderRows || []).map((r) => [requireString(r.trader_id), r]));
+
+  let count = 0;
+  for (const offeringRow of toEnrich) {
+    try {
+      const fullRow = offeringRow as Record<string, unknown>;
+      await enrichOfferingIntelligence(
+        fullRow,
+        solutionMap.get(requireString(fullRow.solution_id)) || null,
+        traderMap.get(requireString(fullRow.trader_id)) || null,
+        provider,
+      );
+      count += 1;
+    } catch {
+      // skip individual failures
+    }
+  }
+  return { ok: true, aiUpdatedCount: count, message: `AI chatbot intelligence refreshed for ${count} offerings.` };
+}
+
 async function assignCurator(needId: string, curatorId: string | null, actorEmail: string) {
   const { data: needRow, error: needFetchError } = await adminClient
     .from("gre_mis_needs")
@@ -9888,6 +9926,10 @@ Deno.serve(async (req) => {
 
       if (action === "refreshNeedIntelligence") {
         return jsonResponse(await refreshNeedIntelligence(adminActorEmail, requireString(payload.aiProvider) || defaultAiProvider));
+      }
+
+      if (action === "refreshChatbotIntelligence") {
+        return jsonResponse(await refreshChatbotIntelligence(requireString(payload.aiProvider) || defaultAiProvider));
       }
 
       if (action === "generateNeedSuggestedQuestions") {
