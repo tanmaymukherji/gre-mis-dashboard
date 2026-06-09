@@ -898,6 +898,10 @@ function isHindiSharedFormMode() {
   return normalizeSharedFormLanguage(state.formLanguage) === "hi";
 }
 
+function uniqueStrings(list) {
+  return [...new Set(list.filter(Boolean))];
+}
+
 function canonicalizeLanguageLabel(value) {
   const text = normalizeText(value);
   if (!text) return "";
