@@ -763,6 +763,7 @@
               <div class="admin-sync-actions">
                 <button id="uploadInboundBtn" class="btn btn-primary">Upload Workbook and Sync</button>
                 <button id="syncGreInboundsBtn" class="btn btn-secondary">Pull Latest Inbounds from GRE</button>
+                <button id="downloadGreInboundBtn" class="btn btn-secondary">Download Inbound from GRE</button>
                 <button id="refreshAiBtn" class="btn btn-secondary">Refresh Need AI Signals</button>
               </div>
             </div>
@@ -862,9 +863,22 @@
             </div>
             <div class="admin-sync-stack">
               <div class="admin-sync-block">
+                <label>
+                  <span>Solution Workbook</span>
+                  <input id="chatbotSolutionFile" type="file" accept=".xlsx,.xls" />
+                </label>
+              </div>
+              <div class="admin-sync-block">
+                <label>
+                  <span>Trader Workbook</span>
+                  <input id="chatbotTraderFile" type="file" accept=".xlsx,.xls" />
+                </label>
+              </div>
+              <div class="admin-sync-block">
                 <p class="helper-text">Use these actions to refresh the supplier, solution, and offering exports that support GRE knowledge search and chatbot responses.</p>
               </div>
               <div class="admin-sync-actions">
+                <button id="uploadChatbotBtn" class="btn btn-primary">Upload and Sync</button>
                 <button id="syncGreChatbotBtn" class="btn btn-primary">Refresh Chatbot Dataset</button>
                 <button id="downloadGreTraderBtn" class="btn btn-secondary">Download Trader Data</button>
                 <button id="downloadGreSolutionBtn" class="btn btn-secondary">Download Solution Data</button>
@@ -1334,6 +1348,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260607gre52"></script>
+  <script type="module" src="./app.js?v=20260608gre57"></script>
 </body>
 </html>

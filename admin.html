@@ -144,6 +144,7 @@
               </label>
               <button id="uploadInboundBtn" class="btn btn-primary">Upload and Sync</button>
               <button id="syncGreInboundsBtn" class="btn btn-secondary">Sync Latest from GRE</button>
+              <button id="downloadGreInboundBtn" class="btn btn-secondary">Download Inbound from GRE</button>
               <button id="refreshAiBtn" class="btn btn-secondary">Refresh AI Signals</button>
             </div>
             <p id="syncStatus" class="helper-text">Uploads add new inbounds, update changed rows for existing request IDs, and refresh AI need intelligence.</p>
@@ -157,6 +158,15 @@
               </div>
             </div>
             <div class="taxonomy-grid">
+              <label>
+                <span>Solution Workbook</span>
+                <input id="chatbotSolutionFile" type="file" accept=".xlsx,.xls" />
+              </label>
+              <label>
+                <span>Trader Workbook</span>
+                <input id="chatbotTraderFile" type="file" accept=".xlsx,.xls" />
+              </label>
+              <button id="uploadChatbotBtn" class="btn btn-primary">Upload and Sync</button>
               <button id="syncGreChatbotBtn" class="btn btn-primary">Refresh Chatbot Dataset</button>
               <button id="downloadGreTraderBtn" class="btn btn-secondary">Download Trader Data</button>
               <button id="downloadGreSolutionBtn" class="btn btn-secondary">Download Solution Data</button>
@@ -235,6 +245,6 @@
     </main>
   </div>
 
-  <script src="./app.js?v=20260607gre52"></script>
+  <script src="./app.js?v=20260608gre57"></script>
 </body>
 </html>

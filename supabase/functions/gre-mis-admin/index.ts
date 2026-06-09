@@ -6780,6 +6780,7 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
       updated_by: actorEmail,
       updated_at: nowIso,
       payload,
+      manual_fields: [],
     },
   };
 
@@ -6855,6 +6856,7 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
     service_brochure_url: nextServiceBrochureUrl || null,
     product_brochure_url: nextProductBrochureUrl || null,
     knowledge_content_url: nextKnowledgeContentUrl || null,
+    gre_link: requireString(payload.gre_link || offering.gre_link) || null,
     contact_details: contactDetails || requireString(originalPayload.contact_details || offering.contact_details) || null,
     search_document: buildSearchDocument([
       solutionName,
@@ -6875,6 +6877,17 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
     raw_payload: rawPayload,
     source_row_signature: stableRowSignature(rawPayload),
   };
+  const manualFields = Object.keys(offeringPatch).filter((key) => {
+    if (key === "raw_payload" || key === "source_row_signature" || key === "search_document" || key === "domain_6m") return false;
+    return String(offeringPatch[key as keyof typeof offeringPatch] ?? "") !== String(offering[key as keyof typeof offering] ?? "");
+  });
+  if (manualFields.length) {
+    rawPayload.last_manual_edit = {
+      ...(rawPayload.last_manual_edit as Record<string, unknown>),
+      manual_fields: manualFields,
+    };
+    offeringPatch.source_row_signature = stableRowSignature(rawPayload);
+  }
   const { error: offeringUpdateError } = await adminClient
     .from("offerings")
     .update(offeringPatch)
@@ -7384,7 +7397,7 @@ function normalizeSolutionRowForChatbot(row: Record<string, unknown>) {
     created_at_source: normalizeCell(row.SolutionCreationDate),
     about_solution_html: normalizeCell(row.AboutSolution),
     about_solution_text: stripHtml(normalizeCell(row.AboutSolution)),
-    solution_image_url: normalizeCell(row.SolutionImage),
+    solution_image_url: rowValue(row, ["SolutionImage", "Solution Image", "Solution Image URL", "Solution Image Url"]) || null,
     raw_payload: row,
   };
 }
@@ -7437,15 +7450,15 @@ function normalizeOfferingRowForChatbot(row: Record<string, unknown>) {
     certification_offered: normalizeCell(row["Certification Offered"]),
     cost_remarks: normalizeCell(row["Remarks on Cost"]),
     location_availability: normalizeCell(row["Location Availability"]),
-    service_brochure_url: normalizeCell(row["Service offering Brochure"]),
+    service_brochure_url: rowValue(row, ["Service offering Brochure", "Service Offering Brochure", "Service Brochure", "ServiceBrochure"]) || null,
     grade_capacity: normalizeCell(row["Grade/Capacity"]),
     product_cost: normalizeCell(row["Cost (Product)"]),
     lead_time: normalizeCell(row["Lead Time"]),
     support_details: normalizeCell(row.Support),
-    product_brochure_url: normalizeCell(row["Product Brochure"]),
-    knowledge_content_url: normalizeCell(row["Knowledge Offering Content"]),
+    product_brochure_url: rowValue(row, ["Product Brochure", "Product Brochure URL", "Product Brochure Url", "ProductBrochure"]) || null,
+    knowledge_content_url: rowValue(row, ["Knowledge Offering Content", "Knowledge Content URL", "Knowledge Content Url", "Knowledge Offering Content URL", "Knowledge Offering Content Url", "KnowledgeContent"]) || null,
     contact_details: normalizeCell(row["Contact Details"]),
-    gre_link: normalizeCell(row["Offering Link on GRE"]),
+    gre_link: rowValue(row, ["Offering Link on GRE", "GRE Link", "Offering GRE Link", "Offering Link", "OfferingLinkOnGRE"]) || null,
     source_row_signature: stableRowSignature(row),
     search_document: buildSearchDocument([
       normalizeCell(row.SolutionName),
@@ -7520,7 +7533,7 @@ async function applyChatbotImportBundle(
   const { data: existingOfferings, error: existingOfferingsError } = offeringIds.length
     ? await adminClient
       .from("offerings")
-      .select("offering_id, source_row_signature, ai_enriched_at")
+      .select("offering_id, source_row_signature, ai_enriched_at, raw_payload")
       .in("offering_id", offeringIds)
     : { data: [], error: null };
   if (existingOfferingsError) throw new Error(existingOfferingsError.message);
@@ -7540,12 +7553,49 @@ async function applyChatbotImportBundle(
     }
 
     for (const rows of chunkArray(bundle.solutions)) {
-      const { error } = await adminClient.from("solutions").upsert(rows, { onConflict: "solution_id" });
+      const rowsCleaned = rows.map((row) => {
+        const cleanRow = { ...row };
+        const rawPayload = cleanRow.raw_payload as Record<string, unknown> | undefined;
+        if (rawPayload && typeof rawPayload === "object") {
+          const hasAnyColumn = (aliases: string[]) =>
+            aliases.some((alias) => Object.prototype.hasOwnProperty.call(rawPayload, alias));
+          if (!hasAnyColumn(["SolutionImage", "Solution Image", "Solution Image URL", "Solution Image Url"]))
+            delete cleanRow.solution_image_url;
+        }
+        return cleanRow;
+      });
+      const { error } = await adminClient.from("solutions").upsert(rowsCleaned, { onConflict: "solution_id" });
       if (error) throw new Error(error.message);
     }
 
     for (const rows of chunkArray(bundle.offerings)) {
-      const rowsWithImport = rows.map((row) => ({ ...row, last_import_id: importId }));
+      const rowsWithImport = rows.map((row) => {
+        const cleanRow = { ...row };
+        const rawPayload = cleanRow.raw_payload as Record<string, unknown> | undefined;
+        if (rawPayload && typeof rawPayload === "object") {
+          const hasAnyColumn = (aliases: string[]) =>
+            aliases.some((alias) => Object.prototype.hasOwnProperty.call(rawPayload, alias));
+          if (!hasAnyColumn(["Service offering Brochure", "Service Offering Brochure", "Service Brochure", "ServiceBrochure"]))
+            delete cleanRow.service_brochure_url;
+          if (!hasAnyColumn(["Product Brochure", "Product Brochure URL", "Product Brochure Url", "ProductBrochure"]))
+            delete cleanRow.product_brochure_url;
+          if (!hasAnyColumn(["Knowledge Offering Content", "Knowledge Content URL", "Knowledge Content Url", "Knowledge Offering Content URL", "Knowledge Offering Content Url", "KnowledgeContent"]))
+            delete cleanRow.knowledge_content_url;
+          if (!hasAnyColumn(["Offering Link on GRE", "GRE Link", "Offering GRE Link", "Offering Link", "OfferingLinkOnGRE"]))
+            delete cleanRow.gre_link;
+        }
+        const existing = existingOfferingMap.get(requireString(cleanRow.offering_id)) as Record<string, unknown> | undefined;
+        if (existing) {
+          const existingRawPayload = existing.raw_payload as Record<string, unknown> | undefined;
+          const manualFields = (existingRawPayload?.last_manual_edit as Record<string, unknown> | undefined)?.manual_fields as string[] | undefined;
+          if (manualFields?.length) {
+            for (const field of manualFields) {
+              delete cleanRow[field];
+            }
+          }
+        }
+        return { ...cleanRow, last_import_id: importId };
+      });
       const { error } = await adminClient.from("offerings").upsert(rowsWithImport, { onConflict: "offering_id" });
       if (error) throw new Error(error.message);
     }
@@ -7594,6 +7644,8 @@ async function applyChatbotImportBundle(
       })
       .eq("id", importId);
     if (completeError) throw new Error(completeError.message);
+
+    await invalidateAskGreSearchCache();
 
     return {
       importId,
@@ -7794,6 +7846,46 @@ async function syncGreChatbotData(provider: string) {
       trader: { fileName: traderReport.fileName },
       solution: { fileName: solutionReport.fileName },
     },
+  };
+}
+
+async function uploadChatbotWorkbooks(
+  solutionBase64: string,
+  traderBase64: string,
+  solutionFileName: string,
+  traderFileName: string,
+  provider: string,
+) {
+  if (!solutionBase64 && !traderBase64) {
+    throw new Error("No solution or trader workbook data was received.");
+  }
+  const solutionBuffer = solutionBase64 ? decodeBase64ToArrayBuffer(solutionBase64) : new ArrayBuffer(0);
+  const traderBuffer = traderBase64 ? decodeBase64ToArrayBuffer(traderBase64) : new ArrayBuffer(0);
+  if (!solutionBuffer.byteLength && !traderBuffer.byteLength) {
+    throw new Error("Could not decode workbook data.");
+  }
+  const bundle = buildChatbotImportBundle(solutionBuffer, traderBuffer);
+  const summary = await applyChatbotImportBundle(bundle, {
+    solutionFileName: solutionFileName || "uploaded_solutions.xlsx",
+    traderFileName: traderFileName || "uploaded_traders.xlsx",
+  }, provider);
+  return { ok: true, summary };
+}
+
+function decodeBase64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+async function downloadGreInboundReport() {
+  const report = await fetchGreReportWorkbook(greInboundReportName, 1000, "request_details_report");
+  return {
+    ok: true,
+    download: await createWorkbookDownloadPayload(report.buffer, report.fileName),
   };
 }
 
@@ -9700,6 +9792,20 @@ Deno.serve(async (req) => {
 
     if (action === "downloadGreChatbotReport") {
       return jsonResponse(await downloadGreChatbotReport(requireString(payload.reportKind)));
+    }
+
+    if (action === "downloadGreInboundReport") {
+      return jsonResponse(await downloadGreInboundReport());
+    }
+
+    if (action === "uploadChatbotWorkbooks") {
+      return jsonResponse(await uploadChatbotWorkbooks(
+        requireString(payload.solutionBase64) || "",
+        requireString(payload.traderBase64) || "",
+        requireString(payload.solutionFileName) || "uploaded_solutions.xlsx",
+        requireString(payload.traderFileName) || "uploaded_traders.xlsx",
+        requireString(payload.aiProvider) || defaultAiProvider,
+      ));
     }
 
       if (action === "refreshNeedIntelligence") {
