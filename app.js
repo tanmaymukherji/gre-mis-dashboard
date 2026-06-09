@@ -908,6 +908,68 @@ function canonicalizeLanguageLabel(value) {
   return text.toUpperCase();
 }
 
+function normalizeCell(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text.length ? text : null;
+}
+
+function stripHtml(html) {
+  if (!html) return "";
+  return String(html)
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitLooseList(value, separators) {
+  if (!value) return [];
+  const seps = separators || [",", ";", "\n"];
+  let working = String(value);
+  for (const sep of seps) {
+    working = working.split(sep).join("|");
+  }
+  return uniqueStrings(
+    working.split("|").map((entry) => entry.trim()).filter(Boolean)
+  );
+}
+
+function splitGeographies(value) {
+  if (!value) return [];
+  const text = String(value);
+  if (text.includes(";") || text.includes("\n") || text.includes("|")) {
+    return splitLooseList(text, [";", "\n", "|"]);
+  }
+  return [text.trim()].filter(Boolean);
+}
+
+function normalizeLanguageArray(value) {
+  const raw = Array.isArray(value) ? value : splitLooseList(value);
+  return uniqueStrings(raw.map(canonicalizeLanguageLabel).filter(Boolean));
+}
+
+function buildSearchDocument(parts) {
+  return parts
+    .flatMap((part) => (Array.isArray(part) ? part : [part]))
+    .filter(Boolean)
+    .join(" | ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dedupeRowsById(rows, key) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const id = String(row[key] ?? "").trim();
+    if (id) map.set(id, row);
+  });
+  return [...map.values()];
+}
+
 function canonicalizeLanguageArray(values) {
   return uniq(ensureList(values).map((item) => canonicalizeLanguageLabel(item)).filter(Boolean));
 }
@@ -3486,6 +3548,10 @@ class GreMisStore {
 
   async uploadChatbotWorkbooks(solutionBase64, traderBase64, solutionFileName, traderFileName, aiProvider) {
     return this.callAdmin("uploadChatbotWorkbooks", { solutionBase64, traderBase64, solutionFileName, traderFileName, aiProvider }, true);
+  }
+
+  async uploadChatbotNormalized(traders, solutions, offerings, solutionFileName, traderFileName, aiProvider) {
+    return this.callAdmin("uploadChatbotNormalized", { traders, solutions, offerings, solutionFileName, traderFileName, aiProvider }, true);
   }
 
   async downloadSeekerRequestTracker(seekerKey, includeClosed = false) {
@@ -8797,6 +8863,10 @@ function bindStaticEvents() {
       toast("Login as admin or moderator first.");
       return;
     }
+    if (!window.XLSX) {
+      toast("Excel parser (SheetJS) is not loaded. Refresh the page.");
+      return;
+    }
     const solutionFile = byId("chatbotSolutionFile")?.files?.[0];
     const traderFile = byId("chatbotTraderFile")?.files?.[0];
     if (!solutionFile && !traderFile) {
@@ -8805,18 +8875,117 @@ function bindStaticEvents() {
     }
     const statusEl = byId("chatbotSyncStatus");
     const provider = byId("aiProviderSelect")?.value || "openai";
-    if (statusEl) statusEl.textContent = "Reading workbooks...";
-    const [solutionBase64, traderBase64] = await Promise.all([
-      solutionFile ? readFileAsBase64(solutionFile) : "",
-      traderFile ? readFileAsBase64(traderFile) : "",
-    ]);
     const fileDesc = [solutionFile?.name, traderFile?.name].filter(Boolean).join(", ");
-    if (statusEl) statusEl.textContent = `Uploading ${fileDesc}...`;
-    const result = await store.uploadChatbotWorkbooks(
-      solutionBase64,
-      traderBase64,
-      solutionFile?.name || "",
-      traderFile?.name || "",
+
+    let traders = [];
+    let solutions = [];
+    let offerings = [];
+
+    if (traderFile) {
+      if (statusEl) statusEl.textContent = `Parsing trader workbook...`;
+      const traderBuf = await traderFile.arrayBuffer();
+      const traderBook = window.XLSX.read(traderBuf, { type: "array" });
+      const traderSheet = traderBook.Sheets[traderBook.SheetNames[0]];
+      const traderRows = window.XLSX.utils.sheet_to_json(traderSheet, { defval: "", raw: false });
+      traders = dedupeRowsById(traderRows.map((row) => ({
+        trader_id: String(row.TraderId || "").trim(),
+        trader_name: normalizeCell(row.TraderName),
+        organisation_name: normalizeCell(row.TraderOrganisation),
+        mobile: normalizeCell(row.TraderMobile),
+        email: normalizeCell(row.TraderMail),
+        poc_name: normalizeCell(row.TraderPOC),
+        tenant_id: normalizeCell(row.TraderTenantId),
+        profile_id: normalizeCell(row.TraderProfileId),
+        description: normalizeCell(row.TraderDescription),
+        short_description: normalizeCell(row.TraderShortDescription),
+        tagline: normalizeCell(row.TraderTagLine),
+        website: normalizeCell(row.TraderWebsite),
+        created_at_source: normalizeCell(row.TraderCreatedDate),
+        association_status: normalizeCell(row.TraderAssociationStatus),
+        raw_payload: row,
+      })), "trader_id");
+    }
+
+    if (solutionFile) {
+      if (statusEl) statusEl.textContent = `Parsing solution workbook...`;
+      const solBuf = await solutionFile.arrayBuffer();
+      const solBook = window.XLSX.read(solBuf, { type: "array" });
+      const solSheet = solBook.Sheets[solBook.SheetNames[0]];
+      const solRows = window.XLSX.utils.sheet_to_json(solSheet, { defval: "", raw: false });
+
+      solutions = dedupeRowsById(solRows.map((row) => ({
+        solution_id: String(row.SolutionId || "").trim(),
+        trader_id: normalizeCell(row.TraderId),
+        solution_name: normalizeCell(row.SolutionName),
+        solution_status: normalizeCell(row.SolutionStatus),
+        publish_status: normalizeCell(row.SolutionPublishStatus),
+        created_at_source: normalizeCell(row.SolutionCreationDate),
+        about_solution_html: normalizeCell(row.AboutSolution),
+        about_solution_text: stripHtml(normalizeCell(row.AboutSolution)),
+        solution_image_url: normalizeCell(row.SolutionImage),
+        raw_payload: row,
+      })), "solution_id");
+
+      offerings = dedupeRowsById(solRows.map((row) => {
+        const aboutOfferingHtml = normalizeCell(row.AboutOffering);
+        const trainerDetailsHtml = normalizeCell(row["Trainer Details"]);
+        return {
+          offering_id: String(row.OfferingId || "").trim().replace(/\.0$/, ""),
+          solution_id: normalizeCell(row.SolutionId),
+          trader_id: normalizeCell(row.TraderId),
+          offering_name: normalizeCell(row.OfferingName),
+          publish_status: normalizeCell(row.OfferingPublishStatus),
+          created_at_source: normalizeCell(row.OfferingCreationDate),
+          offering_category: normalizeCell(row.OfferingCategory),
+          offering_group: normalizeCell(row.OfferingGroup),
+          offering_type: normalizeCell(row.OfferingType),
+          domain_6m: normalizeCell(row["6M"]),
+          primary_valuechain_id: normalizeCell(row.PrimaryValuechainId),
+          primary_valuechain: normalizeCell(row.PrimaryValuechain),
+          primary_application_id: normalizeCell(row.PrimaryApplicationId),
+          primary_application: normalizeCell(row.PrimaryApplication),
+          valuechains: splitLooseList(normalizeCell(row.Valuechains)),
+          applications: splitLooseList(normalizeCell(row.Applications)),
+          tags: splitLooseList(normalizeCell(row.Tags)),
+          languages: normalizeLanguageArray(normalizeCell(row.Languages)),
+          geographies: splitGeographies(normalizeCell(row.Geographies)),
+          geographies_raw: normalizeCell(row.Geographies),
+          about_offering_html: aboutOfferingHtml,
+          about_offering_text: stripHtml(aboutOfferingHtml),
+          audience: normalizeCell(row["Who Can avail it"]),
+          trainer_name: normalizeCell(row["Trainer Name"]),
+          trainer_email: normalizeCell(row["Trainer Email Address"]),
+          trainer_phone: normalizeCell(row["Trainer Phone Number"]),
+          trainer_details_html: trainerDetailsHtml,
+          trainer_details_text: stripHtml(trainerDetailsHtml),
+          duration: normalizeCell(row.Duration),
+          prerequisites: normalizeCell(row["Prerequisites - Participants and Training"]),
+          service_cost: normalizeCell(row["Cost (Service)"]),
+          support_post_service: normalizeCell(row["Support post Service"]),
+          support_post_service_cost: normalizeCell(row["Support post Service Cost"]),
+          delivery_mode: normalizeCell(row["Is it offered - Online or Offline"]),
+          certification_offered: normalizeCell(row["Certification Offered"]),
+          cost_remarks: normalizeCell(row["Remarks on Cost"]),
+          location_availability: normalizeCell(row["Location Availability"]),
+          service_brochure_url: normalizeCell(row["Service offering Brochure"]),
+          grade_capacity: normalizeCell(row["Grade/Capacity"]),
+          product_cost: normalizeCell(row["Cost (Product)"]),
+          lead_time: normalizeCell(row["Lead Time"]),
+          support_details: normalizeCell(row.Support),
+          product_brochure_url: normalizeCell(row["Product Brochure"]),
+          knowledge_content_url: normalizeCell(row["Knowledge Offering Content"]),
+          contact_details: normalizeCell(row["Contact Details"]),
+          gre_link: normalizeCell(row["Offering Link on GRE"]),
+          raw_payload: row,
+        };
+      }), "offering_id");
+    }
+
+    if (statusEl) statusEl.textContent = `Uploading ${fileDesc} (${offerings.length} offerings, ${traders.length} traders)...`;
+    const result = await store.uploadChatbotNormalized(
+      traders, solutions, offerings,
+      solutionFile?.name || "normalized_solutions.json",
+      traderFile?.name || "normalized_traders.json",
       provider,
     );
     if (statusEl) {

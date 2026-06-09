@@ -7894,6 +7894,50 @@ async function uploadChatbotWorkbooks(
   return { ok: true, summary };
 }
 
+async function uploadChatbotNormalized(
+  traders: Record<string, unknown>[],
+  solutions: Record<string, unknown>[],
+  offerings: Record<string, unknown>[],
+  solutionFileName: string,
+  traderFileName: string,
+  provider: string,
+) {
+  const bundle: ImportBundle = {
+    traders,
+    solutions,
+    offerings: offerings.map((row) => {
+      const rp = row.raw_payload as Record<string, unknown> | undefined;
+      return {
+        ...row,
+        search_document: rp ? buildSearchDocument([
+          normalizeCell(rp.SolutionName),
+          normalizeCell(rp.OfferingName),
+          normalizeCell(rp.OfferingCategory),
+          normalizeCell(rp.OfferingGroup),
+          normalizeCell(rp.OfferingType),
+          normalizeCell(rp["6M"]),
+          normalizeCell(rp.PrimaryValuechain),
+          normalizeCell(rp.PrimaryApplication),
+          splitLooseList(normalizeCell(rp.Valuechains)),
+          splitLooseList(normalizeCell(rp.Applications)),
+          splitLooseList(normalizeCell(rp.Tags)),
+          splitLooseList(normalizeCell(rp.Languages)),
+          splitGeographies(normalizeCell(rp.Geographies)),
+          stripHtml(normalizeCell(rp.AboutSolution)),
+          stripHtml(normalizeCell(rp.AboutOffering)),
+          normalizeCell(rp.TraderOrganisation),
+        ]) : null,
+      };
+    }),
+    stats: { solutionRows: solutions.length, traderRows: traders.length },
+  };
+  const summary = await applyChatbotImportBundle(bundle, {
+    solutionFileName: solutionFileName || "normalized_solutions.json",
+    traderFileName: traderFileName || "normalized_traders.json",
+  }, provider);
+  return { ok: true, summary };
+}
+
 function decodeBase64ToArrayBuffer(base64: string): ArrayBuffer {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -9826,6 +9870,17 @@ Deno.serve(async (req) => {
         requireString(payload.traderBase64) || "",
         requireString(payload.solutionFileName) || "uploaded_solutions.xlsx",
         requireString(payload.traderFileName) || "uploaded_traders.xlsx",
+        requireString(payload.aiProvider) || defaultAiProvider,
+      ));
+    }
+
+    if (action === "uploadChatbotNormalized") {
+      return jsonResponse(await uploadChatbotNormalized(
+        Array.isArray(payload.traders) ? payload.traders as Record<string, unknown>[] : [],
+        Array.isArray(payload.solutions) ? payload.solutions as Record<string, unknown>[] : [],
+        Array.isArray(payload.offerings) ? payload.offerings as Record<string, unknown>[] : [],
+        requireString(payload.solutionFileName) || "normalized_solutions.json",
+        requireString(payload.traderFileName) || "normalized_traders.json",
         requireString(payload.aiProvider) || defaultAiProvider,
       ));
     }
