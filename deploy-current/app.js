@@ -1401,6 +1401,18 @@ async function parseInboundWorkbookFile(file) {
   })).filter((row) => row.request_id);
 }
 
+async function readFileAsBase64(file) {
+  if (!file) return "";
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 8192;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
 function downloadBase64Workbook(download) {
   if (!download?.base64 || !download?.fileName) throw new Error("Download payload is missing.");
   const mimeType = download.mimeType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -3466,6 +3478,14 @@ class GreMisStore {
 
   async downloadGreChatbotReport(reportKind) {
     return this.callAdmin("downloadGreChatbotReport", { reportKind }, true);
+  }
+
+  async downloadGreInboundReport() {
+    return this.callAdmin("downloadGreInboundReport", {}, true);
+  }
+
+  async uploadChatbotWorkbooks(solutionBase64, traderBase64, solutionFileName, traderFileName, aiProvider) {
+    return this.callAdmin("uploadChatbotWorkbooks", { solutionBase64, traderBase64, solutionFileName, traderFileName, aiProvider }, true);
   }
 
   async downloadSeekerRequestTracker(seekerKey, includeClosed = false) {
@@ -5764,6 +5784,8 @@ function renderNeedDetail() {
   const noteText = String(stripUrls(need.curation_notes || ""))
     .replace(/\r/g, "")
     .replace(/\bnull\b/gi, "")
+    .replace(/solutions shared\n(\d+\..*(?:\n|$))*/gi, "")
+    .replace(/solutions shared\s*:.*(?:\n|$)/gi, "")
     .trim();
   const noteHtml = noteText ? esc(noteText).replace(/\n/g, "<br>") : "";
   const canInspectCuration = canSeeCurationDetails();
@@ -5867,7 +5889,7 @@ function renderNeedDetail() {
                       ${sharedSolutionEntries
                         .map((entry) => {
                           const link = entry.url;
-                          return `<li>${esc(entry.offeringName)}${entry.providerName ? ` : ${esc(entry.providerName)}` : ""}${link ? ` : <a href="${esc(link)}" target="_blank" rel="noreferrer">View Solution</a>` : ""}${entry.inferred ? ` <span class="helper-text">(GRE-aligned)</span>` : ""}</li>`;
+                          return `<li>${esc(entry.providerName || entry.offeringName)}${entry.providerName && entry.offeringName ? ` : ${esc(entry.offeringName)}` : ""}${link ? ` : <a href="${esc(link)}" target="_blank" rel="noreferrer">View Solution</a>` : ""}${entry.inferred ? ` <span class="helper-text">(GRE-aligned)</span>` : ""}</li>`;
                         })
                         .join("")}
                     </ol>
@@ -8614,6 +8636,18 @@ function bindStaticEvents() {
     toast("Inbound workbook synced.");
   }));
 
+  byId("downloadGreInboundBtn")?.addEventListener("click", safeAsync(async () => {
+    if (!hasAdminLikeAccess()) {
+      toast("Login as admin or moderator first.");
+      return;
+    }
+    const statusEl = byId("syncStatus");
+    if (statusEl) statusEl.textContent = "Downloading live GRE inbound workbook...";
+    const result = await store.downloadGreInboundReport();
+    downloadBase64Workbook(result.download);
+    if (statusEl) statusEl.textContent = `Downloaded ${result.download?.fileName || "inbound workbook"}.`;
+  }));
+
   byId("syncGreInboundsBtn")?.addEventListener("click", safeAsync(async () => {
     if (!hasAdminLikeAccess()) {
       toast("Login as admin or moderator first.");
@@ -8731,18 +8765,19 @@ function bindStaticEvents() {
     toast(result.message || "GRE outreach email sent.");
     const supabaseClient = store?.getClient();
     if (supabaseClient) {
-      const { data: freshNeed } = await supabaseClient
-        .from("gre_mis_needs")
-        .select("*")
-        .eq("id", state.selectedNeedId)
-        .single()
-        .catch(() => ({}));
-      if (freshNeed) {
-        const idx = state.data.needs.findIndex((n) => n.id === state.selectedNeedId);
-        if (idx >= 0) {
-          state.data.needs[idx] = { ...freshNeed, curated_need: parseArray(freshNeed.curated_need) };
+      try {
+        const { data: freshNeed } = await supabaseClient
+          .from("gre_mis_needs")
+          .select("*")
+          .eq("id", state.selectedNeedId)
+          .single();
+        if (freshNeed) {
+          const idx = state.data.needs.findIndex((n) => n.id === state.selectedNeedId);
+          if (idx >= 0) {
+            state.data.needs[idx] = { ...freshNeed, curated_need: parseArray(freshNeed.curated_need) };
+          }
         }
-      }
+      } catch {}
     }
     rerender(false);
   }));
@@ -8755,6 +8790,40 @@ function bindStaticEvents() {
     const result = await store.refreshUserDirectory();
     await rerender(false);
     toast(result.message || "User roles refreshed from GRE.");
+  }));
+
+  byId("uploadChatbotBtn")?.addEventListener("click", safeAsync(async () => {
+    if (!hasAdminLikeAccess()) {
+      toast("Login as admin or moderator first.");
+      return;
+    }
+    const solutionFile = byId("chatbotSolutionFile")?.files?.[0];
+    const traderFile = byId("chatbotTraderFile")?.files?.[0];
+    if (!solutionFile && !traderFile) {
+      toast("Select at least one workbook (solution or trader).");
+      return;
+    }
+    const statusEl = byId("chatbotSyncStatus");
+    const provider = byId("aiProviderSelect")?.value || "openai";
+    if (statusEl) statusEl.textContent = "Reading workbooks...";
+    const [solutionBase64, traderBase64] = await Promise.all([
+      solutionFile ? readFileAsBase64(solutionFile) : "",
+      traderFile ? readFileAsBase64(traderFile) : "",
+    ]);
+    const fileDesc = [solutionFile?.name, traderFile?.name].filter(Boolean).join(", ");
+    if (statusEl) statusEl.textContent = `Uploading ${fileDesc}...`;
+    const result = await store.uploadChatbotWorkbooks(
+      solutionBase64,
+      traderBase64,
+      solutionFile?.name || "",
+      traderFile?.name || "",
+      provider,
+    );
+    if (statusEl) {
+      statusEl.textContent =
+        `Upload complete. Traders: ${result.summary?.traders || 0}, solutions: ${result.summary?.solutions || 0}, offerings: ${result.summary?.offerings || 0}, offering AI refreshed: ${result.summary?.offeringAiUpdated || 0}.`;
+    }
+    toast("Chatbot workbooks uploaded and synced.");
   }));
 
   byId("syncGreChatbotBtn")?.addEventListener("click", safeAsync(async () => {

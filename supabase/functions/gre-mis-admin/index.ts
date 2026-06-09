@@ -7460,24 +7460,6 @@ function normalizeOfferingRowForChatbot(row: Record<string, unknown>) {
     contact_details: normalizeCell(row["Contact Details"]),
     gre_link: rowValue(row, ["Offering Link on GRE", "GRE Link", "Offering GRE Link", "Offering Link", "OfferingLinkOnGRE"]) || null,
     source_row_signature: stableRowSignature(row),
-    search_document: buildSearchDocument([
-      normalizeCell(row.SolutionName),
-      normalizeCell(row.OfferingName),
-      normalizeCell(row.OfferingCategory),
-      normalizeCell(row.OfferingGroup),
-      normalizeCell(row.OfferingType),
-      normalizeCell(row["6M"]),
-      normalizeCell(row.PrimaryValuechain),
-      normalizeCell(row.PrimaryApplication),
-      valuechains,
-      applications,
-      tags,
-      languages,
-      geographies,
-      stripHtml(normalizeCell(row.AboutSolution)),
-      stripHtml(aboutOfferingHtml),
-      normalizeCell(row.TraderOrganisation),
-    ]),
     raw_payload: row,
   };
 }
@@ -7599,6 +7581,25 @@ async function applyChatbotImportBundle(
               }
             }
           }
+          const rp = cleanRow.raw_payload as Record<string, unknown> | undefined;
+          cleanRow.search_document = rp ? buildSearchDocument([
+            normalizeCell(rp.SolutionName),
+            normalizeCell(rp.OfferingName),
+            normalizeCell(rp.OfferingCategory),
+            normalizeCell(rp.OfferingGroup),
+            normalizeCell(rp.OfferingType),
+            normalizeCell(rp["6M"]),
+            normalizeCell(rp.PrimaryValuechain),
+            normalizeCell(rp.PrimaryApplication),
+            splitLooseList(normalizeCell(rp.Valuechains)),
+            splitLooseList(normalizeCell(rp.Applications)),
+            splitLooseList(normalizeCell(rp.Tags)),
+            splitLooseList(normalizeCell(rp.Languages)),
+            splitGeographies(normalizeCell(rp.Geographies)),
+            stripHtml(normalizeCell(rp.AboutSolution)),
+            stripHtml(normalizeCell(rp.AboutOffering)),
+            normalizeCell(rp.TraderOrganisation),
+          ]) : null;
           return { ...cleanRow, last_import_id: importId };
         });
         const { error } = await adminClient.from("offerings").upsert(rowsWithImport, { onConflict: "offering_id" });
