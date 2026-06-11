@@ -5208,6 +5208,9 @@ async function syncCanonicalCuratorRowForUser(user: Record<string, unknown>, syn
   }
 
   const rankedRows = [...rows].sort((left, right) => {
+    const leftMatch = requireString(left.email).toLowerCase() === email;
+    const rightMatch = requireString(right.email).toLowerCase() === email;
+    if (leftMatch !== rightMatch) return leftMatch ? -1 : 1;
     const leftCount = needCounts.get(requireString(left.id)) || 0;
     const rightCount = needCounts.get(requireString(right.id)) || 0;
     if (leftCount !== rightCount) return rightCount - leftCount;
