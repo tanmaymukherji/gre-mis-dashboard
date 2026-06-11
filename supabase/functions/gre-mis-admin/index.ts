@@ -3706,22 +3706,27 @@ async function searchLgdGeographies(query: string) {
   if (search.length < 2) {
     return { ok: true, suggestions: scoreLgdSuggestion("India", search) > 0 ? ["India"] : [] };
   }
-  const wildcard = `%${search.replace(/[%_]/g, " ").trim()}%`;
-  const { data, error } = await adminClient
-    .from("lgd_geography_directory")
-    .select("display_label,location_kind,block_name,district_name,state_name,gram_panchayat_name,village_name")
-    .or(`search_text.ilike.${wildcard},display_label.ilike.${wildcard},block_name.ilike.${wildcard},district_name.ilike.${wildcard},state_name.ilike.${wildcard}`)
-    .limit(20);
-  if (error) {
-    throw new Error(error.message || "LGD search failed.");
+  const lgdBase = "https://grameee.org/api/lgd";
+  try {
+    const response = await fetch(`${lgdBase}/s.php?q=${encodeURIComponent(search)}`);
+    if (!response.ok) {
+      console.warn(`Hostinger LGD search returned ${response.status}`);
+      return { ok: true, suggestions: [] };
+    }
+    const data = await response.json() as Array<{ label: string }>;
+    const labels = (data || []).map((item) => item.label).filter(Boolean);
+    const indiaScore = scoreLgdSuggestion("India", search);
+    return {
+      ok: true,
+      suggestions: uniqueStrings([
+        ...(indiaScore > 0 ? ["India"] : []),
+        ...labels,
+      ]),
+    };
+  } catch (error) {
+    console.warn("Hostinger LGD search error", error);
+    return { ok: true, suggestions: [] };
   }
-  return {
-    ok: true,
-    suggestions: uniqueStrings([
-      ...(scoreLgdSuggestion("India", search) > 0 ? ["India"] : []),
-      ...buildRankedLgdSuggestions((data || []) as Record<string, unknown>[], search),
-    ]),
-  };
 }
 
 async function enrichNeedIntelligence(need: Record<string, unknown>, provider: string) {
@@ -5249,9 +5254,9 @@ async function syncCanonicalCuratorRowForUser(user: Record<string, unknown>, syn
     return requireString(preferredRow.id);
   }
 
-  const { data: insertedRow, error: insertError } = await adminClient
+  const { data: upsertedRow, error: upsertError } = await adminClient
     .from("gre_mis_curators")
-    .insert({
+    .upsert({
       user_id: userId,
       display_name: fullName,
       first_name: firstName,
@@ -5261,11 +5266,12 @@ async function syncCanonicalCuratorRowForUser(user: Record<string, unknown>, syn
       gre_sync_status: "synced",
       gre_sync_message: syncMessage,
       gre_synced_at: syncedAt,
-    })
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "email" })
     .select("id")
     .single();
-  if (insertError) throw new Error(insertError.message);
-  return requireString(insertedRow?.id);
+  if (upsertError) throw new Error(upsertError.message);
+  return requireString(upsertedRow?.id);
 }
 
 async function persistMisRoleState(user: Record<string, unknown>, targetRole: string, greUserId: number | null, greLoginName: string, syncMessage: string) {
