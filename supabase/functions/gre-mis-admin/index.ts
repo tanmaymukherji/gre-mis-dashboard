@@ -8252,9 +8252,9 @@ async function assignCurator(needId: string, curatorId: string | null, actorEmai
         if (updateCuratorError) throw new Error(updateCuratorError.message);
         resolvedCuratorId = existingCurator.id;
       } else {
-        const { data: insertedCurator, error: insertCuratorError } = await adminClient
+        const { data: upsertedCurator, error: upsertCuratorError } = await adminClient
           .from("gre_mis_curators")
-          .insert({
+          .upsert({
             user_id: userId,
             display_name: requireString(userRow.full_name) || requireString(userRow.first_name) || requireString(userRow.username),
             first_name: requireString(userRow.first_name) || requireString(userRow.full_name).split(" ")[0] || requireString(userRow.username),
@@ -8266,11 +8266,12 @@ async function assignCurator(needId: string, curatorId: string | null, actorEmai
               ? "Local GramEEE curator assignment enabled for shared-form needs."
               : "GRE-linked curator assignment ready.",
             gre_synced_at: new Date().toISOString(),
-          })
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "email" })
           .select("id")
           .single();
-        if (insertCuratorError || !insertCurator) throw new Error(insertCuratorError?.message || "Could not create the local curator record.");
-        resolvedCuratorId = requireString(insertedCurator.id);
+        if (upsertCuratorError || !upsertedCurator) throw new Error(upsertCuratorError?.message || "Could not create the local curator record.");
+        resolvedCuratorId = requireString(upsertedCurator.id);
       }
     } else {
       resolvedCuratorId = normalizedSelection;
