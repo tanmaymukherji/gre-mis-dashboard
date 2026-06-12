@@ -1,17 +1,19 @@
+// Fresh deploy script for solution.grameee.org
+// Creates and uploads a new ZIP every time — never reuses old archives
+
 import { createReadStream, statSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
-
-// TUS client is available from the hostinger MCP package
 const tus = require("C:\\Users\\tmukh\\AppData\\Roaming\\npm\\node_modules\\hostinger-api-mcp\\node_modules\\tus-js-client");
 
 const TOKEN = "tsAkruR0VW24ayQyL0TRlWTuoxXdbjUSzluPhrSS16c6ca26";
 const BASE = "https://developers.hostinger.com";
 const USERNAME = "u973202051";
-const DOMAIN = "gre.grameee.org";
+const DOMAIN = "solution.grameee.org";
+
 // Always create a fresh archive — never reuse old ones
 const now = new Date();
 const datestamp = now.getFullYear()
@@ -21,11 +23,20 @@ const datestamp = now.getFullYear()
   + String(now.getHours()).padStart(2, "0")
   + String(now.getMinutes()).padStart(2, "0")
   + String(now.getSeconds()).padStart(2, "0");
-const ARCHIVE_NAME = `gre-mis_${datestamp}.zip`;
+const ARCHIVE_NAME = `hostinger-solution-need_${datestamp}.zip`;
 const ARCHIVE_PATH = join(process.env.TEMP || "C:\\Users\\tmukh\\AppData\\Local\\Temp", ARCHIVE_NAME);
 
 async function main() {
-  // 1. Get upload credentials
+  // 1. Create fresh ZIP from source
+  console.log(`Creating fresh archive: ${ARCHIVE_NAME}`);
+  const { execSync } = await import("child_process");
+  execSync(
+    `powershell -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('hostinger-solution-need', '${ARCHIVE_PATH.replace(/'/g, "''")}')"`,
+    { cwd: new URL(".", import.meta.url).pathname, stdio: "inherit" }
+  );
+  console.log("Archive created.");
+
+  // 2. Get upload credentials
   console.log("Getting upload credentials...");
   const credResp = await fetch(`${BASE}/api/hosting/v1/files/upload-urls`, {
     method: "POST",
@@ -41,9 +52,9 @@ async function main() {
   }
   const creds = await credResp.json();
   const { url: uploadUrl, auth_key: authToken, rest_auth_key: authRestToken } = creds;
-  console.log(`Upload URL obtained: ${uploadUrl}`);
+  console.log(`Upload URL obtained`);
 
-  // 2. Pre-upload POST
+  // 3. Pre-upload POST
   const cleanUploadUrl = uploadUrl.replace(/\/$/, "");
   const uploadUrlWithFile = `${cleanUploadUrl}/${ARCHIVE_NAME}?override=true`;
   const stats = statSync(ARCHIVE_PATH);
@@ -64,7 +75,7 @@ async function main() {
   }
   console.log("Pre-upload OK (201)");
 
-  // 3. TUS upload
+  // 4. TUS upload
   console.log("Uploading via TUS...");
   await new Promise((resolve, reject) => {
     const fileStream = createReadStream(ARCHIVE_PATH);
@@ -92,7 +103,7 @@ async function main() {
     upload.start();
   });
 
-  // 4. Trigger deployment
+  // 5. Trigger deployment
   console.log("Triggering deployment...");
   const deployResp = await fetch(
     `${BASE}/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/deploy`,
@@ -110,8 +121,8 @@ async function main() {
     throw new Error(`Deploy failed: ${deployResp.status} ${text}`);
   }
   const deployResult = await deployResp.json();
-  console.log("Deployment triggered success:", JSON.stringify(deployResult));
-  console.log("Done! Files deploying to gre.grameee.org.");
+  console.log("Deployment triggered:", JSON.stringify(deployResult));
+  console.log("Done! Files deploying to solution.grameee.org.");
 }
 
 main().catch((err) => {
