@@ -9835,6 +9835,10 @@ Deno.serve(async (req) => {
       if (isModeratorMisRole(adminActorRole) && requireString(payload.decision).toLowerCase() === "reject") {
         throw new Error("Moderators cannot reject form submissions.");
       }
+      const updateData = payload.update && typeof payload.update === "object" ? payload.update as Record<string, unknown> : null;
+      if (updateData) {
+        await updateFormSubmission(requireString(payload.submissionId), updateData, adminActorEmail);
+      }
       return jsonResponse(await approveFormSubmission(
         requireString(payload.submissionId),
         requireString(payload.decision),

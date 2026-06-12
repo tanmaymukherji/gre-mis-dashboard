@@ -3434,8 +3434,8 @@ class GreMisStore {
     return this.callAdmin("submitSignedInForm", { submissionType, payload });
   }
 
-  async reviewFormSubmission(submissionId, decision, reviewNotes = "") {
-    return this.callAdmin("reviewFormSubmission", { submissionId, decision, reviewNotes }, true);
+  async reviewFormSubmission(submissionId, decision, reviewNotes = "", update = null) {
+    return this.callAdmin("reviewFormSubmission", { submissionId, decision, reviewNotes, update }, true);
   }
 
   async updateFormSubmission(submissionId, update) {
@@ -9307,10 +9307,9 @@ function bindStaticEvents() {
 
   byId("approveSubmissionReviewBtn")?.addEventListener("click", safeAsync(async () => {
     const status = byId("submissionReviewStatus");
-    if (status) status.textContent = "Saving changes and approving...";
+    if (status) status.textContent = "Approving...";
     const patch = await buildSubmissionReviewPatch();
-    await store.updateFormSubmission(patch.submissionId, patch.update);
-    const result = await store.reviewFormSubmission(patch.submissionId, "approve", patch.update.adminReviewNotes || "");
+    const result = await store.reviewFormSubmission(patch.submissionId, "approve", patch.update.adminReviewNotes || "", patch.update);
     submissionReviewDialog?.close();
     refreshActiveAdminDeskTab();
     toast(result.message || (result.targetNeedId ? `Submission approved as Need ${result.targetNeedId}.` : "Form submission approved."));
@@ -9322,10 +9321,9 @@ function bindStaticEvents() {
       return;
     }
     const status = byId("submissionReviewStatus");
-    if (status) status.textContent = "Saving changes and rejecting...";
+    if (status) status.textContent = "Rejecting...";
     const patch = await buildSubmissionReviewPatch();
-    await store.updateFormSubmission(patch.submissionId, patch.update);
-    await store.reviewFormSubmission(patch.submissionId, "reject", patch.update.adminReviewNotes || "");
+    await store.reviewFormSubmission(patch.submissionId, "reject", patch.update.adminReviewNotes || "", patch.update);
     submissionReviewDialog?.close();
     refreshActiveAdminDeskTab();
     toast("Form submission rejected.");
