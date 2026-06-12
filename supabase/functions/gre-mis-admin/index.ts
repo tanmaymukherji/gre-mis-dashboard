@@ -6493,7 +6493,7 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       })
       .eq("id", submissionId);
     if (approveError) throw new Error(approveError.message);
-    await invalidateAskGreSearchCache();
+    invalidateAskGreSearchCache().catch(() => undefined);
     return {
       ok: true,
       greSyncStatus,
