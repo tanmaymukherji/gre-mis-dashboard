@@ -9525,6 +9525,245 @@ async function sendCuratorMessage(
   return { ok: true, message: `Message sent to ${curator?.display_name || "the curator"}.` };
 }
 
+// ── My Solutions helpers ──────────────────────────────────────────────
+
+async function fetchMySolutions(userCtx: { user: Record<string, unknown> }) {
+  const userId = requireString(userCtx.user.id);
+  const userEmail = requireString(userCtx.user.email).toLowerCase();
+  if (!userId && !userEmail) throw new Error("User identity not found.");
+
+  const query = adminClient
+    .from("gre_mis_form_submissions")
+    .select("*")
+    .eq("submission_type", "solution")
+    .order("created_at", { ascending: false });
+
+  if (userId) query.eq("submitter_user_id", userId);
+  else query.eq("submitter_email", userEmail);
+
+  const { data: submissions, error } = await query;
+  if (error) throw new Error(error.message);
+
+  // resolve parent submission names for edit chain display
+  const parentIds = submissions
+    .map((s: Record<string, unknown>) => requireString(s.parent_submission_id))
+    .filter(Boolean);
+  const parentMap: Record<string, string> = {};
+  if (parentIds.length) {
+    const { data: parents } = await adminClient
+      .from("gre_mis_form_submissions")
+      .select("id, payload")
+      .in("id", parentIds);
+    if (parents) {
+      for (const p of parents as Array<Record<string, unknown>>) {
+        const pPayload = (p.payload || {}) as Record<string, unknown>;
+        parentMap[requireString(p.id)] = requireString(pPayload.offering_name || pPayload.solution_name) || "Unknown";
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    submissions: (submissions || []).map((s: Record<string, unknown>) => {
+      const sPayload = (s.payload || {}) as Record<string, unknown>;
+      return {
+        id: s.id,
+        submission_type: s.submission_type,
+        source_mode: s.source_mode,
+        submitter_name: s.submitter_name,
+        submitter_email: s.submitter_email,
+        organization_name: s.organization_name,
+        existing_trader_id: s.existing_trader_id,
+        existing_trader_name: s.existing_trader_name,
+        org_exists_on_gre: s.org_exists_on_gre,
+        approval_status: s.approval_status,
+        admin_review_notes: s.admin_review_notes,
+        gre_sync_status: s.gre_sync_status,
+        synced_to_gre: s.synced_to_gre,
+        parent_submission_id: s.parent_submission_id,
+        local_edit_version: s.local_edit_version ?? 0,
+        conflict_with_gre_sync: s.conflict_with_gre_sync ?? false,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+        offering_name: requireString(sPayload.offering_name || sPayload.solution_name),
+        offering_category: requireString(sPayload.offering_category),
+        offering_type: requireString(sPayload.offering_type),
+        about_offering_text: requireString(sPayload.about_offering_text || sPayload.about_solution_text),
+        tags: Array.isArray(sPayload.tags) ? sPayload.tags : [],
+        geographies: Array.isArray(sPayload.geographies) ? sPayload.geographies : [],
+        languages: Array.isArray(sPayload.languages) ? sPayload.languages : [],
+        parent_name: parentMap[requireString(s.parent_submission_id)] || "",
+      };
+    }),
+  };
+}
+
+async function submitSignedInEdit(
+  parentSubmissionId: string,
+  updatedPayload: Record<string, unknown>,
+  userCtx: { user: Record<string, unknown> },
+) {
+  if (!parentSubmissionId) throw new Error("Parent submission ID is required.");
+  const userId = requireString(userCtx.user.id);
+  const userEmail = requireString(userCtx.user.email).toLowerCase();
+  if (!userId && !userEmail) throw new Error("User identity not found.");
+
+  // Fetch parent to validate ownership and get current version
+  const parentQuery = adminClient
+    .from("gre_mis_form_submissions")
+    .select("*")
+    .eq("id", parentSubmissionId)
+    .eq("submission_type", "solution");
+  if (userId) parentQuery.eq("submitter_user_id", userId);
+  else parentQuery.eq("submitter_email", userEmail);
+  const { data: parent } = await parentQuery.single();
+  if (!parent) throw new Error("Parent submission not found or access denied.");
+
+  const parentPayload = (parent.payload || {}) as Record<string, unknown>;
+  const currentVersion = (parent.local_edit_version ?? 0) as number + 1;
+
+  // Merge: updatedPayload overrides parentPayload
+  const mergedPayload = { ...parentPayload, ...updatedPayload };
+
+  const { data, error } = await adminClient
+    .from("gre_mis_form_submissions")
+    .insert({
+      submission_type: "solution",
+      source_mode: "signed_in_edit",
+      submitter_name: requireString(updatedPayload.submitter_name || parent.submitter_name || userCtx.user.full_name),
+      submitter_email: requireString((updatedPayload.submitter_email || parent.submitter_email || userEmail)).toLowerCase(),
+      submitter_phone: requireString(updatedPayload.submitter_phone || parent.submitter_phone),
+      submitter_user_id: userId || parent.submitter_user_id || null,
+      organization_name: requireString(updatedPayload.organization_name || parent.organization_name),
+      existing_trader_id: requireString(updatedPayload.existing_trader_id || parent.existing_trader_id),
+      existing_trader_name: requireString(updatedPayload.existing_trader_name || parent.existing_trader_name),
+      org_exists_on_gre: parent.org_exists_on_gre ?? false,
+      payload: mergedPayload,
+      parent_submission_id: parentSubmissionId,
+      local_edit_version: currentVersion,
+      approval_status: "pending_admin",
+      gre_sync_status: "pending_admin_review",
+      gre_sync_message: "Local edit is waiting for admin approval.",
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+
+  return { ok: true, id: data.id, version: currentVersion, message: "Edit submitted for approval." };
+}
+
+async function fetchSolutionOutreach(userCtx: { user: Record<string, unknown> }) {
+  const userId = requireString(userCtx.user.id);
+  const userEmail = requireString(userCtx.user.email).toLowerCase();
+  if (!userId && !userEmail) throw new Error("User identity not found.");
+
+  // Get user's submission IDs and offering IDs
+  const subQuery = adminClient
+    .from("gre_mis_form_submissions")
+    .select("id, existing_trader_id, existing_trader_name, submitter_email, payload")
+    .eq("submission_type", "solution");
+  if (userId) subQuery.eq("submitter_user_id", userId);
+  else subQuery.eq("submitter_email", userEmail);
+  const { data: submissions } = await subQuery;
+  if (!submissions) return { ok: true, offering_views: [], email_logs: [] };
+
+  const submissionIds = (submissions as Array<Record<string, unknown>>).map((s) => s.id);
+  const traderEmails = (submissions as Array<Record<string, unknown>>)
+    .map((s) => {
+      const p = (s.payload || {}) as Record<string, unknown>;
+      return requireString(p.submitter_email || s.submitter_email);
+    })
+    .filter(Boolean);
+  const submitterEmails = (submissions as Array<Record<string, unknown>>)
+    .map((s) => requireString(s.submitter_email))
+    .filter(Boolean);
+  const allEmails = [...new Set([...traderEmails, ...submitterEmails, userEmail])];
+
+  // Fetch offering views for these submissions
+  let offeringViews: Array<Record<string, unknown>> = [];
+  if (submissionIds.length) {
+    const { data: views } = await adminClient
+      .from("gre_mis_offering_views")
+      .select("*")
+      .in("submission_id", submissionIds)
+      .order("viewed_at", { ascending: false });
+    if (views) offeringViews = views as Array<Record<string, unknown>>;
+  }
+
+  // Fetch email log entries where user's contact emails appear
+  let emailLogs: Array<Record<string, unknown>> = [];
+  if (allEmails.length) {
+    const { data: emails } = await adminClient
+      .from("gre_mis_email_log")
+      .select("*")
+      .in("recipient_email", allEmails)
+      .order("sent_at", { ascending: false })
+      .limit(50);
+    if (emails) emailLogs = emails as Array<Record<string, unknown>>;
+  }
+
+  return { ok: true, offering_views: offeringViews, email_logs: emailLogs };
+}
+
+async function resolveEditConflict(
+  submissionId: string,
+  decision: string,
+  reviewNotes: string,
+  actorEmail: string,
+) {
+  const normalizedDecision = requireString(decision).toLowerCase();
+  if (!["approve", "reject"].includes(normalizedDecision)) throw new Error("Decision must be 'approve' or 'reject'.");
+
+  const { data: submission, error } = await adminClient
+    .from("gre_mis_form_submissions")
+    .select("*")
+    .eq("id", submissionId)
+    .single();
+  if (error || !submission) throw new Error(error?.message || "Edit submission not found.");
+  if (requireString(submission.source_mode) !== "signed_in_edit") throw new Error("Submission is not an edit.");
+  if (!submission.conflict_with_gre_sync) throw new Error("Submission is not flagged as conflicting.");
+
+  if (normalizedDecision === "reject") {
+    // Reject: delete the edit submission, GRE version wins
+    const { error: delError } = await adminClient
+      .from("gre_mis_form_submissions")
+      .delete()
+      .eq("id", submissionId);
+    if (delError) throw new Error(delError.message);
+    return { ok: true, decision: "rejected", message: "Edit rejected; GRE version retained." };
+  }
+
+  // Approve: clear conflict flag, update parent to use edit payload
+  const parentId = requireString(submission.parent_submission_id);
+  if (parentId) {
+    const { error: parentError } = await adminClient
+      .from("gre_mis_form_submissions")
+      .update({
+        payload: submission.payload,
+        conflict_with_gre_sync: false,
+        gre_sync_status: "pending_admin_review",
+        gre_sync_message: "Edit approved by admin; awaiting GRE sync.",
+        admin_review_notes: reviewNotes || "Edit conflict resolved by admin.",
+      })
+      .eq("id", parentId);
+    if (parentError) throw new Error(parentError.message);
+
+    // Mark the edit as approved
+    await adminClient
+      .from("gre_mis_form_submissions")
+      .update({
+        approval_status: "approved",
+        conflict_with_gre_sync: false,
+        admin_review_notes: reviewNotes || "Edit approved.",
+        reviewed_by_email: actorEmail,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq("id", submissionId);
+  }
+
+  return { ok: true, decision: "approved", message: "Edit approved; conflict resolved." };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -9685,6 +9924,22 @@ Deno.serve(async (req) => {
         "signed_in",
         userCtx,
       ));
+    }
+
+    if (action === "fetchMySolutions") {
+      return jsonResponse(await fetchMySolutions(userCtx));
+    }
+
+    if (action === "submitSignedInEdit") {
+      return jsonResponse(await submitSignedInEdit(
+        requireString(payload.parentSubmissionId),
+        (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
+        userCtx,
+      ));
+    }
+
+    if (action === "fetchSolutionOutreach") {
+      return jsonResponse(await fetchSolutionOutreach(userCtx));
     }
 
     if (action === "directCuratorUpdate") {
@@ -9970,6 +10225,18 @@ Deno.serve(async (req) => {
           (payload.patch && typeof payload.patch === "object") ? payload.patch as Record<string, unknown> : {},
           requireString(payload.conflictNote),
           Boolean(payload.resolveConflict),
+          adminActorEmail,
+        ));
+      }
+
+      if (action === "resolveEditConflict") {
+        if (isModeratorMisRole(adminActorRole) && requireString(payload.decision).toLowerCase() === "reject") {
+          throw new Error("Moderators cannot reject edit conflicts.");
+        }
+        return jsonResponse(await resolveEditConflict(
+          requireString(payload.submissionId),
+          requireString(payload.decision),
+          requireString(payload.reviewNotes),
           adminActorEmail,
         ));
       }

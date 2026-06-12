@@ -16,9 +16,22 @@ Vanilla HTML/CSS/JS static site + independent Supabase backend.
 | `styles.css` | All styles (~2K lines) |
 | `config.js` | Runtime config: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ADMIN_FUNCTION`, `MAPPLS_MAP_KEY` |
 | `config.example.js` | Template — copy to `config.js` and fill in values |
-| `supabase/migrations/` | 84 SQL migrations, run in date order |
-| `supabase/functions/gre-mis-admin/index.ts` | Deno edge function (~9.5K lines, single `Deno.serve` handler) |
+| `supabase/migrations/` | 85 SQL migrations, run in date order |
+| `supabase/functions/gre-mis-admin/index.ts` | Deno edge function (~10.2K lines, single `Deno.serve` handler) |
+| `hostinger-solution-need/index.html` | `solution.grameee.org` — solution submission page with My Solutions view |
+| `hostinger-help-need/index.html` | `help.grameee.org` — help/need submission page |
 | `.github/workflows/deploy-pages.yml` | CI: copies specific files to `_site/`, deploys to GitHub Pages |
+
+## My Solutions feature
+
+The "My Solutions" feature lives entirely on `solution.grameee.org` (`hostinger-solution-need/index.html`).
+- **Entry**: "My Solutions" button in the hero bar next to the language toggle, visible only when logged in
+- **View**: toggles between the submission iframe and a self-contained card list with search, status filter, category filter, and sort
+- **Data**: fetched via the edge function (`fetchMySolutions`, `fetchSolutionOutreach`) using the GramEEE access token for auth
+- **Edits**: opened via modal, submitted as `signed_in_edit` rows in `gre_mis_form_submissions` (approval_status = pending_admin)
+- **Conflict detection**: when a GRE sync touches an offering that has a pending local edit, `conflict_with_gre_sync` is set; admin resolves via `resolveEditConflict` action in the Management Desk
+- **Edge function actions**: `fetchMySolutions`, `submitSignedInEdit`, `fetchSolutionOutreach` (user auth), `resolveEditConflict` (admin auth)
+- **Migration**: `20260612000000_add_my_solutions.sql` — adds `signed_in_edit` source_mode, edit lineage columns, `gre_mis_offering_views` table, RLS policies
 
 ## Auth
 

@@ -21,6 +21,9 @@
       --brand: #2f6f44;
       --brand-dark: #235836;
       --shadow: rgba(24, 58, 39, 0.1);
+      --red: #ba5441;
+      --amber: #c68c28;
+      --green: #2e6a3c;
     }
 
     * { box-sizing: border-box; }
@@ -63,6 +66,13 @@
       flex: 1 1 auto;
     }
 
+    .hero-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
     .lang-switch {
       display: inline-flex;
       gap: 8px;
@@ -82,12 +92,45 @@
       cursor: pointer;
       color: rgba(245, 251, 245, 0.9);
       background: transparent;
+      white-space: nowrap;
     }
 
     .lang-btn.active {
       background: #ffffff;
       color: var(--brand-dark);
       box-shadow: 0 8px 20px rgba(8, 22, 12, 0.16);
+    }
+
+    .lang-btn.my-solutions-btn {
+      background: rgba(255,255,255,0.18);
+      color: #f5fbf5;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .lang-btn.my-solutions-btn:hover {
+      background: rgba(255,255,255,0.28);
+    }
+
+    .lang-btn.my-solutions-btn.active-view {
+      background: #ffffff;
+      color: var(--brand-dark);
+      box-shadow: 0 8px 20px rgba(8, 22, 12, 0.16);
+    }
+
+    .my-solutions-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 22px;
+      height: 22px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: var(--amber);
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: 800;
     }
 
     .eyebrow {
@@ -131,14 +174,500 @@
       display: block;
     }
 
+    .frame-shell-hidden { display: none; }
+
+    /* ── My Solutions View ── */
+
+    .my-solutions-shell {
+      padding: 28px 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      min-height: 780px;
+    }
+
+    .my-solutions-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .my-solutions-header-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .my-solutions-header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--brand);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+
+    .back-btn:hover { background: var(--panel); }
+
+    .my-solutions-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text);
+      margin: 0;
+    }
+
+    .search-input {
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      font: inherit;
+      font-size: 0.9rem;
+      color: var(--text);
+      min-width: 200px;
+    }
+
+    .search-input:focus {
+      outline: 2px solid var(--brand);
+      outline-offset: -1px;
+    }
+
+    .filter-select {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      font: inherit;
+      font-size: 0.85rem;
+      color: var(--text);
+    }
+
+    .filter-select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
+
+    .my-solutions-meta {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .my-solutions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .solution-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 20px 22px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .solution-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .solution-card-info {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .solution-card-name {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+
+    .solution-card-category {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .solution-card-org {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .solution-card-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .action-btn {
+      padding: 6px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--brand);
+      font: inherit;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .action-btn:hover { background: var(--green-soft, #dfece0); }
+    .action-btn:disabled { opacity: 0.5; cursor: default; }
+
+    .action-btn.primary-action {
+      background: var(--brand);
+      color: #fff;
+      border-color: var(--brand);
+    }
+
+    .action-btn.primary-action:hover { background: var(--brand-dark); }
+
+    .solution-card-status {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+
+    .status-pill::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-live { background: #e4f3e4; color: #1f6b3a; }
+    .status-live::before { background: #1f6b3a; }
+
+    .status-pending { background: #fff3d6; color: #8a6d1f; }
+    .status-pending::before { background: #c68c28; }
+
+    .status-rejected { background: #fbe4e0; color: #9b3a2a; }
+    .status-rejected::before { background: var(--red); }
+
+    .status-edit { background: #dce8f5; color: #2a5a7a; }
+    .status-edit::before { background: #2a5a7a; }
+
+    .status-conflict { background: #fce8d0; color: #8a4f1a; }
+    .status-conflict::before { background: #cc7633; }
+
+    .conflict-warning {
+      color: #cc5200;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+
+    .solution-card-outreach {
+      background: rgba(255,255,255,0.6);
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: grid;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .outreach-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .outreach-header:hover { color: var(--text); }
+
+    .outreach-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .outreach-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.82rem;
+      padding: 4px 0;
+    }
+
+    .outreach-item-detail {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .outreach-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      flex-shrink: 0;
+    }
+
+    .outreach-icon.view { background: #dce8f5; color: #2a5a7a; }
+    .outreach-icon.email { background: #e4f3e4; color: #1f6b3a; }
+    .outreach-icon.connected { background: #d4edda; color: #155724; }
+
+    .outreach-item-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .outreach-item-time {
+      color: var(--muted);
+      font-size: 0.75rem;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .my-solutions-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 60px 20px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .my-solutions-empty-icon {
+      font-size: 2.5rem;
+      opacity: 0.5;
+    }
+
+    .my-solutions-empty-text {
+      font-size: 1rem;
+      max-width: 400px;
+      line-height: 1.6;
+    }
+
+    .my-solutions-loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 60px;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    /* ── Edit Modal ── */
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(16, 31, 24, 0.58);
+    }
+
+    .modal-overlay.hidden { display: none; }
+
+    .modal-card {
+      background: var(--surface);
+      border-radius: 28px;
+      box-shadow: 0 18px 48px rgba(36, 73, 45, 0.2);
+      width: min(780px, calc(100vw - 32px));
+      max-height: calc(100vh - 48px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-head h3 {
+      margin: 0;
+      font-size: 1.2rem;
+      color: var(--text);
+    }
+
+    .modal-close-btn {
+      width: 36px;
+      height: 36px;
+      border: 0;
+      border-radius: 999px;
+      background: rgba(36, 73, 45, 0.08);
+      color: var(--text);
+      font-size: 1.3rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-close-btn:hover { background: rgba(36, 73, 45, 0.15); }
+
+    .modal-body {
+      padding: 20px 24px;
+      overflow-y: auto;
+      display: grid;
+      gap: 16px;
+      flex: 1;
+    }
+
+    .modal-body .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .modal-body .form-grid .wide { grid-column: 1 / -1; }
+
+    .modal-body label {
+      display: grid;
+      gap: 4px;
+    }
+
+    .modal-body label span {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    .modal-body input,
+    .modal-body textarea,
+    .modal-body select {
+      padding: 8px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      font: inherit;
+      font-size: 0.9rem;
+      color: var(--text);
+      width: 100%;
+    }
+
+    .modal-body textarea { resize: vertical; min-height: 60px; }
+    .modal-body input:focus,
+    .modal-body textarea:focus,
+    .modal-body select:focus {
+      outline: 2px solid var(--brand);
+      outline-offset: -1px;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 16px 24px 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    .modal-status {
+      font-size: 0.85rem;
+      color: var(--muted);
+      padding: 0 24px;
+      margin: 0;
+      min-height: 24px;
+    }
+
+    .btn-modal {
+      padding: 10px 22px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    .btn-modal-primary {
+      background: var(--brand);
+      color: #fff;
+      border-color: var(--brand);
+    }
+
+    .btn-modal-primary:hover { background: var(--brand-dark); }
+    .btn-modal-primary:disabled { opacity: 0.5; cursor: default; }
+
+    .btn-modal-secondary {
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    .btn-modal-secondary:hover { background: var(--panel); }
+
+    .edit-tags-area {
+      min-height: 36px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 4px 0;
+    }
+
+    .edit-tag-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: #e4f3e4;
+      color: #1f6b3a;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+
     @media (max-width: 900px) {
       body > .grameee-shell-mount {
         width: calc(100vw - 24px);
       }
 
       .page { padding: 12px; }
-      .hero { padding: 18px; border-radius: 20px; }
+      .hero { padding: 18px; border-radius: 20px; flex-wrap: wrap; }
+      .hero-actions { width: 100%; justify-content: flex-end; }
       iframe { height: calc(100vh - 220px); min-height: 680px; }
+      .my-solutions-shell { padding: 18px 16px; min-height: 680px; }
+      .my-solutions-header { flex-direction: column; align-items: stretch; }
+      .modal-body .form-grid { grid-template-columns: 1fr; }
+      .search-input { min-width: 150px; }
     }
   </style>
 </head>
@@ -150,13 +679,19 @@
         <h1 id="heroTitle">Solution Offering</h1>
         <p class="lede" id="heroLede">Upload your solutions to the AskGRE platform. Added solutions go through an approval process and then reflect on the AskGRE surface once accepted.</p>
       </div>
-      <div class="lang-switch" aria-label="Select language">
-        <button type="button" class="lang-btn active" data-lang="en">English</button>
-        <button type="button" class="lang-btn" data-lang="hi">Hindi</button>
+      <div class="hero-actions">
+        <div class="lang-switch" aria-label="Select language">
+          <button type="button" class="lang-btn active" data-lang="en">English</button>
+          <button type="button" class="lang-btn" data-lang="hi">Hindi</button>
+        </div>
+        <button type="button" id="mySolutionsToggleBtn" class="lang-btn my-solutions-btn hidden">
+          My Solutions
+          <span id="mySolutionsBadge" class="my-solutions-badge hidden">0</span>
+        </button>
       </div>
     </section>
 
-    <section class="frame-shell">
+    <section id="submitSolutionShell" class="frame-shell">
       <iframe
         id="solutionFormFrame"
         title="GRE Solution Offering Form"
@@ -165,6 +700,108 @@
         referrerpolicy="strict-origin-when-cross-origin"
       ></iframe>
     </section>
+
+    <section id="mySolutionsShell" class="frame-shell frame-shell-hidden">
+      <div class="my-solutions-shell">
+        <div class="my-solutions-header">
+          <div class="my-solutions-header-left">
+            <button type="button" id="backToSubmitBtn" class="back-btn">&larr; Back to Submit</button>
+            <h2 class="my-solutions-title">My Solutions</h2>
+          </div>
+          <div class="my-solutions-header-right">
+            <input type="search" id="mySolutionsSearch" class="search-input" placeholder="Search by name, category, organisation..." />
+            <select id="mySolutionsStatusFilter" class="filter-select">
+              <option value="all">All status</option>
+              <option value="approved">Live on GRE</option>
+              <option value="pending_admin">Pending Approval</option>
+              <option value="edit">Edit Pending</option>
+              <option value="rejected">Rejected</option>
+              <option value="conflict">Conflict</option>
+            </select>
+            <select id="mySolutionsCategoryFilter" class="filter-select">
+              <option value="all">All categories</option>
+              <option value="Service offerings">Service</option>
+              <option value="Product offerings">Product</option>
+              <option value="Knowledge offerings">Knowledge</option>
+            </select>
+            <select id="mySolutionsSort" class="filter-select">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="name">Name A-Z</option>
+            </select>
+          </div>
+        </div>
+        <p id="mySolutionsMeta" class="my-solutions-meta"></p>
+        <div id="mySolutionsList" class="my-solutions-list"></div>
+      </div>
+    </section>
+  </div>
+
+  <div id="editModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow" style="margin:0 0 2px">Edit Solution</p>
+          <h3 id="editModalTitle">Edit Your Solution</h3>
+        </div>
+        <button type="button" id="closeEditModal" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editSubmissionId" />
+        <div class="form-grid">
+          <label class="wide">
+            <span>Solution / Offering Name</span>
+            <input id="editOfferingName" required />
+          </label>
+          <label class="wide">
+            <span>Offering Description</span>
+            <textarea id="editOfferingDescription" rows="4" required></textarea>
+          </label>
+          <label>
+            <span>Offering Category</span>
+            <select id="editOfferingCategory">
+              <option value="Service offerings">Service</option>
+              <option value="Product offerings">Product</option>
+              <option value="Knowledge offerings">Knowledge</option>
+            </select>
+          </label>
+          <label>
+            <span>Offering Type</span>
+            <input id="editOfferingType" />
+          </label>
+          <label>
+            <span>Organisation Name</span>
+            <input id="editOrgName" />
+          </label>
+          <label>
+            <span>Contact Email</span>
+            <input id="editContactEmail" type="email" />
+          </label>
+          <label>
+            <span>Contact Phone</span>
+            <input id="editContactPhone" />
+          </label>
+          <label>
+            <span>Contact Person</span>
+            <input id="editContactPerson" />
+          </label>
+          <label class="wide">
+            <span>Tags (comma-separated)</span>
+            <input id="editTags" placeholder="e.g. training, renewable, solar" />
+            <div id="editTagsDisplay" class="edit-tags-area"></div>
+          </label>
+          <label class="wide">
+            <span>Geographies (semicolon-separated)</span>
+            <textarea id="editGeographies" rows="2" placeholder="e.g. Patna, Bihar, India; Ranchi, Jharkhand, India"></textarea>
+          </label>
+        </div>
+      </div>
+      <p id="editModalStatus" class="modal-status"></p>
+      <div class="modal-footer">
+        <button type="button" id="cancelEditBtn" class="btn-modal btn-modal-secondary">Cancel</button>
+        <button type="button" id="saveEditBtn" class="btn-modal btn-modal-primary">Submit Edit for Approval</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -172,17 +809,25 @@
       const iframe = document.getElementById("solutionFormFrame");
       const iframeBaseUrl = new URL("https://gre.grameee.org/?sharedForm=solution&publicForm=solution&grameeeEmbed=1&embedVersion=20260602lang7");
       const iframeOrigin = iframeBaseUrl.origin;
-      const languageButtons = [...document.querySelectorAll(".lang-btn")];
+      const languageButtons = [...document.querySelectorAll(".lang-btn:not(.my-solutions-btn)")];
+      const mySolutionsBtn = document.getElementById("mySolutionsToggleBtn");
+      const mySolutionsBadge = document.getElementById("mySolutionsBadge");
+      const submitShell = document.getElementById("submitSolutionShell");
+      const mySolutionsShell = document.getElementById("mySolutionsShell");
+      const backToSubmitBtn = document.getElementById("backToSubmitBtn");
       const heroTitle = document.getElementById("heroTitle");
       const heroLede = document.getElementById("heroLede");
+      // Copy map for language toggle
       const copy = {
         en: {
           title: "Solution Offering",
-          lede: "Upload your solutions to the AskGRE platform. Added solutions go through an approval process and then reflect on the AskGRE surface once accepted."
+          lede: "Upload your solutions to the AskGRE platform. Added solutions go through an approval process and then reflect on the AskGRE surface once accepted.",
+          mySolutionsTitle: "My Solutions",
         },
         hi: {
           title: "समाधान प्रस्तुति",
-          lede: "अपने समाधानों को AskGRE मंच पर अपलोड करें। जोड़े गए समाधान स्वीकृति प्रक्रिया से गुजरते हैं और स्वीकार होने पर AskGRE पर दिखाई देते हैं।"
+          lede: "अपने समाधानों को AskGRE मंच पर अपलोड करें। जोड़े गए समाधान स्वीकृति प्रक्रिया से गुजरते हैं और स्वीकार होने पर AskGRE पर दिखाई देते हैं।",
+          mySolutionsTitle: "मेरे समाधान",
         }
       };
 
@@ -214,6 +859,9 @@
         });
         heroTitle.textContent = copy[normalized].title;
         heroLede.textContent = copy[normalized].lede;
+        if (currentView === "my-solutions") {
+          document.querySelector(".my-solutions-title").textContent = copy[normalized].mySolutionsTitle;
+        }
         const reloaded = ensureIframeLanguage(normalized);
         if (reloaded) return;
         iframe.contentWindow?.postMessage({
@@ -241,6 +889,375 @@
         return normalizeActor(hydrated);
       }
 
+      async function getAccessToken() {
+        if (window.grameeeAuth?.getAccessToken) {
+          try { return await window.grameeeAuth.getAccessToken(); } catch {}
+        }
+        return null;
+      }
+
+      async function callEdge(action, payload = {}) {
+        const token = await getAccessToken();
+        const supabaseUrl = (window.grameeeSupabase && window.grameeeSupabase.url) || "https://zphabezqbboaexmmhcic.supabase.co";
+        const functionName = "gre-mis-admin";
+        const anonKey = (window.grameeeSupabase && window.grameeeSupabase.anonKey) || "";
+        const url = supabaseUrl.replace(/\/+$/, "") + "/functions/v1/" + functionName;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": anonKey,
+            "Authorization": "Bearer " + anonKey,
+          },
+          body: JSON.stringify({ ...payload, action, grameeeAccessToken: token }),
+        });
+        const data = await response.json();
+        if (!response.ok || data.error) throw new Error(data.error || "Request failed");
+        return data;
+      }
+
+      // ── View management ──
+
+      let currentView = "submit";
+      let currentUser = null;
+      let solutionsCache = [];
+      let outreachCache = { offering_views: [], email_logs: [] };
+
+      function showSubmitView() {
+        currentView = "submit";
+        submitShell.classList.remove("frame-shell-hidden");
+        mySolutionsShell.classList.add("frame-shell-hidden");
+        mySolutionsBtn.classList.remove("active-view");
+        heroTitle.textContent = copy[getStoredLanguage()].title;
+        heroLede.textContent = copy[getStoredLanguage()].lede;
+        updateUrl("");
+      }
+
+      function showMySolutionsView() {
+        currentView = "my-solutions";
+        submitShell.classList.add("frame-shell-hidden");
+        mySolutionsShell.classList.remove("frame-shell-hidden");
+        mySolutionsBtn.classList.add("active-view");
+        heroTitle.textContent = copy[getStoredLanguage()].mySolutionsTitle;
+        heroLede.textContent = "View and manage your submitted solutions.";
+        updateUrl("my-solutions");
+        loadMySolutions();
+      }
+
+      function updateUrl(view) {
+        const url = new URL(window.location);
+        if (view) url.searchParams.set("view", view);
+        else url.searchParams.delete("view");
+        window.history.replaceState({ view }, "", url.toString());
+      }
+
+      // ── Load My Solutions ──
+
+      async function loadMySolutions() {
+        const list = document.getElementById("mySolutionsList");
+        list.innerHTML = '<div class="my-solutions-loading">Loading your solutions...</div>';
+
+        try {
+          const [solutionsRes, outreachRes] = await Promise.all([
+            callEdge("fetchMySolutions"),
+            callEdge("fetchSolutionOutreach"),
+          ]);
+          solutionsCache = solutionsRes.submissions || [];
+          outreachCache = outreachRes || { offering_views: [], email_logs: [] };
+
+          mySolutionsBadge.textContent = solutionsCache.length;
+          mySolutionsBadge.classList.toggle("hidden", solutionsCache.length === 0);
+
+          applyFiltersAndRender();
+        } catch (err) {
+          list.innerHTML = `<div class="my-solutions-empty"><p class="my-solutions-empty-text">Could not load your solutions: ${err.message}</p></div>`;
+        }
+      }
+
+      // ── Filter, Sort, Search ──
+
+      function getStatus(solution) {
+        if (solution.conflict_with_gre_sync) return "conflict";
+        if (solution.source_mode === "signed_in_edit") return "edit";
+        return solution.approval_status || "pending_admin";
+      }
+
+      function getStatusLabel(solution) {
+        const s = getStatus(solution);
+        const map = {
+          approved: "Live on GRE",
+          pending_admin: "Pending Approval",
+          rejected: "Rejected",
+          edit: "Edit Pending",
+          conflict: "Conflict — Awaiting Review",
+        };
+        return map[s] || s;
+      }
+
+      function getStatusClass(solution) {
+        const s = getStatus(solution);
+        const map = {
+          approved: "status-live",
+          pending_admin: "status-pending",
+          rejected: "status-rejected",
+          edit: "status-edit",
+          conflict: "status-conflict",
+        };
+        return map[s] || "status-pending";
+      }
+
+      function applyFiltersAndRender() {
+        const search = (document.getElementById("mySolutionsSearch").value || "").toLowerCase().trim();
+        const statusFilter = document.getElementById("mySolutionsStatusFilter").value;
+        const categoryFilter = document.getElementById("mySolutionsCategoryFilter").value;
+        const sort = document.getElementById("mySolutionsSort").value;
+
+        let filtered = solutionsCache.filter((s) => {
+          if (search) {
+            const name = (s.offering_name || "").toLowerCase();
+            const org = (s.organization_name || "").toLowerCase();
+            const cat = (s.offering_category || "").toLowerCase();
+            const type = (s.offering_type || "").toLowerCase();
+            const tags = (s.tags || []).join(" ").toLowerCase();
+            if (!name.includes(search) && !org.includes(search) && !cat.includes(search) && !type.includes(search) && !tags.includes(search)) return false;
+          }
+          if (statusFilter !== "all" && getStatus(s) !== statusFilter) return false;
+          if (categoryFilter !== "all" && (s.offering_category || "") !== categoryFilter) return false;
+          return true;
+        });
+
+        if (sort === "newest") filtered.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        else if (sort === "oldest") filtered.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        else if (sort === "name") filtered.sort((a, b) => (a.offering_name || "").localeCompare(b.offering_name || ""));
+
+        document.getElementById("mySolutionsMeta").textContent = `Showing ${filtered.length} of ${solutionsCache.length} solutions`;
+        renderCards(filtered);
+      }
+
+      // ── Render Cards ──
+
+      function renderCards(solutions) {
+        const list = document.getElementById("mySolutionsList");
+        if (!solutions.length) {
+          list.innerHTML = `<div class="my-solutions-empty">
+            <div class="my-solutions-empty-icon">&#128161;</div>
+            <p class="my-solutions-empty-text">No solutions found. Submit a solution and it will appear here once reviewed.</p>
+          </div>`;
+          return;
+        }
+
+        list.innerHTML = solutions.map((s) => {
+          const outreach = getOutreachForSubmission(s);
+          const canEdit = s.approval_status === "approved" && s.source_mode !== "signed_in_edit";
+          const isPendingEdit = s.source_mode === "signed_in_edit";
+          const isConflict = s.conflict_with_gre_sync;
+
+          return `<div class="solution-card" data-id="${esc(s.id)}">
+            <div class="solution-card-top">
+              <div class="solution-card-info">
+                <h4 class="solution-card-name">${esc(s.offering_name || "Unnamed")}</h4>
+                <p class="solution-card-category">${esc(s.offering_category || "")}${s.offering_type ? " &middot; " + esc(s.offering_type) : ""}</p>
+                <p class="solution-card-org">${esc(s.organization_name || "")}${s.existing_trader_name ? " via " + esc(s.existing_trader_name) : ""}</p>
+              </div>
+              <div class="solution-card-actions">
+                ${canEdit ? `<button class="action-btn" onclick="openEditModal('${esc(s.id)}')">Edit</button>` : ""}
+                ${isPendingEdit ? `<button class="action-btn" disabled>Edit Pending</button>` : ""}
+              </div>
+            </div>
+            <div class="solution-card-status">
+              <span class="status-pill ${getStatusClass(s)}">${esc(getStatusLabel(s))}</span>
+              ${isConflict ? '<span class="conflict-warning">&#9888; Pending admin review</span>' : ""}
+              ${s.parent_name ? `<span class="status-pill status-edit">Editing: ${esc(s.parent_name)}</span>` : ""}
+            </div>
+            ${outreach.items.length ? renderOutreach(outreach) : ""}
+          </div>`;
+        }).join("");
+      }
+
+      function getOutreachForSubmission(solution) {
+        const views = (outreachCache.offering_views || []).filter((v) => v.submission_id === solution.id);
+        const emails = (outreachCache.email_logs || []).filter((e) => {
+          const subEmail = (solution.submitter_email || "").toLowerCase();
+          return (e.recipient_email || "").toLowerCase() === subEmail;
+        });
+        const items = [];
+        for (const v of views) {
+          items.push({
+            kind: "view",
+            label: (v.viewer_organisation || v.viewer_email || "Someone") + " viewed your offering",
+            time: v.viewed_at,
+          });
+        }
+        for (const e of emails) {
+          items.push({
+            kind: "email",
+            label: "Email sent about a matching need",
+            time: e.sent_at,
+          });
+        }
+        items.sort((a, b) => new Date(b.time) - new Date(a.time));
+        return { items, count: items.length };
+      }
+
+      function renderOutreach(outreach) {
+        return `<div class="solution-card-outreach">
+          <div class="outreach-header" onclick="this.nextElementSibling.classList.toggle('hidden')">
+            <span>Outreach &middot; ${outreach.count} ${outreach.count === 1 ? "activity" : "activities"}</span>
+            <span>&#9660;</span>
+          </div>
+          <div class="outreach-list">
+            ${outreach.items.slice(0, 5).map((item) => {
+              const iconClass = item.kind === "view" ? "view" : item.kind === "email" ? "email" : "connected";
+              const iconLabel = item.kind === "view" ? "V" : item.kind === "email" ? "E" : "C";
+              return `<div class="outreach-item">
+                <div class="outreach-item-detail">
+                  <span class="outreach-icon ${iconClass}">${iconLabel}</span>
+                  <span class="outreach-item-label">${esc(item.label)}</span>
+                </div>
+                <span class="outreach-item-time">${timeAgo(item.time)}</span>
+              </div>`;
+            }).join("")}
+            ${outreach.items.length > 5 ? `<div class="outreach-item" style="font-size:0.78rem;color:var(--muted)">+${outreach.items.length - 5} more</div>` : ""}
+          </div>
+        </div>`;
+      }
+
+      // ── Edit Modal ──
+
+      window.openEditModal = function(submissionId) {
+        const s = solutionsCache.find((x) => x.id === submissionId);
+        if (!s) return;
+        document.getElementById("editSubmissionId").value = submissionId;
+        document.getElementById("editModalTitle").textContent = "Edit: " + (s.offering_name || "Unnamed");
+        document.getElementById("editOfferingName").value = s.offering_name || "";
+        document.getElementById("editOfferingDescription").value = s.about_offering_text || "";
+        document.getElementById("editOfferingCategory").value = s.offering_category || "Service offerings";
+        document.getElementById("editOfferingType").value = s.offering_type || "";
+        document.getElementById("editOrgName").value = s.organization_name || "";
+        document.getElementById("editContactEmail").value = s.submitter_email || "";
+        document.getElementById("editContactPhone").value = s.submitter_phone || "";
+        document.getElementById("editContactPerson").value = s.submitter_name || "";
+        const tags = Array.isArray(s.tags) ? s.tags.join(", ") : "";
+        document.getElementById("editTags").value = tags;
+        renderEditTags(tags);
+        const geos = Array.isArray(s.geographies) ? s.geographies.join("; ") : "";
+        document.getElementById("editGeographies").value = geos;
+        document.getElementById("editModalStatus").textContent = "";
+        document.getElementById("editModal").classList.remove("hidden");
+      };
+
+      function renderEditTags(tagsStr) {
+        const tags = tagsStr.split(",").map((t) => t.trim()).filter(Boolean);
+        const area = document.getElementById("editTagsDisplay");
+        area.innerHTML = tags.map((t) => `<span class="edit-tag-chip">${esc(t)}</span>`).join("");
+      }
+
+      document.getElementById("editTags").addEventListener("input", function() {
+        renderEditTags(this.value);
+      });
+
+      document.getElementById("closeEditModal").addEventListener("click", closeEditModal);
+      document.getElementById("cancelEditBtn").addEventListener("click", closeEditModal);
+      document.getElementById("editModal").addEventListener("click", function(e) {
+        if (e.target === this) closeEditModal();
+      });
+
+      function closeEditModal() {
+        document.getElementById("editModal").classList.add("hidden");
+      }
+
+      document.getElementById("saveEditBtn").addEventListener("click", async function() {
+        const submissionId = document.getElementById("editSubmissionId").value;
+        if (!submissionId) return;
+
+        const statusEl = document.getElementById("editModalStatus");
+        const saveBtn = this;
+        saveBtn.disabled = true;
+        statusEl.textContent = "Submitting edit...";
+
+        try {
+          const offeringName = document.getElementById("editOfferingName").value.trim();
+          if (!offeringName) throw new Error("Solution name is required.");
+
+          const tagsStr = document.getElementById("editTags").value;
+          const tags = tagsStr.split(",").map((t) => t.trim()).filter(Boolean);
+
+          const geosStr = document.getElementById("editGeographies").value;
+          const geographies = geosStr.split(";").map((g) => g.trim()).filter(Boolean);
+
+          const payload = {
+            offering_name: offeringName,
+            about_offering_text: document.getElementById("editOfferingDescription").value.trim(),
+            offering_category: document.getElementById("editOfferingCategory").value,
+            offering_type: document.getElementById("editOfferingType").value.trim(),
+            organization_name: document.getElementById("editOrgName").value.trim(),
+            submitter_email: document.getElementById("editContactEmail").value.trim(),
+            submitter_phone: document.getElementById("editContactPhone").value.trim(),
+            submitter_name: document.getElementById("editContactPerson").value.trim(),
+            tags,
+            geographies,
+          };
+
+          const result = await callEdge("submitSignedInEdit", {
+            parentSubmissionId: submissionId,
+            payload,
+          });
+
+          statusEl.textContent = result.message || "Edit submitted for approval.";
+          setTimeout(closeEditModal, 1500);
+          loadMySolutions();
+        } catch (err) {
+          statusEl.textContent = "Error: " + err.message;
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+
+      // ── Auth and View Init ──
+
+      async function initAuthAndView() {
+        currentUser = await getCurrentUser();
+
+        if (currentUser) {
+          mySolutionsBtn.classList.remove("hidden");
+          const token = await getAccessToken();
+          if (token) {
+            try {
+              const solRes = await callEdge("fetchMySolutions");
+              const count = (solRes.submissions || []).length;
+              mySolutionsBadge.textContent = count;
+              mySolutionsBadge.classList.toggle("hidden", count === 0);
+              solutionsCache = solRes.submissions || [];
+            } catch {}
+          }
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("view") === "my-solutions" && currentUser) {
+          showMySolutionsView();
+        }
+      }
+
+      // ── Event Bindings ──
+
+      mySolutionsBtn.addEventListener("click", () => {
+        if (currentView === "my-solutions") showSubmitView();
+        else showMySolutionsView();
+      });
+
+      backToSubmitBtn.addEventListener("click", showSubmitView);
+
+      document.getElementById("mySolutionsSearch").addEventListener("input", applyFiltersAndRender);
+      document.getElementById("mySolutionsStatusFilter").addEventListener("change", applyFiltersAndRender);
+      document.getElementById("mySolutionsCategoryFilter").addEventListener("change", applyFiltersAndRender);
+      document.getElementById("mySolutionsSort").addEventListener("change", applyFiltersAndRender);
+
+      // Language buttons
+      languageButtons.forEach((button) => {
+        button.addEventListener("click", () => applyLanguage(button.dataset.lang || "en"));
+      });
+
+      // Iframe context
       async function postContextToFrame() {
         const user = await getCurrentUser();
         iframe.contentWindow?.postMessage({
@@ -254,7 +1271,11 @@
       }
 
       iframe.addEventListener("load", postContextToFrame);
-      document.addEventListener("grameee:auth-updated", postContextToFrame);
+      document.addEventListener("grameee:auth-updated", () => {
+        initAuthAndView();
+        postContextToFrame();
+      });
+
       window.addEventListener("message", (event) => {
         if (event.origin !== iframeOrigin || !event.data || typeof event.data !== "object") return;
         if (event.data.type === "grameee-form-request-context") {
@@ -266,13 +1287,40 @@
           authLink?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
         }
       });
-      languageButtons.forEach((button) => {
-        button.addEventListener("click", () => applyLanguage(button.dataset.lang || "en"));
-      });
+
+      // Init
       ensureIframeLanguage(getStoredLanguage());
       applyLanguage(getStoredLanguage());
       postContextToFrame();
+      initAuthAndView();
     });
+
+    // ── Utilities ──
+
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[char]));
+    }
+
+    function timeAgo(dateStr) {
+      if (!dateStr) return "";
+      const now = new Date();
+      const date = new Date(dateStr);
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 1) return "just now";
+      if (diffMins < 60) return diffMins + "m ago";
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return diffHours + "h ago";
+      const diffDays = Math.floor(diffHours / 24);
+      if (diffDays < 30) return diffDays + "d ago";
+      return date.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+    }
   </script>
 </body>
 </html>
