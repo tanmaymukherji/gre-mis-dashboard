@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -30,7 +30,7 @@
   <script src="https://grameee.org/supabase-config.js?v=20260519gre1"></script>
   <script src="https://grameee.org/auth.js?v=20260531b" defer></script>
   <script src="./config.js?v=20260517b"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260606gre49" />
+  <link rel="stylesheet" href="./styles.css?v=20260610gre01" />
 </head>
 <body>
   <header class="grameee-site-header">
@@ -60,7 +60,7 @@
           <div class="auth-copy">
             <p class="eyebrow">Green Rural Economy</p>
             <h2>Welcome to the GRE MIS</h2>
-            <p class="auth-lede">Track live inbounds, understand curator movement, surface solution matches, and coordinate the day’s action from one cleaner workspace.</p>
+            <p class="auth-lede">Track live inbounds, understand curator movement, surface solution matches, and coordinate the dayâ€™s action from one cleaner workspace.</p>
             <div class="auth-highlight-row">
               <span class="auth-highlight">Live needs intelligence</span>
               <span class="auth-highlight">Curator coordination</span>
@@ -324,7 +324,7 @@
                     </label>
                     <label>
                       <span>Organisation Name</span>
-                      <input name="organization_name" id="solutionOrgName" required />
+                      <input name="organization_name" id="solutionOrgName" required readonly />
                     </label>
                     <label>
                       <span>Contact Person</span>
@@ -332,11 +332,11 @@
                     </label>
                     <label>
                       <span>Contact Email</span>
-                      <input name="submitter_email" type="email" required />
+                      <input name="submitter_email" type="email" required readonly />
                     </label>
                     <label>
                       <span>Contact Phone</span>
-                      <input name="submitter_phone" />
+                      <input name="submitter_phone" readonly />
                     </label>
                   </div>
                 </div>
@@ -624,19 +624,19 @@
                   </label>
                   <label>
                     <span>Organisation Name</span>
-                    <input name="organization_name" id="needOrgName" required />
+                    <input name="organization_name" id="needOrgName" required readonly />
                   </label>
                   <label>
                     <span>Contact Person</span>
-                    <input name="contact_person" required />
+                    <input name="contact_person" required readonly />
                   </label>
                   <label>
                     <span>Email</span>
-                    <input name="seeker_email" type="email" required />
+                    <input name="seeker_email" type="email" required readonly />
                   </label>
                   <label>
                     <span>Phone</span>
-                    <input name="seeker_phone" />
+                    <input name="seeker_phone" / readonly>
                   </label>
                 </div>
               </section>
@@ -717,7 +717,7 @@
         <section id="heroStrip" class="hero-strip">
           <article class="hero-summary">
             <p class="eyebrow">Live Dataset</p>
-            <h2 id="datasetHeadline">Loading GRE inbound records…</h2>
+            <h2 id="datasetHeadline">Loading GRE inbound recordsâ€¦</h2>
             <div id="datasetSubline" class="dataset-stat-grid"></div>
           </article>
         </section>
@@ -762,9 +762,9 @@
               </div>
               <div class="admin-sync-actions">
                 <button id="uploadInboundBtn" class="btn btn-primary">Upload Workbook and Sync</button>
-                <button id="syncGreInboundsBtn" class="btn btn-secondary">Pull Latest Inbounds from GRE</button>
-                <button id="downloadGreInboundBtn" class="btn btn-secondary">Download Inbound from GRE</button>
-                <button id="refreshAiBtn" class="btn btn-secondary">Refresh Need AI Signals</button>
+                <button id="syncGreInboundsBtn" class="btn btn-yellow">Pull Latest Inbounds from GRE</button>
+                <button id="refreshAiBtn" class="btn btn-blue">Refresh Need AI Signals</button>
+                <button id="downloadGreInboundBtn" class="btn btn-orange">Download Inbound from GRE</button>
               </div>
             </div>
             <p id="syncStatus" class="helper-text"></p>
@@ -879,10 +879,10 @@
               </div>
               <div class="admin-sync-actions">
                 <button id="uploadChatbotBtn" class="btn btn-primary">Upload and Sync</button>
-                <button id="syncGreChatbotBtn" class="btn btn-primary">Refresh Chatbot Dataset</button>
-                <button id="refreshChatbotAiBtn" class="btn btn-secondary">Refresh Offering AI Signals</button>
-                <button id="downloadGreTraderBtn" class="btn btn-secondary">Download Trader Data</button>
-                <button id="downloadGreSolutionBtn" class="btn btn-secondary">Download Solution Data</button>
+                <button id="syncGreChatbotBtn" class="btn btn-yellow">Refresh Chatbot Dataset</button>
+                <button id="refreshChatbotAiBtn" class="btn btn-blue">Refresh Offering AI Signals</button>
+                <button id="downloadGreTraderBtn" class="btn btn-orange">Download Trader Data</button>
+                <button id="downloadGreSolutionBtn" class="btn btn-orange">Download Solution Data</button>
               </div>
             </div>
             <p id="chatbotSyncStatus" class="helper-text"></p>
@@ -1002,9 +1002,9 @@
       </div>
       <div class="form-grid">
         <label><span>Seeker Organisation</span><input name="organization_name" required /></label>
-        <label><span>Contact Person</span><input name="contact_person" required /></label>
-        <label><span>Email</span><input name="seeker_email" type="email" required /></label>
-        <label><span>Phone</span><input name="seeker_phone" /></label>
+        <label><span>Contact Person</span><input name="contact_person" required readonly /></label>
+        <label><span>Email</span><input name="seeker_email" type="email" required readonly /></label>
+        <label><span>Phone</span><input name="seeker_phone" / readonly></label>
         <label><span>State</span><input name="state" required /></label>
         <label><span>District</span><input name="district" /></label>
         <label class="wide"><span>Challenge / Need Statement</span><textarea name="problem_statement" rows="5" required></textarea></label>
@@ -1166,7 +1166,7 @@
         </label>
         <label>
           <span>Approved GRE Supplier</span>
-          <select id="submissionReviewTraderSelect" name="existing_trader_id" required></select>
+          <select id="submissionReviewTraderSelect" name="existing_trader_id"></select>
         </label>
         <label class="wide">
           <span>Admin Review Notes</span>
@@ -1302,11 +1302,11 @@
         </label>
         <label>
           <span>Email</span>
-          <input name="seeker_email" type="email" required />
+          <input name="seeker_email" type="email" required readonly />
         </label>
         <label>
           <span>Phone</span>
-          <input name="seeker_phone" />
+          <input name="seeker_phone" / readonly>
         </label>
         <label>
           <span>Need Category</span>
@@ -1349,6 +1349,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260609gre01"></script>
+  <script src="./app.js?v=20260612gre07"></script>
 </body>
 </html>

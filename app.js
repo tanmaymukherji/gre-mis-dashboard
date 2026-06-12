@@ -5207,7 +5207,7 @@ async function buildSubmissionReviewPatch() {
   }
   const payloadField = form.querySelector('[name="payload_json"]');
   const trader = getTraderById(existingTraderId);
-  if (!trader && !isSolution) throw new Error("Please choose a valid GRE supplier before saving the submission.");
+  if (!trader && !isSolution) { /* GRE supplier selection is optional for needs */ }
   payload.organization_name = organizationName
     || payload.organization_name
     || trader?.organisation_name

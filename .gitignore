@@ -11,3 +11,5 @@ window.APP_CONFIG = {
   ENABLE_EMAIL_ACTIONS: true,
   BRAND_NAME: "GREEN RURAL ECONOMY",
 };
+
+.vercel

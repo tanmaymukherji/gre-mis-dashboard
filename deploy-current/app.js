@@ -3465,69 +3465,23 @@ class GreMisStore {
   async searchLgdGeographies(query) {
     const search = normalizeText(query);
     if (search.length < 2) return [];
+    const lgdBase = String(this.config.LGD_API_BASE || "https://grameee.org/api/lgd").replace(/\/+$/, "");
     const fallbackSuggestions = buildFallbackGeographySuggestions(search);
-    const restSuggestions = await this.searchLgdGeographiesViaRest(search).catch((error) => {
-      console.warn("REST LGD geography lookup failed", error);
-      return [];
-    });
-    if (restSuggestions.length) {
-      return uniq([...restSuggestions, ...fallbackSuggestions]);
-    }
     try {
-      const response = await this.callAdmin("searchLgdGeographies", { query: search }, false);
-      const suggestions = ensureList(response?.suggestions).map((item) => normalizeText(item)).filter(Boolean);
+      const response = await fetch(`${lgdBase}/s.php?q=${encodeURIComponent(search)}`);
+      if (!response.ok) {
+        console.warn("Hostinger LGD search failed, using fallback.");
+        return fallbackSuggestions;
+      }
+      const data = await response.json();
+      const suggestions = ensureList(data)
+        .map((item) => normalizeText(item.label))
+        .filter(Boolean);
       return uniq([...suggestions, ...fallbackSuggestions]);
     } catch (error) {
-      console.warn("Backend LGD geography lookup failed", error);
+      console.warn("Hostinger LGD search error", error);
+      return fallbackSuggestions;
     }
-
-    const client = this.getClient();
-    if (!client) return fallbackSuggestions;
-    const manualSuggestions = scoreLgdSuggestion("India", search) > 0 ? ["India"] : [];
-    const wildcard = `%${search.replace(/[%_]/g, " ").trim()}%`;
-    const { data, error } = await client
-      .from("lgd_geography_directory")
-      .select("display_label,location_kind,block_name,district_name,state_name,gram_panchayat_name,village_name")
-      .or(`search_text.ilike.${wildcard},display_label.ilike.${wildcard},block_name.ilike.${wildcard},district_name.ilike.${wildcard},state_name.ilike.${wildcard}`)
-      .limit(20);
-    if (error) {
-      console.warn("LGD geography lookup failed", error);
-      return uniq([...manualSuggestions, ...fallbackSuggestions]);
-    }
-    return uniq([...manualSuggestions, ...buildRankedLgdSuggestions(ensureList(data), search), ...fallbackSuggestions]);
-  }
-
-  async searchLgdGeographiesViaRest(query) {
-    const search = normalizeText(query);
-    if (search.length < 2) return [];
-    const supabaseUrl = normalizeText(this.config.SUPABASE_URL || "");
-    const anonKey = normalizeText(this.config.SUPABASE_ANON_KEY || "");
-    if (!supabaseUrl || !anonKey) return [];
-    const wildcard = `*${search.replace(/[%_*]/g, " ").trim()}*`;
-    const url =
-      `${supabaseUrl}/rest/v1/lgd_geography_directory` +
-      `?select=display_label,location_kind,block_name,district_name,state_name,gram_panchayat_name,village_name` +
-      `&or=(` +
-      `search_text.ilike.${encodeURIComponent(wildcard)},` +
-      `display_label.ilike.${encodeURIComponent(wildcard)},` +
-      `block_name.ilike.${encodeURIComponent(wildcard)},` +
-      `district_name.ilike.${encodeURIComponent(wildcard)},` +
-      `state_name.ilike.${encodeURIComponent(wildcard)}` +
-      `)&limit=20`;
-    const response = await fetch(url, {
-      headers: {
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
-      },
-    });
-    if (!response.ok) {
-      throw new Error(`LGD REST lookup failed (${response.status}).`);
-    }
-    const rows = await response.json().catch(() => []);
-    return uniq([
-      ...(scoreLgdSuggestion("India", search) > 0 ? ["India"] : []),
-      ...buildRankedLgdSuggestions(ensureList(rows), search),
-    ]);
   }
 
   async importInboundWorkbook(fileName, rows, aiProvider) {
@@ -4584,16 +4538,42 @@ function updateNeedOfferingForm() {
   applySharedFormLanguage().catch(() => null);
 }
 
-function buildOfferingButtonGridMarkup(scope, selectedCategory, selectedType) {
+const _multiTypeState = {};
+
+function getOfferingTypes(scope) {
+  return _multiTypeState[scope] || [];
+}
+
+function setOfferingTypes(scope, types) {
+  _multiTypeState[scope] = types.slice();
+  // Sync to form for submission
+  const name = scope === "solution" ? "offering_type" : "submitted_offering_type";
+  const formId = scope === "solution" ? "solutionSubmissionForm" : "needSubmissionForm";
+  let input = document.querySelector(`#${formId} input[name="${name}"][data-type-store="1"]`);
+  if (!input) {
+    input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.dataset.typeStore = "1";
+    const form = document.getElementById(formId);
+    if (form) form.appendChild(input);
+  }
+  input.value = types.join(", ");
+}
+
+function buildOfferingButtonGridMarkup(scope, selectedCategory, selectedTypes) {
+  const selectedList = ensureList(selectedTypes).map((t) => normalizeText(t));
+  const hasAnySelection = selectedList.length > 0;
   return OFFERING_CATEGORY_OPTIONS.map((category) => {
     const categoryValue = category.value;
     const items = OFFERING_TYPE_OPTIONS[categoryValue] || [];
+    const isActiveCategory = !hasAnySelection || normalizeText(selectedCategory) === normalizeText(categoryValue);
     return `
-      <div class="offering-button-row" data-offering-row="${escAttr(categoryValue)}">
+      <div class="offering-button-row" data-offering-row="${escAttr(categoryValue)}" style="${isActiveCategory ? "" : "opacity:0.35;pointer-events:none;"}">
         <span class="offering-button-row-label">${esc(translateOfferingCategoryLabel(category.label))}</span>
         <div class="offering-button-row-actions">
           ${items.map((item) => {
-            const active = selectedCategory === categoryValue && normalizeText(selectedType) === normalizeText(item.value);
+            const active = isActiveCategory && selectedList.includes(normalizeText(item.value));
             return `
               <button
                 type="button"
@@ -4614,12 +4594,11 @@ function buildOfferingButtonGridMarkup(scope, selectedCategory, selectedType) {
 function renderOfferingButtonGrid(scope) {
   const isSolution = scope === "solution";
   const categorySelect = byId(isSolution ? "solutionOfferingCategory" : "needOfferingCategory");
-  const typeSelect = byId(isSolution ? "solutionOfferingType" : "needOfferingType");
   const host = byId(isSolution ? "solutionOfferingButtonGrid" : "needOfferingButtonGrid");
-  if (!categorySelect || !typeSelect || !host) return;
+  if (!categorySelect || !host) return;
   const selectedCategory = categorySelect.value || "Service offerings";
-  const selectedType = typeSelect.value || "";
-  host.innerHTML = buildOfferingButtonGridMarkup(scope, selectedCategory, selectedType);
+  const selectedTypes = getOfferingTypes(scope);
+  host.innerHTML = buildOfferingButtonGridMarkup(scope, selectedCategory, selectedTypes);
 }
 
 function getSharedFormSeedGeographies() {
@@ -4637,17 +4616,33 @@ function applyOfferingButtonSelection(scope, category, type) {
   const isSolution = scope === "solution";
   const categorySelect = byId(isSolution ? "solutionOfferingCategory" : "needOfferingCategory");
   if (!categorySelect) return;
-  categorySelect.value = category;
+  const currentCategory = categorySelect.value;
+  const currentTypes = getOfferingTypes(scope);
+  const normalizedType = normalizeText(type);
+
+  let nextCategory = category;
+  let nextTypes;
+
+  if (normalizeText(currentCategory) !== normalizeText(category)) {
+    nextTypes = [normalizedType];
+  } else {
+    if (currentTypes.includes(normalizedType)) {
+      nextTypes = currentTypes.filter((t) => t !== normalizedType);
+    } else {
+      nextTypes = [...currentTypes, normalizedType];
+    }
+  }
+
+  categorySelect.value = nextCategory;
+  setOfferingTypes(scope, nextTypes);
+
   if (isSolution) {
     updateSolutionOfferingForm();
   } else {
     updateNeedOfferingForm();
   }
-  const typeSelect = byId(isSolution ? "solutionOfferingType" : "needOfferingType");
-  if (typeSelect) {
-    typeSelect.value = type;
-  }
-  renderOfferingButtonGrid(scope);
+  const offeringTypeSelect = byId(isSolution ? "solutionOfferingType" : "needOfferingType");
+  if (offeringTypeSelect) offeringTypeSelect.value = nextTypes.length > 0 ? nextTypes[0] : "";
 }
 
 function renderSolutionReferenceInputs() {
@@ -4997,7 +4992,7 @@ function getSubmissionReviewFieldConfig(submissionType, payload = {}) {
       { key: "seeker_email", label: "Email" },
       { key: "seeker_phone", label: "Phone" },
       { key: "offering_category", label: "Need Category" },
-      { key: "offering_type", label: "Need Type" },
+      { key: "offering_type", label: "Need Type", list: true },
       { key: "thematic_area", label: "Thematic Area" },
       { key: "deployment_locations", label: "Place of Deployment", multiline: true, list: true, wide: true },
       { key: "demand_broadcast_needed", label: "Broadcast to Ecosystem" },
@@ -5011,7 +5006,7 @@ function getSubmissionReviewFieldConfig(submissionType, payload = {}) {
     { key: "submitter_email", label: "Contact Email" },
     { key: "submitter_phone", label: "Contact Phone" },
     { key: "offering_category", label: "Offering Category" },
-    { key: "offering_type", label: "Offering Type" },
+    { key: "offering_type", label: "Offering Type", list: true },
     { key: "offering_name", label: "Offering Name" },
     { key: "about_offering_text", label: "Offering Description", multiline: true, wide: true },
   ];
@@ -5307,6 +5302,7 @@ function populateSubmissionDefaults(form, force = false) {
   ].forEach(([name, value]) => {
     const input = form.querySelector(`[name="${name}"]`);
     if (input && value && (force || !input.value)) input.value = value;
+    if (input && input.readOnly && force) input.readOnly = false;
   });
 }
 
@@ -5335,6 +5331,36 @@ function ensureEmbeddedSubmissionActionRow(formId, mode) {
     `;
 }
 
+function gateEmbeddedFormFields(form) {
+  if (!isEmbeddedSharedForm() || !form) return;
+  const gateFields = ["organization_name", "submitter_name", "submitter_email", "submitter_phone", "contact_person"];
+  const applyGate = () => {
+    const locked = !state.embeddedActor;
+    gateFields.forEach((name) => {
+      const field = form.querySelector(`[name="${name}"]`);
+      if (!field) return;
+      if (locked) {
+        field.readOnly = true;
+        field.placeholder = field.placeholder || field.getAttribute("placeholder") || "";
+        if (!field.placeholder) field.placeholder = "Please log in with GramEEE first";
+      } else {
+        field.readOnly = false;
+      }
+    });
+  };
+  applyGate();
+  if (state.embeddedActor) return;
+  const focusHandler = () => {
+    if (state.embeddedActor) return;
+    requestEmbeddedLogin(state.sharedFormMode || "need");
+  };
+  gateFields.forEach((name) => {
+    const field = form.querySelector(`[name="${name}"]`);
+    if (!field) return;
+    field.addEventListener("focus", focusHandler);
+  });
+}
+
 function configureEmbeddedSubmissionForms() {
   [
     { formId: "solutionSubmissionForm", selectId: "solutionTraderSelect", mode: "solution" },
@@ -5353,6 +5379,13 @@ function configureEmbeddedSubmissionForms() {
     label?.classList.toggle("hidden", isEmbeddedSharedForm());
     ensureEmbeddedSubmissionActionRow(formId, mode);
     populateSubmissionDefaults(form, isEmbeddedSharedForm());
+    const typeSelect = byId(mode === "solution" ? "solutionOfferingType" : "needOfferingType");
+    if (typeSelect && typeSelect.value) {
+      setOfferingTypes(mode, typeSelect.value.split(", ").filter(Boolean));
+    }
+    if (isEmbeddedSharedForm()) {
+      gateEmbeddedFormFields(form);
+    }
   });
 }
 
@@ -6928,11 +6961,12 @@ function renderAdminQueue() {
               const summaryText = isNeed
                 ? normalizeText(payload.problem_statement || "")
                 : normalizeText(payload.about_offering_text || payload.about_solution_text || payload.solution_name || payload.offering_name || "");
+                const fmtTypes = (val) => { const a = parseLooseListInput(val); return a.length > 1 ? a.map((t) => t.trim()).join(" + ") : normalizeText(val); };
                 const categoryLine = isNeed
-                  ? [payload.offering_category, payload.offering_type, payload.thematic_area].filter(Boolean).join(" / ")
+                  ? [payload.offering_category, fmtTypes(payload.offering_type), payload.thematic_area].filter(Boolean).join(" / ")
                   : [
                       payload.offering_category,
-                      payload.offering_type,
+                      fmtTypes(payload.offering_type),
                     payload.primary_valuechain,
                     payload.primary_application,
                   ].filter(Boolean).join(" / ");
@@ -9278,7 +9312,7 @@ function bindStaticEvents() {
     await store.updateFormSubmission(patch.submissionId, patch.update);
     const result = await store.reviewFormSubmission(patch.submissionId, "approve", patch.update.adminReviewNotes || "");
     submissionReviewDialog?.close();
-    await refreshActiveAdminDeskTab();
+    refreshActiveAdminDeskTab();
     toast(result.message || (result.targetNeedId ? `Submission approved as Need ${result.targetNeedId}.` : "Form submission approved."));
   }));
 
@@ -9293,7 +9327,7 @@ function bindStaticEvents() {
     await store.updateFormSubmission(patch.submissionId, patch.update);
     await store.reviewFormSubmission(patch.submissionId, "reject", patch.update.adminReviewNotes || "");
     submissionReviewDialog?.close();
-    await refreshActiveAdminDeskTab();
+    refreshActiveAdminDeskTab();
     toast("Form submission rejected.");
   }));
 
@@ -9306,7 +9340,7 @@ function bindStaticEvents() {
     }
     if (button.dataset.action === "approve-need") {
       await store.approveNeed(button.dataset.needId, "approve");
-      await refreshActiveAdminDeskTab();
+      refreshActiveAdminDeskTab();
       toast("Need approved.");
     }
     if (button.dataset.action === "reject-need") {
@@ -9315,12 +9349,12 @@ function bindStaticEvents() {
         return;
       }
       await store.approveNeed(button.dataset.needId, "reject");
-      await refreshActiveAdminDeskTab();
+      refreshActiveAdminDeskTab();
       toast("Need rejected.");
     }
     if (button.dataset.action === "approve-update") {
       await store.reviewUpdateRequest(button.dataset.requestId, "approve");
-      await refreshActiveAdminDeskTab();
+      refreshActiveAdminDeskTab();
       toast("Curator update approved.");
     }
     if (button.dataset.action === "reject-update") {
@@ -9329,7 +9363,7 @@ function bindStaticEvents() {
         return;
       }
       await store.reviewUpdateRequest(button.dataset.requestId, "reject");
-      await refreshActiveAdminDeskTab();
+      refreshActiveAdminDeskTab();
       toast("Curator update rejected.");
     }
     if (button.dataset.action === "edit-form-submission") {
@@ -9338,7 +9372,7 @@ function bindStaticEvents() {
     }
     if (button.dataset.action === "approve-form-submission") {
       const result = await store.reviewFormSubmission(button.dataset.submissionId, "approve");
-      await refreshActiveAdminDeskTab();
+      refreshActiveAdminDeskTab();
       toast(result.message || (result.targetNeedId ? `Submission approved as Need ${result.targetNeedId}.` : "Form submission approved."));
     }
     if (button.dataset.action === "reject-form-submission") {
@@ -9347,7 +9381,7 @@ function bindStaticEvents() {
         return;
       }
       await store.reviewFormSubmission(button.dataset.submissionId, "reject");
-      await refreshActiveAdminDeskTab();
+      refreshActiveAdminDeskTab();
       toast("Form submission rejected.");
     }
       if (button.dataset.action === "run-puter-need-review") {

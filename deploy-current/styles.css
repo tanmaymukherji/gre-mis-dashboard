@@ -1775,6 +1775,30 @@ body.public-solution-form-mode #shareSolutionFormBtn {
   color: #7f2618;
   border: 1px solid #efc6be;
 }
+.btn-yellow {
+  background: #fff3cd;
+  color: #664d03;
+  border: 1px solid #ffecb5;
+}
+.btn-yellow:hover {
+  background: #ffe69b;
+}
+.btn-blue {
+  background: #cfe2ff;
+  color: #052c65;
+  border: 1px solid #b6d4fe;
+}
+.btn-blue:hover {
+  background: #9ec5fe;
+}
+.btn-orange {
+  background: #ffecce;
+  color: #663b00;
+  border: 1px solid #fed9a4;
+}
+.btn-orange:hover {
+  background: #fddb9a;
+}
 .admin-sync-panel {
   min-height: 100%;
 }

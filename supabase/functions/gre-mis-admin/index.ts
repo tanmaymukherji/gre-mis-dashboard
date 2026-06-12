@@ -6687,7 +6687,7 @@ async function updateFormSubmission(submissionId: string, update: Record<string,
     if (traderError) throw new Error(traderError.message);
     trader = data;
   }
-  if (!trader && !isSolution) throw new Error("Please select a valid GRE supplier before saving the submission.");
+  if (!trader && !isSolution) { /* GRE supplier selection is optional for needs */ }
 
   const organizationName =
     requireString(update.organizationName) ||

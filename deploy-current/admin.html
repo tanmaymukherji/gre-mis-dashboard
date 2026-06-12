@@ -14,7 +14,7 @@
   <script src="https://grameee.org/supabase-config.js?v=20260519gre1"></script>
   <script src="https://grameee.org/auth.js?v=20260531b" defer></script>
   <script src="./config.js?v=20260511a"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260606gre49" />
+  <link rel="stylesheet" href="./styles.css?v=20260610gre01" />
 </head>
 <body class="admin-page">
   <header class="grameee-site-header">
@@ -143,9 +143,9 @@
                 </select>
               </label>
               <button id="uploadInboundBtn" class="btn btn-primary">Upload and Sync</button>
-              <button id="syncGreInboundsBtn" class="btn btn-secondary">Sync Latest from GRE</button>
-              <button id="downloadGreInboundBtn" class="btn btn-secondary">Download Inbound from GRE</button>
-              <button id="refreshAiBtn" class="btn btn-secondary">Refresh AI Signals</button>
+              <button id="syncGreInboundsBtn" class="btn btn-yellow">Sync Latest from GRE</button>
+              <button id="refreshAiBtn" class="btn btn-blue">Refresh AI Signals</button>
+              <button id="downloadGreInboundBtn" class="btn btn-orange">Download Inbound from GRE</button>
             </div>
             <p id="syncStatus" class="helper-text">Uploads add new inbounds, update changed rows for existing request IDs, and refresh AI need intelligence.</p>
           </section>
@@ -167,10 +167,10 @@
                 <input id="chatbotTraderFile" type="file" accept=".xlsx,.xls" />
               </label>
               <button id="uploadChatbotBtn" class="btn btn-primary">Upload and Sync</button>
-              <button id="syncGreChatbotBtn" class="btn btn-primary">Refresh Chatbot Dataset</button>
-              <button id="refreshChatbotAiBtn" class="btn btn-secondary">Refresh Offering AI Signals</button>
-              <button id="downloadGreTraderBtn" class="btn btn-secondary">Download Trader Data</button>
-              <button id="downloadGreSolutionBtn" class="btn btn-secondary">Download Solution Data</button>
+              <button id="syncGreChatbotBtn" class="btn btn-yellow">Refresh Chatbot Dataset</button>
+              <button id="refreshChatbotAiBtn" class="btn btn-blue">Refresh Offering AI Signals</button>
+              <button id="downloadGreTraderBtn" class="btn btn-orange">Download Trader Data</button>
+              <button id="downloadGreSolutionBtn" class="btn btn-orange">Download Solution Data</button>
             </div>
             <p id="chatbotSyncStatus" class="helper-text">Fetch the live GRE trader and solution exports, then update the GRE Chatbot Supabase dataset.</p>
           </section>
