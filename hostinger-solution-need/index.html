@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>Solution Offering | Green Rural Economy</title>
   <meta name="description" content="Upload your solutions to the AskGRE platform for admin approval and publishing." />
   <link rel="stylesheet" href="https://grameee.org/shared-shell.css?v=20260531b" />
@@ -175,6 +178,7 @@
     }
 
     .frame-shell-hidden { display: none; }
+    .hidden { display: none !important; }
 
     /* ── My Solutions View ── */
 
@@ -267,66 +271,69 @@
     }
 
     .my-solutions-list {
-      display: flex;
-      flex-direction: column;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 14px;
       overflow-y: auto;
       flex: 1;
+      align-content: start;
     }
 
     .solution-card {
-      background: var(--panel);
+      background: linear-gradient(180deg, #ffffff, #f7faf4);
       border: 1px solid var(--border);
       border-radius: 18px;
-      padding: 20px 22px;
+      padding: 16px 18px;
       display: grid;
-      gap: 12px;
+      gap: 10px;
+      box-shadow: 0 2px 8px rgba(24, 50, 30, 0.06);
     }
 
     .solution-card-top {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      gap: 12px;
+      gap: 8px;
     }
 
     .solution-card-info {
       display: grid;
-      gap: 4px;
+      gap: 2px;
       min-width: 0;
     }
 
     .solution-card-name {
       margin: 0;
-      font-size: 1.1rem;
+      font-size: 1rem;
       font-weight: 700;
+      line-height: 1.3;
     }
 
     .solution-card-category {
-      font-size: 0.85rem;
+      font-size: 0.78rem;
       color: var(--muted);
     }
 
     .solution-card-org {
-      font-size: 0.85rem;
+      font-size: 0.78rem;
       color: var(--muted);
     }
 
     .solution-card-actions {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       align-items: center;
       flex-shrink: 0;
     }
 
     .action-btn {
-      padding: 6px 14px;
+      padding: 4px 12px;
       border-radius: 999px;
       border: 1px solid var(--border);
       background: var(--surface);
       color: var(--brand);
       font: inherit;
-      font-size: 0.82rem;
+      font-size: 0.75rem;
       font-weight: 700;
       cursor: pointer;
     }
@@ -655,6 +662,53 @@
       font-weight: 600;
     }
 
+    .edit-section-divider {
+      font-weight: 700;
+      font-size: 0.85rem;
+      color: var(--brand);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 4px;
+      margin-bottom: 4px;
+      grid-column: 1 / -1;
+    }
+
+    .conditional-edit-section.hidden { display: none !important; }
+
+    .inline-check {
+      display: flex !important;
+      flex-direction: row !important;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .inline-check input[type=checkbox] { width: auto; }
+
+    .detail-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .detail-table th, .detail-table td {
+      text-align: left; vertical-align: top;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+    .detail-table th {
+      width: 34%; color: var(--muted);
+      font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em;
+      padding-right: 18px;
+    }
+    .detail-table td { line-height: 1.5; }
+    .detail-table tr:last-child th, .detail-table tr:last-child td { border-bottom: none; }
+    .view-panel-title { margin: 0; font-size: 1.1rem; font-weight: 700; }
+    .view-panel-subtitle { margin: 0 0 4px; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .view-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; }
+    .view-panel + .view-panel { margin-top: 14px; }
+    .view-panel .view-panel-title { margin-bottom: 6px; }
+    .view-tags { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 0; }
+    .view-tags span { padding: 4px 10px; border-radius: 999px; background: #e4f3e4; color: #1f6b3a; font-size: 0.75rem; font-weight: 700; }
+    .match-detail-frame-wrap { width: 100%; overflow: hidden; border-radius: 12px; }
+    .match-detail-frame { width: 100%; height: 70vh; border: 0; border-radius: 12px; display: block; }
+
     @media (max-width: 900px) {
       body > .grameee-shell-mount {
         width: calc(100vw - 24px);
@@ -666,6 +720,7 @@
       iframe { height: calc(100vh - 220px); min-height: 680px; }
       .my-solutions-shell { padding: 18px 16px; min-height: 680px; }
       .my-solutions-header { flex-direction: column; align-items: stretch; }
+      .my-solutions-list { grid-template-columns: 1fr; }
       .modal-body .form-grid { grid-template-columns: 1fr; }
       .search-input { min-width: 150px; }
     }
@@ -695,7 +750,7 @@
       <iframe
         id="solutionFormFrame"
         title="GRE Solution Offering Form"
-        src="https://gre.grameee.org/?sharedForm=solution&publicForm=solution&grameeeEmbed=1&formLang=en&embedVersion=20260602lang7"
+        src="https://gre.grameee.org/?sharedForm=solution&publicForm=solution&grameeeEmbed=1&formLang=en&embedVersion=20260612lang1"
         loading="eager"
         referrerpolicy="strict-origin-when-cross-origin"
       ></iframe>
@@ -737,6 +792,22 @@
     </section>
   </div>
 
+  <div id="viewModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow" style="margin:0 0 2px">Solution Details</p>
+          <h3 id="viewModalTitle">Solution Details</h3>
+        </div>
+        <button type="button" class="modal-close-btn view-close-btn">&times;</button>
+      </div>
+      <div id="viewModalBody" class="modal-body" style="gap:8px"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn-modal btn-modal-secondary view-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="editModal" class="modal-overlay hidden">
     <div class="modal-card">
       <div class="modal-head">
@@ -755,23 +826,29 @@
           </label>
           <label class="wide">
             <span>Offering Description</span>
-            <textarea id="editOfferingDescription" rows="4" required></textarea>
+            <textarea id="editOfferingDescription" rows="3" required></textarea>
           </label>
-          <label>
-            <span>Offering Category</span>
-            <select id="editOfferingCategory">
-              <option value="Service offerings">Service</option>
-              <option value="Product offerings">Product</option>
-              <option value="Knowledge offerings">Knowledge</option>
-            </select>
-          </label>
-          <label>
-            <span>Offering Type</span>
-            <input id="editOfferingType" />
-          </label>
+          <div class="wide" style="display:flex;gap:14px;flex-wrap:wrap">
+            <label style="flex:1;min-width:140px">
+              <span>Offering Category</span>
+              <select id="editOfferingCategory" onchange="toggleEditCategorySections()">
+                <option value="Service offerings">Service</option>
+                <option value="Product offerings">Product</option>
+                <option value="Knowledge offerings">Knowledge</option>
+              </select>
+            </label>
+            <label style="flex:1;min-width:140px">
+              <span>Offering Type</span>
+              <input id="editOfferingType" />
+            </label>
+          </div>
           <label>
             <span>Organisation Name</span>
             <input id="editOrgName" />
+          </label>
+          <label>
+            <span>Contact Person</span>
+            <input id="editContactPerson" />
           </label>
           <label>
             <span>Contact Email</span>
@@ -781,10 +858,65 @@
             <span>Contact Phone</span>
             <input id="editContactPhone" />
           </label>
-          <label>
-            <span>Contact Person</span>
-            <input id="editContactPerson" />
+
+          <!-- Languages -->
+          <label class="wide">
+            <span>Languages (comma-separated)</span>
+            <input id="editLanguages" placeholder="e.g. Hindi, English, Bengali" />
           </label>
+
+          <!-- Service-specific section -->
+          <div id="editServiceSection" class="wide conditional-edit-section" data-category="Service offerings">
+            <div class="edit-section-divider">Service Delivery Details</div>
+            <div class="form-grid">
+              <label><span>Facilitator Name</span><input id="editTrainerName" /></label>
+              <label><span>Facilitator Email</span><input id="editTrainerEmail" type="email" /></label>
+              <label><span>Facilitator Phone</span><input id="editTrainerPhone" /></label>
+              <label class="wide"><span>Facilitator Details</span><textarea id="editTrainerDetails" rows="2"></textarea></label>
+              <label><span>Duration</span><input id="editDuration" /></label>
+              <label><span>Duration Unit</span><select id="editDurationUnit"><option value="">Select</option><option>Days</option><option>Hours</option><option>Months</option><option>Weeks</option></select></label>
+              <label class="wide"><span>Prerequisites</span><textarea id="editPrerequisites" rows="2"></textarea></label>
+              <label><span>Service Cost</span><input id="editServiceCost" /></label>
+              <label><span>Cost Unit</span><select id="editServiceCostUnit"><option value="">Select</option><option>Can be quoted after finalising scope</option><option>Per day</option><option>Per hour</option><option>Per person</option></select></label>
+              <label class="wide"><span>Cost Remarks</span><textarea id="editCostRemarks" rows="2"></textarea></label>
+              <label><span>Support Post Service</span><select id="editSupportPostService"><option value="">Select</option><option>Not Provided if outside the service location</option><option>Yes,Provided if in the service location</option><option>Yes, Provided if in the service location and outside the service location</option></select></label>
+              <label><span>Support Post Service Cost</span><select id="editSupportPostServiceCost"><option value="">Select</option><option>No Cost, if in the service location and outside the service location</option><option>No Cost if in the service location</option><option>Additional cost apply if in the service location</option></select></label>
+              <label><span>Delivery Mode</span><select id="editDeliveryMode"><option value="">Select</option><option>Online</option><option>Offline</option><option>Online & Offline</option></select></label>
+              <label><span>Certification Offered</span><select id="editCertification"><option value="Not Provided">Not Provided</option><option value="Provided">Provided</option></select></label>
+            </div>
+          </div>
+
+          <!-- Product-specific section -->
+          <div id="editProductSection" class="wide conditional-edit-section hidden" data-category="Product offerings">
+            <div class="edit-section-divider">Product Details</div>
+            <div class="form-grid">
+              <label><span>Grade / Capacity</span><input id="editGradeCapacity" /></label>
+              <label><span>Cost</span><input id="editProductCost" /></label>
+              <label class="inline-check"><input type="checkbox" id="editCostQuoteOnScope" /> <span>Can be quoted after finalising scope</span></label>
+              <label><span>Lead Time</span><input id="editLeadTime" /></label>
+              <label class="wide"><span>Support Services</span><textarea id="editSupportDetails" rows="2"></textarea></label>
+            </div>
+          </div>
+
+          <!-- Knowledge-specific section -->
+          <div id="editKnowledgeSection" class="wide conditional-edit-section hidden" data-category="Knowledge offerings">
+            <div class="edit-section-divider">Knowledge Resource Details</div>
+            <div class="form-grid">
+              <label class="wide"><span>Content Link</span><input id="editKnowledgeContentUrl" type="url" placeholder="https://..." /></label>
+            </div>
+          </div>
+
+          <!-- Common detail fields -->
+          <label class="wide">
+            <span>Location Availability</span>
+            <input id="editLocationAvailability" placeholder="e.g. At Service Provider, At Service Seeker" />
+          </label>
+          <label class="wide">
+            <span>Contact Details</span>
+            <textarea id="editContactDetails" rows="2" placeholder="Optional additional contact details"></textarea>
+          </label>
+
+          <!-- Tags and Geographies -->
           <label class="wide">
             <span>Tags (comma-separated)</span>
             <input id="editTags" placeholder="e.g. training, renewable, solar" />
@@ -805,9 +937,20 @@
   </div>
 
   <script>
+    // Global JS error tracker
+    window.__jsErrors = [];
+    window.addEventListener("error", function(e) {
+      window.__jsErrors.push({ message: e.error ? e.error.message : e.message, filename: e.filename, lineno: e.lineno });
+      console.error("Page JS error:", e.error || e.message);
+    });
+    window.addEventListener("unhandledrejection", function(e) {
+      window.__jsErrors.push({ message: "Unhandled: " + (e.reason ? e.reason.message || e.reason : e.reason) });
+      console.error("Unhandled rejection:", e.reason);
+    });
+
     window.addEventListener("DOMContentLoaded", () => {
       const iframe = document.getElementById("solutionFormFrame");
-      const iframeBaseUrl = new URL("https://gre.grameee.org/?sharedForm=solution&publicForm=solution&grameeeEmbed=1&embedVersion=20260602lang7");
+      const iframeBaseUrl = new URL("https://gre.grameee.org/?sharedForm=solution&publicForm=solution&grameeeEmbed=1&embedVersion=20260612lang1");
       const iframeOrigin = iframeBaseUrl.origin;
       const languageButtons = [...document.querySelectorAll(".lang-btn:not(.my-solutions-btn)")];
       const mySolutionsBtn = document.getElementById("mySolutionsToggleBtn");
@@ -890,29 +1033,45 @@
       }
 
       async function getAccessToken() {
-        if (window.grameeeAuth?.getAccessToken) {
-          try { return await window.grameeeAuth.getAccessToken(); } catch {}
-        }
-        return null;
+        return getTokenWithTimeout(5000);
       }
 
-      async function callEdge(action, payload = {}) {
-        const token = await getAccessToken();
-        const supabaseUrl = (window.grameeeSupabase && window.grameeeSupabase.url) || "https://zphabezqbboaexmmhcic.supabase.co";
-        const functionName = "gre-mis-admin";
-        const anonKey = (window.grameeeSupabase && window.grameeeSupabase.anonKey) || "";
-        const url = supabaseUrl.replace(/\/+$/, "") + "/functions/v1/" + functionName;
-        const response = await fetch(url, {
+      // ── Edge function call with timeout ──
+
+      async function fetchWithTimeout(url, opts, ms) {
+        var ctrl = new AbortController();
+        var id = setTimeout(function() { ctrl.abort(); }, ms || 12000);
+        try { return await fetch(url, Object.assign({ signal: ctrl.signal }, opts || {})); }
+        finally { clearTimeout(id); }
+      }
+
+      async function getTokenWithTimeout(ms) {
+        if (!window.grameeeAuth || typeof window.grameeeAuth.getAccessToken !== "function") return null;
+        try {
+          var result = await Promise.race([
+            window.grameeeAuth.getAccessToken(),
+            new Promise(function(_, reject) { setTimeout(reject, ms || 5000); }),
+          ]);
+          return result;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      async function callEdge(action, body) {
+        var token = await getTokenWithTimeout();
+        var gs = window.grameeeSupabase || {};
+        var supabaseUrl = gs.url || "https://zphabezqbboaexmmhcic.supabase.co";
+        var anonKey = gs.anonKey || "";
+        var resp = await fetchWithTimeout(supabaseUrl.replace(/\/+$/, "") + "/functions/v1/gre-mis-admin", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "apikey": anonKey,
-            "Authorization": "Bearer " + anonKey,
-          },
-          body: JSON.stringify({ ...payload, action, grameeeAccessToken: token }),
-        });
-        const data = await response.json();
-        if (!response.ok || data.error) throw new Error(data.error || "Request failed");
+          headers: { "Content-Type": "application/json", "apikey": anonKey, "Authorization": "Bearer " + anonKey },
+          body: JSON.stringify(Object.assign({ action: action, grameeeAccessToken: token || "" }, body || {})),
+        }, 15000);
+        var txt = await resp.text();
+        var data = {};
+        try { data = JSON.parse(txt); } catch (e) { throw new Error("Edge function returned: " + txt.slice(0, 200)); }
+        if (!resp.ok || data.error) throw new Error(data.error || "Request failed (" + resp.status + ")");
         return data;
       }
 
@@ -921,7 +1080,6 @@
       let currentView = "submit";
       let currentUser = null;
       let solutionsCache = [];
-      let outreachCache = { offering_views: [], email_logs: [] };
 
       function showSubmitView() {
         currentView = "submit";
@@ -941,6 +1099,7 @@
         heroTitle.textContent = copy[getStoredLanguage()].mySolutionsTitle;
         heroLede.textContent = "View and manage your submitted solutions.";
         updateUrl("my-solutions");
+        mySolutionsBadge.classList.add("hidden");
         loadMySolutions();
       }
 
@@ -951,26 +1110,79 @@
         window.history.replaceState({ view }, "", url.toString());
       }
 
-      // ── Load My Solutions ──
+      // ── Load My Solutions (edge function with timeout) ──
 
       async function loadMySolutions() {
-        const list = document.getElementById("mySolutionsList");
+        var list = document.getElementById("mySolutionsList");
         list.innerHTML = '<div class="my-solutions-loading">Loading your solutions...</div>';
 
         try {
-          const [solutionsRes, outreachRes] = await Promise.all([
-            callEdge("fetchMySolutions"),
-            callEdge("fetchSolutionOutreach"),
-          ]);
-          solutionsCache = solutionsRes.submissions || [];
-          outreachCache = outreachRes || { offering_views: [], email_logs: [] };
+          var result = await callEdge("fetchMySolutions");
+          var all = (result.submissions || []).filter(function(s) {
+            // Exclude rejected, deleted source_mode, and signed_in_edit (they are edit
+            // placeholders linked to a parent, not standalone solutions)
+            if (s.approval_status === "rejected") return false;
+            if (s.source_mode === "deleted") return false;
+            if (s.source_mode === "signed_in_edit") return false;
+            return true;
+          });
+
+          // Flatten payload into the submission objects
+          solutionsCache = all.map(function(s) {
+            var p = s.payload || {};
+            return {
+              id: s.id,
+              submission_type: s.submission_type,
+              source_mode: s.source_mode,
+              approval_status: s.approval_status,
+              organization_name: s.organization_name || "",
+              existing_trader_name: s.existing_trader_name || "",
+              submitter_name: s.submitter_name || "",
+              submitter_email: s.submitter_email || "",
+              submitter_phone: s.submitter_phone || "",
+              synced_to_gre: s.synced_to_gre,
+              parent_submission_id: s.parent_submission_id,
+              local_edit_version: s.local_edit_version || 0,
+              conflict_with_gre_sync: s.conflict_with_gre_sync || false,
+              created_at: s.created_at,
+              offering_name: p.offering_name || p.solution_name || "",
+              about_offering_text: p.about_offering_text || p.about_solution_text || "",
+              offering_category: p.offering_category || "",
+              offering_type: p.offering_type || "",
+              organization_name_payload: p.organization_name || "",
+              tags: Array.isArray(p.tags) ? p.tags : [],
+              geographies: Array.isArray(p.geographies) ? p.geographies : [],
+              languages: Array.isArray(p.languages) ? p.languages : [],
+              location_availability: p.location_availability || "",
+              contact_details: p.contact_details || "",
+              trainer_name: p.trainer_name || "",
+              trainer_email: p.trainer_email || "",
+              trainer_phone: p.trainer_phone || "",
+              trainer_details_text: p.trainer_details_text || "",
+              duration: p.duration || "",
+              duration_unit: p.duration_unit || "",
+              prerequisites: p.prerequisites || "",
+              service_cost: p.service_cost || "",
+              service_cost_unit: p.service_cost_unit || "",
+              cost_remarks: p.cost_remarks || "",
+              support_post_service: p.support_post_service || "",
+              support_post_service_cost: p.support_post_service_cost || "",
+              delivery_mode: p.delivery_mode || "",
+              certification_offered: p.certification_offered || "",
+              grade_capacity: p.grade_capacity || "",
+              product_cost: p.product_cost || "",
+              product_cost_quote_on_scope: p.product_cost_quote_on_scope || "",
+              lead_time: p.lead_time || "",
+              support_details: p.support_details || "",
+              knowledge_content_url: p.knowledge_content_url || "",
+            };
+          });
 
           mySolutionsBadge.textContent = solutionsCache.length;
           mySolutionsBadge.classList.toggle("hidden", solutionsCache.length === 0);
-
           applyFiltersAndRender();
         } catch (err) {
-          list.innerHTML = `<div class="my-solutions-empty"><p class="my-solutions-empty-text">Could not load your solutions: ${err.message}</p></div>`;
+          list.innerHTML = '<div class="my-solutions-empty"><p class="my-solutions-empty-text">Could not load your solutions. ' + esc(err.message) + '</p></div>';
         }
       }
 
@@ -1046,31 +1258,28 @@
           return;
         }
 
-        list.innerHTML = solutions.map((s) => {
-          const outreach = getOutreachForSubmission(s);
-          const canEdit = s.approval_status === "approved" && s.source_mode !== "signed_in_edit";
-          const isPendingEdit = s.source_mode === "signed_in_edit";
-          const isConflict = s.conflict_with_gre_sync;
+        list.innerHTML = solutions.map(function(s) {
+          var canEdit = s.approval_status === "approved" && s.source_mode !== "signed_in_edit";
+          var isPending = s.approval_status === "pending_admin" && s.source_mode !== "signed_in_edit";
 
-          return `<div class="solution-card" data-id="${esc(s.id)}">
-            <div class="solution-card-top">
-              <div class="solution-card-info">
-                <h4 class="solution-card-name">${esc(s.offering_name || "Unnamed")}</h4>
-                <p class="solution-card-category">${esc(s.offering_category || "")}${s.offering_type ? " &middot; " + esc(s.offering_type) : ""}</p>
-                <p class="solution-card-org">${esc(s.organization_name || "")}${s.existing_trader_name ? " via " + esc(s.existing_trader_name) : ""}</p>
-              </div>
-              <div class="solution-card-actions">
-                ${canEdit ? `<button class="action-btn" onclick="openEditModal('${esc(s.id)}')">Edit</button>` : ""}
-                ${isPendingEdit ? `<button class="action-btn" disabled>Edit Pending</button>` : ""}
-              </div>
-            </div>
-            <div class="solution-card-status">
-              <span class="status-pill ${getStatusClass(s)}">${esc(getStatusLabel(s))}</span>
-              ${isConflict ? '<span class="conflict-warning">&#9888; Pending admin review</span>' : ""}
-              ${s.parent_name ? `<span class="status-pill status-edit">Editing: ${esc(s.parent_name)}</span>` : ""}
-            </div>
-            ${outreach.items.length ? renderOutreach(outreach) : ""}
-          </div>`;
+          return '<div class="solution-card" data-id="' + esc(s.id) + '">\
+            <div class="solution-card-top">\
+              <div class="solution-card-info">\
+                <h4 class="solution-card-name">' + esc(s.offering_name || "Unnamed") + '</h4>\
+                <p class="solution-card-category">' + esc(s.offering_category || "") + (s.offering_type ? " &middot; " + esc(s.offering_type) : "") + '</p>\
+                <p class="solution-card-org">' + esc(s.organization_name || "") + (s.existing_trader_name ? " via " + esc(s.existing_trader_name) : "") + '</p>\
+              </div>\
+              <div class="solution-card-actions">\
+                <button class="action-btn" onclick="openViewModal(\'' + esc(s.id) + '\')">View Details</button>' +
+                (canEdit ? '<button class="action-btn" onclick="openEditModal(\'' + esc(s.id) + '\')">Edit</button>' : "") +
+                (isPending ? '<button class="action-btn" style="color:var(--red);border-color:var(--red)" onclick="deleteSubmission(\'' + esc(s.id) + '\')">Remove</button>' : "") + '\
+              </div>\
+            </div>\
+            <div class="solution-card-status">\
+              <span class="status-pill ' + getStatusClass(s) + '">' + esc(getStatusLabel(s)) + '</span>' +
+              (s.conflict_with_gre_sync ? '<span class="conflict-warning">&#9888; Pending admin review</span>' : "") + '\
+            </div>\
+          </div>';
         }).join("");
       }
 
@@ -1122,42 +1331,202 @@
         </div>`;
       }
 
+      // ── View Modal ──
+
+      function arr(val) { return Array.isArray(val) ? val.filter(Boolean).join(", ") : (val || ""); }
+
+      window.deleteSubmission = async function(id) {
+        if (!confirm("Remove this pending submission?")) return;
+        try {
+          await callEdge("deleteMySubmission", { submissionId: id });
+          loadMySolutions();
+        } catch (e) {
+          alert("Could not delete: " + e.message);
+        }
+      };
+
+      window.openViewModal = function(submissionId) {
+        var s = solutionsCache.find(function(x) { return x.id === submissionId; });
+        if (!s) return;
+        var p = s;
+        document.getElementById("viewModalTitle").textContent = p.offering_name || "Solution Details";
+
+        // If offering_id is available, load offering-detail.html in iframe (like GRE MIS)
+        if (p.offering_id) {
+          document.getElementById("viewModalBody").innerHTML = '<div class="match-detail-frame-wrap"><iframe class="match-detail-frame" src="./offering-detail.html?offering_id=' + encodeURIComponent(p.offering_id) + '&embedded=1&v=20260612" style="width:100%;height:70vh;border:0;border-radius:12px"></iframe></div>';
+          document.getElementById("viewModal").classList.remove("hidden");
+          return;
+        }
+
+        // Inline detail view (exact offering-detail.html format)
+        var cat = (p.offering_category || "").toLowerCase();
+        var tags = Array.isArray(p.tags) ? p.tags : [];
+
+        function detailRow(label, val) {
+          if (!val && val !== 0) return "";
+          return "<tr><th>" + esc(label) + "</th><td>" + esc(val) + "</td></tr>";
+        }
+
+        var html = '<div class="view-panel">';
+        html += '<p class="view-panel-subtitle">' + esc(p.offering_category || "Solution") + ' &middot; Pending Sync</p>';
+        html += '<h3 class="view-panel-title">' + esc(p.offering_name || "Unnamed") + '</h3>';
+        html += '<p style="color:var(--muted);font-size:0.9rem;margin:4px 0 0">' + esc(p.organization_name || "") + '</p>';
+        if (tags.length) {
+          html += '<div class="view-tags">' + tags.map(function(t) { return "<span>" + esc(t) + "</span>"; }).join("") + '</div>';
+        }
+        html += '</div>';
+
+        // Provider & Contact
+        html += '<div class="view-panel">';
+        html += '<h3 class="view-panel-title">Provider and Solution</h3>';
+        html += '<table class="detail-table"><tbody>';
+        html += detailRow("Organisation", p.organization_name);
+        html += detailRow("Contact Person", p.submitter_name);
+        html += detailRow("Email", p.submitter_email);
+        html += detailRow("Phone", p.submitter_phone);
+        html += '</tbody></table></div>';
+
+        // Offering Category
+        html += '<div class="view-panel">';
+        html += '<h3 class="view-panel-title">Offering Category</h3>';
+        html += '<table class="detail-table"><tbody>';
+        html += detailRow("Category", p.offering_category);
+        html += detailRow("Type", p.offering_type);
+        html += detailRow("Languages", arr(p.languages));
+        html += detailRow("Geographies", arr(p.geographies));
+        html += detailRow("Location Availability", p.location_availability);
+        html += '</tbody></table></div>';
+
+        // Category-specific details
+        if (cat.indexOf("service") >= 0) {
+          html += '<div class="view-panel">';
+          html += '<h3 class="view-panel-title">Service Details</h3>';
+          html += '<table class="detail-table"><tbody>';
+          html += detailRow("Facilitator", p.trainer_name);
+          html += detailRow("Facilitator Email", p.trainer_email);
+          html += detailRow("Facilitator Phone", p.trainer_phone);
+          html += detailRow("Facilitator Details", p.trainer_details_text);
+          html += detailRow("Duration", p.duration + (p.duration_unit ? " (" + p.duration_unit + ")" : ""));
+          html += detailRow("Prerequisites", p.prerequisites);
+          html += detailRow("Service Cost", p.service_cost + (p.service_cost_unit ? " (" + p.service_cost_unit + ")" : ""));
+          html += detailRow("Cost Remarks", p.cost_remarks);
+          html += detailRow("Support Post Service", p.support_post_service);
+          html += detailRow("Support Post Service Cost", p.support_post_service_cost);
+          html += detailRow("Delivery Mode", p.delivery_mode);
+          html += detailRow("Certification Offered", p.certification_offered);
+          html += '</tbody></table></div>';
+        } else if (cat.indexOf("product") >= 0) {
+          html += '<div class="view-panel">';
+          html += '<h3 class="view-panel-title">Product Details</h3>';
+          html += '<table class="detail-table"><tbody>';
+          html += detailRow("Grade / Capacity", p.grade_capacity);
+          html += detailRow("Product Cost", p.product_cost);
+          html += detailRow("Lead Time", p.lead_time);
+          html += detailRow("Support Services", p.support_details);
+          html += '</tbody></table></div>';
+        } else if (cat.indexOf("knowledge") >= 0) {
+          html += '<div class="view-panel">';
+          html += '<h3 class="view-panel-title">Knowledge Resource Details</h3>';
+          html += '<table class="detail-table"><tbody>';
+          html += detailRow("Content URL", p.knowledge_content_url);
+          html += '</tbody></table></div>';
+        }
+
+        // Status
+        html += '<div class="view-panel">';
+        html += '<h3 class="view-panel-title">Status</h3>';
+        html += '<table class="detail-table"><tbody>';
+        html += detailRow("Approval Status", getStatusLabel(s));
+        html += detailRow("Submitted", s.created_at ? new Date(s.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "");
+        html += detailRow("Contact Details", p.contact_details);
+        html += '</tbody></table></div>';
+
+        if (p.about_offering_text) {
+          html += '<div class="view-panel">';
+          html += '<h3 class="view-panel-title">Full Description</h3>';
+          html += '<p style="color:var(--muted);line-height:1.6;margin:6px 0 0">' + esc(p.about_offering_text) + '</p>';
+          html += '</div>';
+        }
+
+        document.getElementById("viewModalBody").innerHTML = html;
+        document.getElementById("viewModal").classList.remove("hidden");
+      };
+
+      document.querySelectorAll(".view-close-btn").forEach(function(btn) {
+        btn.addEventListener("click", function() { document.getElementById("viewModal").classList.add("hidden"); });
+      });
+      document.getElementById("viewModal").addEventListener("click", function(e) {
+        if (e.target === this) this.classList.add("hidden");
+      });
+
       // ── Edit Modal ──
 
+      window.toggleEditCategorySections = function() {
+        var cat = document.getElementById("editOfferingCategory").value;
+        document.querySelectorAll(".conditional-edit-section").forEach(function(el) {
+          el.classList.toggle("hidden", el.dataset.category !== cat);
+        });
+      };
+
       window.openEditModal = function(submissionId) {
-        const s = solutionsCache.find((x) => x.id === submissionId);
+        var s = solutionsCache.find(function(x) { return x.id === submissionId; });
         if (!s) return;
+        var p = s;
         document.getElementById("editSubmissionId").value = submissionId;
-        document.getElementById("editModalTitle").textContent = "Edit: " + (s.offering_name || "Unnamed");
-        document.getElementById("editOfferingName").value = s.offering_name || "";
-        document.getElementById("editOfferingDescription").value = s.about_offering_text || "";
-        document.getElementById("editOfferingCategory").value = s.offering_category || "Service offerings";
-        document.getElementById("editOfferingType").value = s.offering_type || "";
-        document.getElementById("editOrgName").value = s.organization_name || "";
-        document.getElementById("editContactEmail").value = s.submitter_email || "";
-        document.getElementById("editContactPhone").value = s.submitter_phone || "";
-        document.getElementById("editContactPerson").value = s.submitter_name || "";
-        const tags = Array.isArray(s.tags) ? s.tags.join(", ") : "";
+        document.getElementById("editModalTitle").textContent = "Edit: " + (p.offering_name || "Unnamed");
+        document.getElementById("editOfferingName").value = p.offering_name || "";
+        document.getElementById("editOfferingDescription").value = p.about_offering_text || "";
+        document.getElementById("editOfferingCategory").value = p.offering_category || "Service offerings";
+        document.getElementById("editOfferingType").value = p.offering_type || "";
+        document.getElementById("editOrgName").value = p.organization_name || "";
+        document.getElementById("editContactPerson").value = p.submitter_name || "";
+        document.getElementById("editContactEmail").value = p.submitter_email || "";
+        document.getElementById("editContactPhone").value = p.submitter_phone || "";
+        document.getElementById("editLanguages").value = Array.isArray(p.languages) ? p.languages.join(", ") : "";
+        document.getElementById("editTrainerName").value = p.trainer_name || "";
+        document.getElementById("editTrainerEmail").value = p.trainer_email || "";
+        document.getElementById("editTrainerPhone").value = p.trainer_phone || "";
+        document.getElementById("editTrainerDetails").value = p.trainer_details_text || "";
+        document.getElementById("editDuration").value = p.duration || "";
+        document.getElementById("editDurationUnit").value = p.duration_unit || "";
+        document.getElementById("editPrerequisites").value = p.prerequisites || "";
+        document.getElementById("editServiceCost").value = p.service_cost || "";
+        document.getElementById("editServiceCostUnit").value = p.service_cost_unit || "";
+        document.getElementById("editCostRemarks").value = p.cost_remarks || "";
+        document.getElementById("editSupportPostService").value = p.support_post_service || "";
+        document.getElementById("editSupportPostServiceCost").value = p.support_post_service_cost || "";
+        document.getElementById("editDeliveryMode").value = p.delivery_mode || "";
+        document.getElementById("editCertification").value = p.certification_offered || "Not Provided";
+        document.getElementById("editGradeCapacity").value = p.grade_capacity || "";
+        document.getElementById("editProductCost").value = p.product_cost || "";
+        document.getElementById("editCostQuoteOnScope").checked = p.product_cost_quote_on_scope === true || p.product_cost_quote_on_scope === "yes";
+        document.getElementById("editLeadTime").value = p.lead_time || "";
+        document.getElementById("editSupportDetails").value = p.support_details || "";
+        document.getElementById("editKnowledgeContentUrl").value = p.knowledge_content_url || "";
+        document.getElementById("editLocationAvailability").value = p.location_availability || "";
+        document.getElementById("editContactDetails").value = p.contact_details || "";
+        var tags = Array.isArray(p.tags) ? p.tags.join(", ") : "";
         document.getElementById("editTags").value = tags;
         renderEditTags(tags);
-        const geos = Array.isArray(s.geographies) ? s.geographies.join("; ") : "";
+        var geos = Array.isArray(p.geographies) ? p.geographies.join("; ") : "";
         document.getElementById("editGeographies").value = geos;
         document.getElementById("editModalStatus").textContent = "";
+        toggleEditCategorySections();
         document.getElementById("editModal").classList.remove("hidden");
       };
 
       function renderEditTags(tagsStr) {
-        const tags = tagsStr.split(",").map((t) => t.trim()).filter(Boolean);
-        const area = document.getElementById("editTagsDisplay");
-        area.innerHTML = tags.map((t) => `<span class="edit-tag-chip">${esc(t)}</span>`).join("");
+        var tags = tagsStr.split(",").map(function(t) { return t.trim(); }).filter(Boolean);
+        var area = document.getElementById("editTagsDisplay");
+        area.innerHTML = tags.map(function(t) { return '<span class="edit-tag-chip">' + esc(t) + "</span>"; }).join("");
       }
 
       document.getElementById("editTags").addEventListener("input", function() {
         renderEditTags(this.value);
       });
 
-      document.getElementById("closeEditModal").addEventListener("click", closeEditModal);
-      document.getElementById("cancelEditBtn").addEventListener("click", closeEditModal);
+      document.getElementById("closeEditModal").addEventListener("click", function() { closeEditModal(); });
+      document.getElementById("cancelEditBtn").addEventListener("click", function() { closeEditModal(); });
       document.getElementById("editModal").addEventListener("click", function(e) {
         if (e.target === this) closeEditModal();
       });
@@ -1167,44 +1536,70 @@
       }
 
       document.getElementById("saveEditBtn").addEventListener("click", async function() {
-        const submissionId = document.getElementById("editSubmissionId").value;
+        var submissionId = document.getElementById("editSubmissionId").value;
         if (!submissionId) return;
 
-        const statusEl = document.getElementById("editModalStatus");
-        const saveBtn = this;
+        var statusEl = document.getElementById("editModalStatus");
+        var saveBtn = this;
         saveBtn.disabled = true;
         statusEl.textContent = "Submitting edit...";
 
         try {
-          const offeringName = document.getElementById("editOfferingName").value.trim();
+          var offeringName = document.getElementById("editOfferingName").value.trim();
           if (!offeringName) throw new Error("Solution name is required.");
 
-          const tagsStr = document.getElementById("editTags").value;
-          const tags = tagsStr.split(",").map((t) => t.trim()).filter(Boolean);
+          var tagsStr = document.getElementById("editTags").value;
+          var tags = tagsStr.split(",").map(function(t) { return t.trim(); }).filter(Boolean);
 
-          const geosStr = document.getElementById("editGeographies").value;
-          const geographies = geosStr.split(";").map((g) => g.trim()).filter(Boolean);
+          var geosStr = document.getElementById("editGeographies").value;
+          var geographies = geosStr.split(";").map(function(g) { return g.trim(); }).filter(Boolean);
 
-          const payload = {
+          var langsStr = document.getElementById("editLanguages").value;
+          var languages = langsStr.split(",").map(function(l) { return l.trim(); }).filter(Boolean);
+
+          var payload = {
             offering_name: offeringName,
             about_offering_text: document.getElementById("editOfferingDescription").value.trim(),
             offering_category: document.getElementById("editOfferingCategory").value,
             offering_type: document.getElementById("editOfferingType").value.trim(),
             organization_name: document.getElementById("editOrgName").value.trim(),
+            submitter_name: document.getElementById("editContactPerson").value.trim(),
             submitter_email: document.getElementById("editContactEmail").value.trim(),
             submitter_phone: document.getElementById("editContactPhone").value.trim(),
-            submitter_name: document.getElementById("editContactPerson").value.trim(),
-            tags,
-            geographies,
+            languages: languages,
+            tags: tags,
+            geographies: geographies,
+            location_availability: document.getElementById("editLocationAvailability").value.trim(),
+            contact_details: document.getElementById("editContactDetails").value.trim(),
+            trainer_name: document.getElementById("editTrainerName").value.trim(),
+            trainer_email: document.getElementById("editTrainerEmail").value.trim(),
+            trainer_phone: document.getElementById("editTrainerPhone").value.trim(),
+            trainer_details_text: document.getElementById("editTrainerDetails").value.trim(),
+            duration: document.getElementById("editDuration").value.trim(),
+            duration_unit: document.getElementById("editDurationUnit").value,
+            prerequisites: document.getElementById("editPrerequisites").value.trim(),
+            service_cost: document.getElementById("editServiceCost").value.trim(),
+            service_cost_unit: document.getElementById("editServiceCostUnit").value,
+            cost_remarks: document.getElementById("editCostRemarks").value.trim(),
+            support_post_service: document.getElementById("editSupportPostService").value,
+            support_post_service_cost: document.getElementById("editSupportPostServiceCost").value,
+            delivery_mode: document.getElementById("editDeliveryMode").value,
+            certification_offered: document.getElementById("editCertification").value,
+            grade_capacity: document.getElementById("editGradeCapacity").value.trim(),
+            product_cost: document.getElementById("editProductCost").value.trim(),
+            product_cost_quote_on_scope: document.getElementById("editCostQuoteOnScope").checked ? "yes" : "",
+            lead_time: document.getElementById("editLeadTime").value.trim(),
+            support_details: document.getElementById("editSupportDetails").value.trim(),
+            knowledge_content_url: document.getElementById("editKnowledgeContentUrl").value.trim(),
           };
 
-          const result = await callEdge("submitSignedInEdit", {
+          var result = await callEdge("submitSignedInEdit", {
             parentSubmissionId: submissionId,
-            payload,
+            payload: payload,
           });
 
           statusEl.textContent = result.message || "Edit submitted for approval.";
-          setTimeout(closeEditModal, 1500);
+          setTimeout(function() { closeEditModal(); }, 1500);
           loadMySolutions();
         } catch (err) {
           statusEl.textContent = "Error: " + err.message;
@@ -1217,21 +1612,11 @@
 
       async function initAuthAndView() {
         currentUser = await getCurrentUser();
-
         if (currentUser) {
           mySolutionsBtn.classList.remove("hidden");
-          const token = await getAccessToken();
-          if (token) {
-            try {
-              const solRes = await callEdge("fetchMySolutions");
-              const count = (solRes.submissions || []).length;
-              mySolutionsBadge.textContent = count;
-              mySolutionsBadge.classList.toggle("hidden", count === 0);
-              solutionsCache = solRes.submissions || [];
-            } catch {}
-          }
+          mySolutionsBadge.textContent = "!";
+          mySolutionsBadge.classList.remove("hidden");
         }
-
         const params = new URLSearchParams(window.location.search);
         if (params.get("view") === "my-solutions" && currentUser) {
           showMySolutionsView();

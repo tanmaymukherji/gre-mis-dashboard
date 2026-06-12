@@ -9532,10 +9532,12 @@ async function fetchMySolutions(userCtx: { user: Record<string, unknown> }) {
   const userEmail = requireString(userCtx.user.email).toLowerCase();
   if (!userId && !userEmail) throw new Error("User identity not found.");
 
+  // Only show the user's own signed-in submissions, not shared-link (public form) ones
   const query = adminClient
     .from("gre_mis_form_submissions")
     .select("*")
     .eq("submission_type", "solution")
+    .in("source_mode", ["signed_in", "signed_in_edit"])
     .order("created_at", { ascending: false });
 
   if (userId) query.eq("submitter_user_id", userId);
@@ -9560,6 +9562,41 @@ async function fetchMySolutions(userCtx: { user: Record<string, unknown> }) {
         parentMap[requireString(p.id)] = requireString(pPayload.offering_name || pPayload.solution_name) || "Unknown";
       }
     }
+  }
+
+  // Look up offering_ids for approved+synced submissions
+  const offeringLookupPromises = (submissions || []).map(async (s: Record<string, unknown>) => {
+    const traderId = requireString(s.existing_trader_id);
+    const sPayload = (s.payload || {}) as Record<string, unknown>;
+    const offeringName = requireString(sPayload.offering_name || sPayload.solution_name);
+    if (!offeringName) return { id: s.id, offering_id: "" };
+
+    // Try trader_id + name match first, fall back to name-only match
+    let offeringId = "";
+    if (traderId) {
+      const { data: offering } = await adminClient
+        .from("offerings")
+        .select("offering_id")
+        .eq("trader_id", traderId)
+        .ilike("offering_name", offeringName)
+        .maybeSingle();
+      if (offering) offeringId = requireString(offering.offering_id);
+    }
+    if (!offeringId) {
+      const { data: offering } = await adminClient
+        .from("offerings")
+        .select("offering_id")
+        .ilike("offering_name", offeringName)
+        .limit(1)
+        .maybeSingle();
+      if (offering) offeringId = requireString(offering.offering_id);
+    }
+    return { id: s.id, offering_id: offeringId };
+  });
+  const offeringLookups = await Promise.all(offeringLookupPromises);
+  const offeringMap: Record<string, string> = {};
+  for (const item of offeringLookups) {
+    if (item.offering_id) offeringMap[item.id] = item.offering_id;
   }
 
   return {
@@ -9592,7 +9629,30 @@ async function fetchMySolutions(userCtx: { user: Record<string, unknown> }) {
         tags: Array.isArray(sPayload.tags) ? sPayload.tags : [],
         geographies: Array.isArray(sPayload.geographies) ? sPayload.geographies : [],
         languages: Array.isArray(sPayload.languages) ? sPayload.languages : [],
+        location_availability: requireString(sPayload.location_availability),
+        contact_details: requireString(sPayload.contact_details || sPayload.product_contact_details),
+        trainer_name: requireString(sPayload.trainer_name),
+        trainer_email: requireString(sPayload.trainer_email),
+        trainer_phone: requireString(sPayload.trainer_phone),
+        trainer_details_text: requireString(sPayload.trainer_details_text),
+        duration: requireString(sPayload.duration),
+        duration_unit: requireString(sPayload.duration_unit),
+        prerequisites: requireString(sPayload.prerequisites),
+        service_cost: requireString(sPayload.service_cost),
+        service_cost_unit: requireString(sPayload.service_cost_unit),
+        cost_remarks: requireString(sPayload.cost_remarks),
+        support_post_service: requireString(sPayload.support_post_service),
+        support_post_service_cost: requireString(sPayload.support_post_service_cost),
+        delivery_mode: requireString(sPayload.delivery_mode),
+        certification_offered: requireString(sPayload.certification_offered || "Not Provided"),
+        grade_capacity: requireString(sPayload.grade_capacity || sPayload.grade_or_capacity),
+        product_cost: requireString(sPayload.product_cost || sPayload.cost),
+        product_cost_quote_on_scope: requireString(sPayload.product_cost_quote_on_scope),
+        lead_time: requireString(sPayload.lead_time),
+        support_details: requireString(sPayload.support_details),
+        knowledge_content_url: requireString(sPayload.knowledge_content_url),
         parent_name: parentMap[requireString(s.parent_submission_id)] || "",
+        offering_id: offeringMap[requireString(s.id)] || "",
       };
     }),
   };
@@ -9703,6 +9763,28 @@ async function fetchSolutionOutreach(userCtx: { user: Record<string, unknown> })
   }
 
   return { ok: true, offering_views: offeringViews, email_logs: emailLogs };
+}
+
+async function deleteMySubmission(submissionId: string, userCtx: { user: Record<string, unknown> }) {
+  const userId = requireString(userCtx.user.id);
+  const userEmail = requireString(userCtx.user.email).toLowerCase();
+  if (!submissionId) throw new Error("Submission ID required.");
+
+  // Verify ownership and only allow deletion of pending_admin submissions
+  const query = adminClient
+    .from("gre_mis_form_submissions")
+    .select("id, approval_status")
+    .eq("id", submissionId)
+    .eq("submission_type", "solution");
+  if (userId) query.eq("submitter_user_id", userId);
+  else query.eq("submitter_email", userEmail);
+  const { data: sub } = await query.single();
+  if (!sub) throw new Error("Submission not found or access denied.");
+  if (sub.approval_status !== "pending_admin") throw new Error("Only pending submissions can be deleted.");
+
+  const { error } = await adminClient.from("gre_mis_form_submissions").delete().eq("id", submissionId);
+  if (error) throw new Error(error.message);
+  return { ok: true, message: "Submission deleted." };
 }
 
 async function resolveEditConflict(
@@ -9940,6 +10022,10 @@ Deno.serve(async (req) => {
 
     if (action === "fetchSolutionOutreach") {
       return jsonResponse(await fetchSolutionOutreach(userCtx));
+    }
+
+    if (action === "deleteMySubmission") {
+      return jsonResponse(await deleteMySubmission(requireString(payload.submissionId), userCtx));
     }
 
     if (action === "directCuratorUpdate") {
