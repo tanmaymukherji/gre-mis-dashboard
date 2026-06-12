@@ -3434,8 +3434,8 @@ class GreMisStore {
     return this.callAdmin("submitSignedInForm", { submissionType, payload });
   }
 
-  async reviewFormSubmission(submissionId, decision, reviewNotes = "") {
-    return this.callAdmin("reviewFormSubmission", { submissionId, decision, reviewNotes }, true);
+  async reviewFormSubmission(submissionId, decision, reviewNotes = "", update = null) {
+    return this.callAdmin("reviewFormSubmission", { submissionId, decision, reviewNotes, update }, true);
   }
 
   async updateFormSubmission(submissionId, update) {
@@ -5160,12 +5160,6 @@ function getFormSubmissionById(submissionId) {
   return ensureList(state.data.pendingFormSubmissions).find((submission) => submission.id === submissionId) || null;
 }
 
-function fillSubmissionReviewTraderSelect(selectedId = "") {
-  const select = byId("submissionReviewTraderSelect");
-  if (!select) return;
-  select.innerHTML = buildSupplierOptionsHtml(selectedId);
-}
-
 function getSubmissionReviewNeedDraft() {
   const form = byId("submissionReviewForm");
   if (!form) return null;
@@ -5252,7 +5246,6 @@ function openSubmissionReviewDialog(submissionId) {
   if (orgField) orgField.value = submission.organization_name || payload.organization_name || "";
   if (notesField) notesField.value = submission.admin_review_notes || "";
   if (payloadField) payloadField.value = JSON.stringify(payload, null, 2);
-  fillSubmissionReviewTraderSelect(submission.existing_trader_id || payload.existing_trader_id || "");
   renderSubmissionReviewFields(submission.submission_type, payload);
   renderSubmissionReviewAttachments(submission.submission_type, payload);
   const needTools = byId("submissionReviewNeedTools");
@@ -8106,13 +8099,6 @@ function bindStaticEvents() {
   byId("closeSubmissionReviewDialog")?.addEventListener("click", () => submissionReviewDialog?.close());
   byId("closeLocalSolutionReviewDialog")?.addEventListener("click", () => localSolutionReviewDialog?.close());
   byId("closeLocalNeedReviewDialog")?.addEventListener("click", () => localNeedReviewDialog?.close());
-  byId("submissionReviewTraderSelect")?.addEventListener("change", (event) => {
-    const trader = getTraderById(event.target.value);
-    const orgInput = byId("submissionReviewForm")?.querySelector('[name="organization_name"]');
-    if (trader && orgInput) {
-      orgInput.value = trader.organisation_name || trader.trader_name || "";
-    }
-  });
   ["solution", "need"].forEach((kind) => {
     const selectId = kind === "solution" ? "solutionTraderSelect" : "needTraderSelect";
     const orgInputId = kind === "solution" ? "solutionOrgName" : "needOrgName";
@@ -9307,10 +9293,9 @@ function bindStaticEvents() {
 
   byId("approveSubmissionReviewBtn")?.addEventListener("click", safeAsync(async () => {
     const status = byId("submissionReviewStatus");
-    if (status) status.textContent = "Saving changes and approving...";
+    if (status) status.textContent = "Approving...";
     const patch = await buildSubmissionReviewPatch();
-    await store.updateFormSubmission(patch.submissionId, patch.update);
-    const result = await store.reviewFormSubmission(patch.submissionId, "approve", patch.update.adminReviewNotes || "");
+    const result = await store.reviewFormSubmission(patch.submissionId, "approve", patch.update.adminReviewNotes || "", patch.update);
     submissionReviewDialog?.close();
     refreshActiveAdminDeskTab();
     toast(result.message || (result.targetNeedId ? `Submission approved as Need ${result.targetNeedId}.` : "Form submission approved."));
@@ -9322,10 +9307,9 @@ function bindStaticEvents() {
       return;
     }
     const status = byId("submissionReviewStatus");
-    if (status) status.textContent = "Saving changes and rejecting...";
+    if (status) status.textContent = "Rejecting...";
     const patch = await buildSubmissionReviewPatch();
-    await store.updateFormSubmission(patch.submissionId, patch.update);
-    await store.reviewFormSubmission(patch.submissionId, "reject", patch.update.adminReviewNotes || "");
+    await store.reviewFormSubmission(patch.submissionId, "reject", patch.update.adminReviewNotes || "", patch.update);
     submissionReviewDialog?.close();
     refreshActiveAdminDeskTab();
     toast("Form submission rejected.");

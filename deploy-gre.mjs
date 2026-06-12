@@ -13,8 +13,8 @@ const BASE = "https://developers.hostinger.com";
 const USERNAME = "u973202051";
 const DOMAIN = "gre.grameee.org";
 // Update these paths/names for each deploy
-const ARCHIVE_PATH = "C:\\Users\\tmukh\\AppData\\Local\\Temp\\gre-mis_20260610.zip";
-const ARCHIVE_NAME = "gre-mis_20260610.zip";
+const ARCHIVE_PATH = "C:\\Users\\tmukh\\AppData\\Local\\Temp\\gre-mis_20260611.zip";
+const ARCHIVE_NAME = "gre-mis_20260611.zip";
 
 async function main() {
   // 1. Get upload credentials
