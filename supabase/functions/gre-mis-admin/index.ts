@@ -5864,18 +5864,10 @@ async function createLocalSolutionFromSubmission(
   const productCost = parseBoolean(payload.product_cost_quote_on_scope) && !requireString(payload.product_cost)
     ? "Can be quoted after finalising scope"
     : requireString(payload.product_cost);
-  const serviceBrochureUrl =
-    await uploadAttachmentToGithub(payload.service_brochure_attachment, "service-brochures", `${offeringName || "service-offering"}-${attachmentName(payload.service_brochure_attachment) || "brochure"}`) ||
-    attachmentDataUrl(payload.service_brochure_attachment);
-  const productBrochureUrl =
-    await uploadAttachmentToGithub(payload.product_brochure_attachment, "product-brochures", `${offeringName || "product-offering"}-${attachmentName(payload.product_brochure_attachment) || "brochure"}`) ||
-    attachmentDataUrl(payload.product_brochure_attachment);
-  const uploadedKnowledgeContent =
-    await uploadAttachmentToGithub(payload.knowledge_content_attachment, "knowledge-content", `${offeringName || "knowledge-offering"}-${attachmentName(payload.knowledge_content_attachment) || "content"}`);
-  const knowledgeContentUrl = uploadedKnowledgeContent || attachmentDataUrl(payload.knowledge_content_attachment) || requireString(payload.knowledge_content_url);
-  const solutionImageUrl =
-    await uploadAttachmentToGithub(payload.offering_image_attachment, "offering-images", `${offeringName || "offering"}-${attachmentName(payload.offering_image_attachment) || "image"}`) ||
-    attachmentDataUrl(payload.offering_image_attachment);
+  const serviceBrochureUrl = attachmentDataUrl(payload.service_brochure_attachment) || null;
+  const productBrochureUrl = attachmentDataUrl(payload.product_brochure_attachment) || null;
+  const knowledgeContentUrl = attachmentDataUrl(payload.knowledge_content_attachment) || requireString(payload.knowledge_content_url) || null;
+  const solutionImageUrl = attachmentDataUrl(payload.offering_image_attachment) || null;
 
   const rawPayload = {
     source: "gre_mis_local_solution_submission",
@@ -5989,13 +5981,32 @@ async function createLocalSolutionFromSubmission(
     source_row_signature: stableRowSignature(rawPayload),
   };
 
-  const { error: solutionError } = await adminClient.from("solutions").insert(solutionRow);
-  if (solutionError) throw new Error(solutionError.message);
+  const [solutionResult, offeringResult] = await Promise.all([
+    adminClient.from("solutions").insert(solutionRow).select("solution_id").single(),
+    adminClient.from("offerings").insert(offeringRow).select("offering_id").single(),
+  ]);
+  if (solutionResult.error) throw new Error(solutionResult.error.message);
+  if (offeringResult.error) throw new Error(offeringResult.error.message);
 
-  const { error: offeringError } = await adminClient.from("offerings").insert(offeringRow);
-  if (offeringError) throw new Error(offeringError.message);
+  enrichOfferingIntelligence(offeringRow, solutionRow, trader, defaultAiProvider || "openrouter").catch((aiError) => {
+    console.warn("Offering intelligence enrichment failed:", aiError instanceof Error ? aiError.message : String(aiError));
+  });
 
-  await enrichOfferingIntelligence(offeringRow, solutionRow, trader, defaultAiProvider || "openrouter");
+  Promise.all([
+    uploadAttachmentToGithub(payload.service_brochure_attachment, "service-brochures", `${offeringName || "service-offering"}-${attachmentName(payload.service_brochure_attachment) || "brochure"}`),
+    uploadAttachmentToGithub(payload.product_brochure_attachment, "product-brochures", `${offeringName || "product-offering"}-${attachmentName(payload.product_brochure_attachment) || "brochure"}`),
+    uploadAttachmentToGithub(payload.knowledge_content_attachment, "knowledge-content", `${offeringName || "knowledge-offering"}-${attachmentName(payload.knowledge_content_attachment) || "content"}`),
+    uploadAttachmentToGithub(payload.offering_image_attachment, "offering-images", `${offeringName || "offering"}-${attachmentName(payload.offering_image_attachment) || "image"}`),
+  ]).then(([serviceUrl, productUrl, knowledgeUrl, imageUrl]) => {
+    const patches = [];
+    if (serviceUrl) patches.push(adminClient.from("offerings").update({ service_brochure_url: serviceUrl }).eq("offering_id", offeringId));
+    if (productUrl) patches.push(adminClient.from("offerings").update({ product_brochure_url: productUrl }).eq("offering_id", offeringId));
+    if (knowledgeUrl) patches.push(adminClient.from("offerings").update({ knowledge_content_url: knowledgeUrl }).eq("offering_id", offeringId));
+    if (imageUrl) patches.push(adminClient.from("solutions").update({ solution_image_url: imageUrl }).eq("solution_id", solutionId));
+    return Promise.all(patches);
+  }).catch((uploadError) => {
+    console.warn("Background attachment upload failed:", uploadError instanceof Error ? uploadError.message : String(uploadError));
+  });
 
   return {
     traderId,
@@ -6322,22 +6333,18 @@ async function submitFormSubmission(
     ? "Solution Submitted for Approval"
     : "Need Help Submitted for Approval";
   if (normalizedType === "solution") {
-    try {
-      await sendSolutionSubmissionConfirmationEmail(payload);
-    } catch (mailError) {
+    sendSolutionSubmissionConfirmationEmail(payload).catch((mailError) => {
       const reason = requireString((mailError as { message?: string } | null)?.message) || "Unknown mail error.";
-      message = `Solution Submitted for Approval. Confirmation email could not be sent: ${reason}`;
-    }
+      console.warn(`Confirmation email could not be sent: ${reason}`);
+    });
   } else if (normalizedType === "need") {
-    try {
-      await sendNeedSubmissionConfirmationEmail({
-        ...payload,
-        demand_broadcast_needed: demandBroadcastNeeded,
-      });
-    } catch (mailError) {
+    sendNeedSubmissionConfirmationEmail({
+      ...payload,
+      demand_broadcast_needed: demandBroadcastNeeded,
+    }).catch((mailError) => {
       const reason = requireString((mailError as { message?: string } | null)?.message) || "Unknown mail error.";
-      message = `Need Help Submitted for Approval. Confirmation email could not be sent: ${reason}`;
-    }
+      console.warn(`Confirmation email could not be sent: ${reason}`);
+    });
   }
 
   return {
@@ -6449,19 +6456,13 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       })
       .eq("id", submissionId);
     if (approveError) throw new Error(approveError.message);
-    let questionsMessage = "";
-    try {
-      const questionResult = await generateSuggestedQuestionsForNeed(nextNeedId, actorEmail);
-      questionsMessage = questionResult?.questions?.length
-        ? ` Suggested questions to seeker were also prepared automatically.`
-        : "";
-    } catch (questionError) {
-      questionsMessage = ` Suggested questions could not be prepared automatically: ${questionError instanceof Error ? questionError.message : String(questionError)}.`;
-    }
+    generateSuggestedQuestionsForNeed(nextNeedId, actorEmail).catch((questionError) => {
+      console.warn("Suggested questions could not be prepared automatically:", questionError instanceof Error ? questionError.message : String(questionError));
+    });
     return {
       ok: true,
       targetNeedId: nextNeedId,
-      message: `Need was saved to local Supabase successfully as ${nextNeedId}.${questionsMessage}`.trim(),
+      message: `Need was saved to local Supabase successfully as ${nextNeedId}. Suggested questions to seeker are being prepared automatically.`,
     };
   }
 
