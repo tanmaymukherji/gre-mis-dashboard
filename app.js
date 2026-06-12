@@ -5160,12 +5160,6 @@ function getFormSubmissionById(submissionId) {
   return ensureList(state.data.pendingFormSubmissions).find((submission) => submission.id === submissionId) || null;
 }
 
-function fillSubmissionReviewTraderSelect(selectedId = "") {
-  const select = byId("submissionReviewTraderSelect");
-  if (!select) return;
-  select.innerHTML = buildSupplierOptionsHtml(selectedId);
-}
-
 function getSubmissionReviewNeedDraft() {
   const form = byId("submissionReviewForm");
   if (!form) return null;
@@ -5252,7 +5246,6 @@ function openSubmissionReviewDialog(submissionId) {
   if (orgField) orgField.value = submission.organization_name || payload.organization_name || "";
   if (notesField) notesField.value = submission.admin_review_notes || "";
   if (payloadField) payloadField.value = JSON.stringify(payload, null, 2);
-  fillSubmissionReviewTraderSelect(submission.existing_trader_id || payload.existing_trader_id || "");
   renderSubmissionReviewFields(submission.submission_type, payload);
   renderSubmissionReviewAttachments(submission.submission_type, payload);
   const needTools = byId("submissionReviewNeedTools");
@@ -8106,13 +8099,6 @@ function bindStaticEvents() {
   byId("closeSubmissionReviewDialog")?.addEventListener("click", () => submissionReviewDialog?.close());
   byId("closeLocalSolutionReviewDialog")?.addEventListener("click", () => localSolutionReviewDialog?.close());
   byId("closeLocalNeedReviewDialog")?.addEventListener("click", () => localNeedReviewDialog?.close());
-  byId("submissionReviewTraderSelect")?.addEventListener("change", (event) => {
-    const trader = getTraderById(event.target.value);
-    const orgInput = byId("submissionReviewForm")?.querySelector('[name="organization_name"]');
-    if (trader && orgInput) {
-      orgInput.value = trader.organisation_name || trader.trader_name || "";
-    }
-  });
   ["solution", "need"].forEach((kind) => {
     const selectId = kind === "solution" ? "solutionTraderSelect" : "needTraderSelect";
     const orgInputId = kind === "solution" ? "solutionOrgName" : "needOrgName";
