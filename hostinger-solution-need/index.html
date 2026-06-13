@@ -356,6 +356,78 @@
       flex-wrap: wrap;
     }
 
+    .solution-card-summary {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 0.92rem;
+    }
+
+    .solution-card-tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .tag-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #e4f3e4;
+      color: #1f6b3a;
+      font-size: 0.76rem;
+      font-weight: 700;
+    }
+
+    .solution-card-geo {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .solution-card-actions-bottom {
+      margin-top: 2px;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .media-preview {
+      width: min(360px, 100%);
+      max-height: 240px;
+      object-fit: contain;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: #f8fbf5;
+      padding: 8px;
+    }
+
+    .asset-link-list {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .asset-link {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: #e4f3e4;
+      color: #1f6b3a;
+      font-weight: 800;
+      border: 1px solid rgba(31, 107, 58, 0.18);
+    }
+
+    .current-asset-note {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      word-break: break-word;
+    }
+
     .status-pill {
       display: inline-flex;
       align-items: center;
@@ -916,6 +988,51 @@
             <textarea id="editContactDetails" rows="2" placeholder="Optional additional contact details"></textarea>
           </label>
 
+          <div class="wide">
+            <div class="edit-section-divider">Media and Documents</div>
+            <div class="form-grid">
+              <label class="wide">
+                <span>Offering Image URL</span>
+                <input id="editSolutionImageUrl" type="url" placeholder="https://..." />
+                <small id="currentSolutionImageUrl" class="current-asset-note"></small>
+              </label>
+              <label class="wide">
+                <span>Replace Offering Image</span>
+                <input id="editOfferingImageFile" type="file" accept="image/*" />
+              </label>
+              <label class="wide category-media-field" data-media-category="Service offerings">
+                <span>Service Brochure URL</span>
+                <input id="editServiceBrochureUrl" type="url" placeholder="https://..." />
+                <small id="currentServiceBrochureUrl" class="current-asset-note"></small>
+              </label>
+              <label class="wide category-media-field" data-media-category="Service offerings">
+                <span>Replace Service Brochure</span>
+                <input id="editServiceBrochureFile" type="file" />
+              </label>
+              <label class="wide category-media-field" data-media-category="Product offerings">
+                <span>Product Brochure URL</span>
+                <input id="editProductBrochureUrl" type="url" placeholder="https://..." />
+                <small id="currentProductBrochureUrl" class="current-asset-note"></small>
+              </label>
+              <label class="wide category-media-field" data-media-category="Product offerings">
+                <span>Replace Product Brochure</span>
+                <input id="editProductBrochureFile" type="file" />
+              </label>
+              <label class="wide category-media-field" data-media-category="Knowledge offerings">
+                <span>Knowledge Video Link</span>
+                <input id="editKnowledgeVideoUrl" type="url" placeholder="https://..." />
+              </label>
+              <label class="wide category-media-field" data-media-category="Knowledge offerings">
+                <span>Knowledge Document Link</span>
+                <input id="editKnowledgeDocumentUrl" type="url" placeholder="https://..." />
+              </label>
+              <label class="wide category-media-field" data-media-category="Knowledge offerings">
+                <span>Replace Knowledge / Video / Document File</span>
+                <input id="editKnowledgeContentFile" type="file" />
+              </label>
+            </div>
+          </div>
+
           <!-- Tags and Geographies -->
           <label class="wide">
             <span>Tags (comma-separated)</span>
@@ -1066,7 +1183,11 @@
         var resp = await fetchWithTimeout(supabaseUrl.replace(/\/+$/, "") + "/functions/v1/gre-mis-admin", {
           method: "POST",
           headers: { "Content-Type": "application/json", "apikey": anonKey, "Authorization": "Bearer " + anonKey },
-          body: JSON.stringify(Object.assign({ action: action, grameeeAccessToken: token || "" }, body || {})),
+          body: JSON.stringify(Object.assign({
+            action: action,
+            grameeeAccessToken: token || "",
+            grameeeUserSummary: currentUser || null
+          }, body || {})),
         }, 15000);
         var txt = await resp.text();
         var data = {};
@@ -1080,6 +1201,9 @@
       let currentView = "submit";
       let currentUser = null;
       let solutionsCache = [];
+      let mySolutionsLoaded = false;
+      let mySolutionsLoading = false;
+      let mySolutionsLoadedAt = 0;
 
       function showSubmitView() {
         currentView = "submit";
@@ -1100,7 +1224,8 @@
         heroLede.textContent = "View and manage your submitted solutions.";
         updateUrl("my-solutions");
         mySolutionsBadge.classList.add("hidden");
-        loadMySolutions();
+        if (mySolutionsLoaded) applyFiltersAndRender();
+        else loadMySolutions();
       }
 
       function updateUrl(view) {
@@ -1113,19 +1238,14 @@
       // ── Load My Solutions (edge function with timeout) ──
 
       async function loadMySolutions() {
+        if (mySolutionsLoading) return;
+        mySolutionsLoading = true;
         var list = document.getElementById("mySolutionsList");
         list.innerHTML = '<div class="my-solutions-loading">Loading your solutions...</div>';
 
         try {
           var result = await callEdge("fetchMySolutions");
-          var all = (result.submissions || []).filter(function(s) {
-            // Exclude rejected, deleted source_mode, and signed_in_edit (they are edit
-            // placeholders linked to a parent, not standalone solutions)
-            if (s.approval_status === "rejected") return false;
-            if (s.source_mode === "deleted") return false;
-            if (s.source_mode === "signed_in_edit") return false;
-            return true;
-          });
+          var all = (result.submissions || []);
 
           // Flatten payload into the submission objects
           solutionsCache = all.map(function(s) {
@@ -1144,45 +1264,56 @@
               parent_submission_id: s.parent_submission_id,
               local_edit_version: s.local_edit_version || 0,
               conflict_with_gre_sync: s.conflict_with_gre_sync || false,
+              offering_id: s.offering_id || "",
+              gre_link: s.gre_link || "",
               created_at: s.created_at,
-              offering_name: p.offering_name || p.solution_name || "",
-              about_offering_text: p.about_offering_text || p.about_solution_text || "",
-              offering_category: p.offering_category || "",
-              offering_type: p.offering_type || "",
+              offering_name: s.offering_name || p.offering_name || p.solution_name || "",
+              about_offering_text: s.about_offering_text || p.about_offering_text || p.about_solution_text || "",
+              offering_category: s.offering_category || p.offering_category || "",
+              offering_type: s.offering_type || p.offering_type || "",
               organization_name_payload: p.organization_name || "",
-              tags: Array.isArray(p.tags) ? p.tags : [],
-              geographies: Array.isArray(p.geographies) ? p.geographies : [],
-              languages: Array.isArray(p.languages) ? p.languages : [],
-              location_availability: p.location_availability || "",
-              contact_details: p.contact_details || "",
-              trainer_name: p.trainer_name || "",
-              trainer_email: p.trainer_email || "",
-              trainer_phone: p.trainer_phone || "",
-              trainer_details_text: p.trainer_details_text || "",
-              duration: p.duration || "",
-              duration_unit: p.duration_unit || "",
-              prerequisites: p.prerequisites || "",
-              service_cost: p.service_cost || "",
-              service_cost_unit: p.service_cost_unit || "",
-              cost_remarks: p.cost_remarks || "",
-              support_post_service: p.support_post_service || "",
-              support_post_service_cost: p.support_post_service_cost || "",
-              delivery_mode: p.delivery_mode || "",
-              certification_offered: p.certification_offered || "",
-              grade_capacity: p.grade_capacity || "",
-              product_cost: p.product_cost || "",
-              product_cost_quote_on_scope: p.product_cost_quote_on_scope || "",
-              lead_time: p.lead_time || "",
-              support_details: p.support_details || "",
-              knowledge_content_url: p.knowledge_content_url || "",
+              tags: Array.isArray(s.tags) ? s.tags : (Array.isArray(p.tags) ? p.tags : []),
+              geographies: Array.isArray(s.geographies) ? s.geographies : (Array.isArray(p.geographies) ? p.geographies : []),
+              languages: Array.isArray(s.languages) ? s.languages : (Array.isArray(p.languages) ? p.languages : []),
+              location_availability: s.location_availability || p.location_availability || "",
+              contact_details: s.contact_details || p.contact_details || "",
+              trainer_name: s.trainer_name || p.trainer_name || "",
+              trainer_email: s.trainer_email || p.trainer_email || "",
+              trainer_phone: s.trainer_phone || p.trainer_phone || "",
+              trainer_details_text: s.trainer_details_text || p.trainer_details_text || "",
+              duration: s.duration || p.duration || "",
+              duration_unit: s.duration_unit || p.duration_unit || "",
+              prerequisites: s.prerequisites || p.prerequisites || "",
+              service_cost: s.service_cost || p.service_cost || "",
+              service_cost_unit: s.service_cost_unit || p.service_cost_unit || "",
+              cost_remarks: s.cost_remarks || p.cost_remarks || "",
+              support_post_service: s.support_post_service || p.support_post_service || "",
+              support_post_service_cost: s.support_post_service_cost || p.support_post_service_cost || "",
+              delivery_mode: s.delivery_mode || p.delivery_mode || "",
+              certification_offered: s.certification_offered || p.certification_offered || "",
+              grade_capacity: s.grade_capacity || p.grade_capacity || "",
+              product_cost: s.product_cost || p.product_cost || "",
+              product_cost_quote_on_scope: s.product_cost_quote_on_scope || p.product_cost_quote_on_scope || "",
+              lead_time: s.lead_time || p.lead_time || "",
+              support_details: s.support_details || p.support_details || "",
+              solution_image_url: s.solution_image_url || p.solution_image_url || "",
+              service_brochure_url: s.service_brochure_url || p.service_brochure_url || "",
+              product_brochure_url: s.product_brochure_url || p.product_brochure_url || "",
+              knowledge_content_url: s.knowledge_content_url || p.knowledge_content_url || "",
+              knowledge_video_url: s.knowledge_video_url || p.knowledge_video_url || "",
+              knowledge_document_url: s.knowledge_document_url || p.knowledge_document_url || "",
             };
           });
 
           mySolutionsBadge.textContent = solutionsCache.length;
           mySolutionsBadge.classList.toggle("hidden", solutionsCache.length === 0);
+          mySolutionsLoaded = true;
+          mySolutionsLoadedAt = Date.now();
           applyFiltersAndRender();
         } catch (err) {
           list.innerHTML = '<div class="my-solutions-empty"><p class="my-solutions-empty-text">Could not load your solutions. ' + esc(err.message) + '</p></div>';
+        } finally {
+          mySolutionsLoading = false;
         }
       }
 
@@ -1195,6 +1326,8 @@
       }
 
       function getStatusLabel(solution) {
+        if (solution.source_mode === "local_mis_published") return "Live on GramEEE";
+        if (solution.approval_status === "approved" && solution.synced_to_gre === false && !solution.gre_link) return "Live on GramEEE";
         const s = getStatus(solution);
         const map = {
           approved: "Live on GRE",
@@ -1242,7 +1375,7 @@
         else if (sort === "oldest") filtered.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
         else if (sort === "name") filtered.sort((a, b) => (a.offering_name || "").localeCompare(b.offering_name || ""));
 
-        document.getElementById("mySolutionsMeta").textContent = `Showing ${filtered.length} of ${solutionsCache.length} solutions`;
+        document.getElementById("mySolutionsMeta").textContent = `Showing ${filtered.length} of ${solutionsCache.length} live solutions`;
         renderCards(filtered);
       }
 
@@ -1259,8 +1392,13 @@
         }
 
         list.innerHTML = solutions.map(function(s) {
-          var canEdit = s.approval_status === "approved" && s.source_mode !== "signed_in_edit";
-          var isPending = s.approval_status === "pending_admin" && s.source_mode !== "signed_in_edit";
+          var canEdit = s.approval_status === "approved" && s.source_mode === "local_mis_published";
+          var summary = (s.about_offering_text || "").trim();
+          var shortSummary = summary.length > 260 ? summary.slice(0, 257).trim() + "..." : summary;
+          var tags = (s.tags || []).slice(0, 5).map(function(tag) {
+            return '<span class="tag-chip">' + esc(tag) + '</span>';
+          }).join("");
+          var geography = (s.geographies || []).slice(0, 2).join("; ");
 
           return '<div class="solution-card" data-id="' + esc(s.id) + '">\
             <div class="solution-card-top">\
@@ -1269,15 +1407,17 @@
                 <p class="solution-card-category">' + esc(s.offering_category || "") + (s.offering_type ? " &middot; " + esc(s.offering_type) : "") + '</p>\
                 <p class="solution-card-org">' + esc(s.organization_name || "") + (s.existing_trader_name ? " via " + esc(s.existing_trader_name) : "") + '</p>\
               </div>\
-              <div class="solution-card-actions">\
-                <button class="action-btn" onclick="openViewModal(\'' + esc(s.id) + '\')">View Details</button>' +
-                (canEdit ? '<button class="action-btn" onclick="openEditModal(\'' + esc(s.id) + '\')">Edit</button>' : "") +
-                (isPending ? '<button class="action-btn" style="color:var(--red);border-color:var(--red)" onclick="deleteSubmission(\'' + esc(s.id) + '\')">Remove</button>' : "") + '\
-              </div>\
             </div>\
+            <p class="solution-card-summary">' + esc(shortSummary || "No summary available yet.") + '</p>\
+            ' + (tags ? '<div class="solution-card-tags">' + tags + '</div>' : '') + '\
+            ' + (geography ? '<p class="solution-card-geo">' + esc(geography) + '</p>' : '') + '\
             <div class="solution-card-status">\
-              <span class="status-pill ' + getStatusClass(s) + '">' + esc(getStatusLabel(s)) + '</span>' +
-              (s.conflict_with_gre_sync ? '<span class="conflict-warning">&#9888; Pending admin review</span>' : "") + '\
+              <span class="status-pill ' + getStatusClass(s) + '">' + esc(getStatusLabel(s)) + '</span>\
+            </div>\
+            <div class="solution-card-actions solution-card-actions-bottom">\
+              <button class="action-btn primary-action" onclick="openViewModal(\'' + esc(s.id) + '\')">View Details</button>' +
+              (s.gre_link ? '<a class="action-btn" href="' + esc(s.gre_link) + '" target="_blank" rel="noreferrer">View on GRE</a>' : "") +
+              (canEdit ? '<button class="action-btn" onclick="openEditModal(\'' + esc(s.id) + '\')">Edit</button>' : "") + '\
             </div>\
           </div>';
         }).join("");
@@ -1352,8 +1492,8 @@
         document.getElementById("viewModalTitle").textContent = p.offering_name || "Solution Details";
 
         // If offering_id is available, load offering-detail.html in iframe (like GRE MIS)
-        if (p.offering_id) {
-          document.getElementById("viewModalBody").innerHTML = '<div class="match-detail-frame-wrap"><iframe class="match-detail-frame" src="./offering-detail.html?offering_id=' + encodeURIComponent(p.offering_id) + '&embedded=1&v=20260612" style="width:100%;height:70vh;border:0;border-radius:12px"></iframe></div>';
+        if (p.offering_id && p.source_mode !== "local_mis_published") {
+          document.getElementById("viewModalBody").innerHTML = '<div class="match-detail-frame-wrap"><iframe class="match-detail-frame" src="https://gre.grameee.org/offering-detail.html?offering_id=' + encodeURIComponent(p.offering_id) + '&embedded=1&v=20260612" style="width:100%;height:70vh;border:0;border-radius:12px"></iframe></div>';
           document.getElementById("viewModal").classList.remove("hidden");
           return;
         }
@@ -1375,6 +1515,26 @@
           html += '<div class="view-tags">' + tags.map(function(t) { return "<span>" + esc(t) + "</span>"; }).join("") + '</div>';
         }
         html += '</div>';
+
+        var assetLinks = [];
+        if (cat.indexOf("service") >= 0 && p.service_brochure_url) assetLinks.push({ label: "Service Brochure", url: p.service_brochure_url });
+        if (cat.indexOf("product") >= 0 && p.product_brochure_url) assetLinks.push({ label: "Product Brochure", url: p.product_brochure_url });
+        if (cat.indexOf("knowledge") >= 0 && p.knowledge_video_url) assetLinks.push({ label: "Knowledge Video", url: p.knowledge_video_url });
+        if (cat.indexOf("knowledge") >= 0 && p.knowledge_document_url) assetLinks.push({ label: "Knowledge Document", url: p.knowledge_document_url });
+        if (cat.indexOf("knowledge") >= 0 && p.knowledge_content_url) assetLinks.push({ label: "Knowledge / Video / Document", url: p.knowledge_content_url });
+        if (p.solution_image_url || assetLinks.length) {
+          html += '<div class="view-panel">';
+          html += '<h3 class="view-panel-title">Media and Documents</h3>';
+          if (p.solution_image_url) {
+            html += '<img class="media-preview" src="' + esc(p.solution_image_url) + '" alt="' + esc(p.offering_name || "Offering image") + '" />';
+          }
+          if (assetLinks.length) {
+            html += '<div class="asset-link-list">' + assetLinks.map(function(item) {
+              return '<a class="asset-link" href="' + esc(item.url) + '" target="_blank" rel="noreferrer">' + esc(item.label) + '</a>';
+            }).join("") + '</div>';
+          }
+          html += '</div>';
+        }
 
         // Provider & Contact
         html += '<div class="view-panel">';
@@ -1466,6 +1626,9 @@
         document.querySelectorAll(".conditional-edit-section").forEach(function(el) {
           el.classList.toggle("hidden", el.dataset.category !== cat);
         });
+        document.querySelectorAll(".category-media-field").forEach(function(el) {
+          el.classList.toggle("hidden", el.dataset.mediaCategory !== cat);
+        });
       };
 
       window.openEditModal = function(submissionId) {
@@ -1503,6 +1666,18 @@
         document.getElementById("editLeadTime").value = p.lead_time || "";
         document.getElementById("editSupportDetails").value = p.support_details || "";
         document.getElementById("editKnowledgeContentUrl").value = p.knowledge_content_url || "";
+        document.getElementById("editSolutionImageUrl").value = p.solution_image_url || "";
+        document.getElementById("editServiceBrochureUrl").value = p.service_brochure_url || "";
+        document.getElementById("editProductBrochureUrl").value = p.product_brochure_url || "";
+        document.getElementById("editKnowledgeVideoUrl").value = p.knowledge_video_url || "";
+        document.getElementById("editKnowledgeDocumentUrl").value = p.knowledge_document_url || "";
+        document.getElementById("currentSolutionImageUrl").textContent = p.solution_image_url ? "Current: " + p.solution_image_url : "No image currently attached.";
+        document.getElementById("currentServiceBrochureUrl").textContent = p.service_brochure_url ? "Current: " + p.service_brochure_url : "No service brochure currently attached.";
+        document.getElementById("currentProductBrochureUrl").textContent = p.product_brochure_url ? "Current: " + p.product_brochure_url : "No product brochure currently attached.";
+        document.getElementById("editOfferingImageFile").value = "";
+        document.getElementById("editServiceBrochureFile").value = "";
+        document.getElementById("editProductBrochureFile").value = "";
+        document.getElementById("editKnowledgeContentFile").value = "";
         document.getElementById("editLocationAvailability").value = p.location_availability || "";
         document.getElementById("editContactDetails").value = p.contact_details || "";
         var tags = Array.isArray(p.tags) ? p.tags.join(", ") : "";
@@ -1535,6 +1710,20 @@
         document.getElementById("editModal").classList.add("hidden");
       }
 
+      function fileToAttachment(inputId) {
+        var input = document.getElementById(inputId);
+        var file = input && input.files && input.files[0];
+        if (!file) return Promise.resolve(null);
+        return new Promise(function(resolve, reject) {
+          var reader = new FileReader();
+          reader.onload = function() {
+            resolve({ name: file.name, type: file.type || "application/octet-stream", dataUrl: reader.result });
+          };
+          reader.onerror = function() { reject(new Error("Could not read " + file.name)); };
+          reader.readAsDataURL(file);
+        });
+      }
+
       document.getElementById("saveEditBtn").addEventListener("click", async function() {
         var submissionId = document.getElementById("editSubmissionId").value;
         if (!submissionId) return;
@@ -1556,6 +1745,10 @@
 
           var langsStr = document.getElementById("editLanguages").value;
           var languages = langsStr.split(",").map(function(l) { return l.trim(); }).filter(Boolean);
+          var offeringImageAttachment = await fileToAttachment("editOfferingImageFile");
+          var serviceBrochureAttachment = await fileToAttachment("editServiceBrochureFile");
+          var productBrochureAttachment = await fileToAttachment("editProductBrochureFile");
+          var knowledgeContentAttachment = await fileToAttachment("editKnowledgeContentFile");
 
           var payload = {
             offering_name: offeringName,
@@ -1590,8 +1783,17 @@
             product_cost_quote_on_scope: document.getElementById("editCostQuoteOnScope").checked ? "yes" : "",
             lead_time: document.getElementById("editLeadTime").value.trim(),
             support_details: document.getElementById("editSupportDetails").value.trim(),
+            solution_image_url: document.getElementById("editSolutionImageUrl").value.trim(),
+            service_brochure_url: document.getElementById("editServiceBrochureUrl").value.trim(),
+            product_brochure_url: document.getElementById("editProductBrochureUrl").value.trim(),
             knowledge_content_url: document.getElementById("editKnowledgeContentUrl").value.trim(),
+            knowledge_video_url: document.getElementById("editKnowledgeVideoUrl").value.trim(),
+            knowledge_document_url: document.getElementById("editKnowledgeDocumentUrl").value.trim(),
           };
+          if (offeringImageAttachment) payload.offering_image_attachment = offeringImageAttachment;
+          if (serviceBrochureAttachment) payload.service_brochure_attachment = serviceBrochureAttachment;
+          if (productBrochureAttachment) payload.product_brochure_attachment = productBrochureAttachment;
+          if (knowledgeContentAttachment) payload.knowledge_content_attachment = knowledgeContentAttachment;
 
           var result = await callEdge("submitSignedInEdit", {
             parentSubmissionId: submissionId,
@@ -1600,6 +1802,7 @@
 
           statusEl.textContent = result.message || "Edit submitted for approval.";
           setTimeout(function() { closeEditModal(); }, 1500);
+          mySolutionsLoaded = false;
           loadMySolutions();
         } catch (err) {
           statusEl.textContent = "Error: " + err.message;
@@ -1657,9 +1860,22 @@
 
       iframe.addEventListener("load", postContextToFrame);
       document.addEventListener("grameee:auth-updated", () => {
+        currentUser = null;
         initAuthAndView();
         postContextToFrame();
       });
+
+      function refreshMySolutionsIfStale() {
+        if (currentView !== "my-solutions" || !currentUser) return;
+        if (!mySolutionsLoaded || Date.now() - mySolutionsLoadedAt > 15000) {
+          loadMySolutions();
+        }
+      }
+      document.addEventListener("visibilitychange", function() {
+        if (!document.hidden) refreshMySolutionsIfStale();
+      });
+      window.addEventListener("focus", refreshMySolutionsIfStale);
+      window.addEventListener("pageshow", refreshMySolutionsIfStale);
 
       window.addEventListener("message", (event) => {
         if (event.origin !== iframeOrigin || !event.data || typeof event.data !== "object") return;

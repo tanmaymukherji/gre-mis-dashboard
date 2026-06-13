@@ -6389,6 +6389,37 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
   const payload = (submission.payload && typeof submission.payload === "object") ? submission.payload as Record<string, unknown> : {};
 
   if (submission.submission_type === "need") {
+    const localParentNeedId = requireString(payload.local_parent_need_id);
+    if (localParentNeedId) {
+      await updateLocalNeed(localParentNeedId, payload);
+      const { data: refreshedNeed } = await adminClient
+        .from("gre_mis_needs")
+        .select("*")
+        .eq("id", localParentNeedId)
+        .maybeSingle();
+      const { error: approveNeedEditError } = await adminClient
+        .from("gre_mis_form_submissions")
+        .update({
+          approval_status: "approved",
+          admin_review_notes: reviewNotes || "Approved by admin.",
+          reviewed_by_email: actorEmail,
+          reviewed_at: new Date().toISOString(),
+          target_need_id: localParentNeedId,
+          synced_to_gre: false,
+          gre_sync_status: "synced_local_only",
+          gre_sync_message: `Approved edit was applied to local help request ${localParentNeedId}. GRE website write-back is pending final validation.`,
+        })
+        .eq("id", submissionId);
+      if (approveNeedEditError) throw new Error(approveNeedEditError.message);
+      sendHelpRequestUpdateApprovedEmail(refreshedNeed || { ...payload, id: localParentNeedId }, actorEmail).catch((mailError) => {
+        console.warn("Help request update email could not be sent:", mailError instanceof Error ? mailError.message : String(mailError));
+      });
+      return {
+        ok: true,
+        targetNeedId: localParentNeedId,
+        message: `Help request edit was applied locally as ${localParentNeedId}. GRE website write-back is pending final validation.`,
+      };
+    }
     const nextNeedId = `FORM-${Date.now()}`;
     const deploymentLocations = uniqueStrings(asStringArray(payload.deployment_locations));
     const submittedKeywords = uniqueStrings(asStringArray(payload.keywords));
@@ -6467,6 +6498,30 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
   }
 
   try {
+    const localParentOfferingId = requireString(payload.local_parent_offering_id);
+    if (localParentOfferingId) {
+      await updateLocalSolution(localParentOfferingId, payload, actorEmail);
+      const { error: approveLocalEditError } = await adminClient
+        .from("gre_mis_form_submissions")
+        .update({
+          approval_status: "approved",
+          admin_review_notes: reviewNotes || "Approved by admin.",
+          reviewed_by_email: actorEmail,
+          reviewed_at: new Date().toISOString(),
+          target_solution_id: requireString(payload.local_parent_solution_id) || null,
+          synced_to_gre: false,
+          gre_sync_status: "synced_local_only",
+          gre_sync_message: `Approved edit was applied to local offering ${localParentOfferingId}.`,
+        })
+        .eq("id", submissionId);
+      if (approveLocalEditError) throw new Error(approveLocalEditError.message);
+      return {
+        ok: true,
+        greSyncStatus: "synced_local_only",
+        message: `Approved edit was applied to local offering ${localParentOfferingId}.`,
+        offeringId: localParentOfferingId,
+      };
+    }
     const localWrite = await createLocalSolutionFromSubmission(submissionId, payload, actorEmail);
     const greSyncStatus = "synced_local_only";
     const greSyncMessage = `Solution and offering were saved to local Supabase successfully. Local Solution ID ${localWrite.solutionId}, Local Offering ID ${localWrite.offeringId}. These records will be discoverable in AskGRE with View Details only.`;
@@ -6758,7 +6813,12 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
   const geographies = uniqueStrings(asStringArray(payload.geographies || originalPayload.geographies || offering.geographies));
   const locationAvailability = uniqueStrings(asStringArray(payload.location_availability || originalPayload.location_availability)).join(", ") || requireString(offering.location_availability);
   const productCost = requireString(payload.product_cost || offering.product_cost);
-  const serviceCost = requireString(payload.service_cost || offering.service_cost);
+  const hasPayloadServiceUnit = Object.prototype.hasOwnProperty.call(payload, "service_cost_unit");
+  const serviceCostParts = splitServiceCostValue(
+    payload.service_cost || originalPayload.service_cost || offering.service_cost,
+    hasPayloadServiceUnit ? payload.service_cost_unit : originalPayload.service_cost_unit,
+  );
+  const serviceCost = [serviceCostParts.value, serviceCostParts.unit].filter(Boolean).join(" ");
   const contactDetails = buildLocalContactDetails({
     ...payload,
     submitter_name: submitterName,
@@ -6771,25 +6831,38 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
   const nextServiceBrochureUrl =
     await uploadAttachmentToGithub(payload.service_brochure_attachment, "service-brochures", `${offeringName || "service-offering"}-${attachmentName(payload.service_brochure_attachment) || "brochure"}`) ||
     attachmentDataUrl(payload.service_brochure_attachment) ||
-    requireString(offering.service_brochure_url);
+    requireString(payload.service_brochure_url || offering.service_brochure_url);
   const nextProductBrochureUrl =
     await uploadAttachmentToGithub(payload.product_brochure_attachment, "product-brochures", `${offeringName || "product-offering"}-${attachmentName(payload.product_brochure_attachment) || "brochure"}`) ||
     attachmentDataUrl(payload.product_brochure_attachment) ||
-    requireString(offering.product_brochure_url);
+    requireString(payload.product_brochure_url || offering.product_brochure_url);
   const nextKnowledgeContentUrl =
     await uploadAttachmentToGithub(payload.knowledge_content_attachment, "knowledge-content", `${offeringName || "knowledge-offering"}-${attachmentName(payload.knowledge_content_attachment) || "content"}`) ||
     attachmentDataUrl(payload.knowledge_content_attachment) ||
-    requireString(payload.knowledge_content_url || offering.knowledge_content_url);
+    requireString(payload.knowledge_content_url || payload.knowledge_document_url || payload.knowledge_video_url || offering.knowledge_content_url);
   const nextSolutionImageUrl =
     await uploadAttachmentToGithub(payload.offering_image_attachment, "offering-images", `${offeringName || "offering"}-${attachmentName(payload.offering_image_attachment) || "image"}`) ||
     attachmentDataUrl(payload.offering_image_attachment) ||
     requireString(payload.solution_image_url || solutionRow?.solution_image_url);
+  const mergedPayload = {
+    ...originalPayload,
+    ...payload,
+    service_cost: serviceCostParts.value,
+    service_cost_unit: serviceCostParts.unit,
+    solution_image_url: nextSolutionImageUrl || requireString(payload.solution_image_url || originalPayload.solution_image_url),
+    service_brochure_url: nextServiceBrochureUrl || requireString(payload.service_brochure_url || originalPayload.service_brochure_url),
+    product_brochure_url: nextProductBrochureUrl || requireString(payload.product_brochure_url || originalPayload.product_brochure_url),
+    knowledge_content_url: nextKnowledgeContentUrl || requireString(payload.knowledge_content_url || originalPayload.knowledge_content_url),
+    knowledge_video_url: requireString(payload.knowledge_video_url || originalPayload.knowledge_video_url),
+    knowledge_document_url: requireString(payload.knowledge_document_url || originalPayload.knowledge_document_url),
+  };
   const rawPayload = {
     ...(offering.raw_payload && typeof offering.raw_payload === "object" ? offering.raw_payload as Record<string, unknown> : {}),
+    payload: mergedPayload,
     last_manual_edit: {
       updated_by: actorEmail,
       updated_at: nowIso,
-      payload,
+      payload: mergedPayload,
       manual_fields: [],
     },
   };
@@ -6886,6 +6959,7 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
     ]),
     raw_payload: rawPayload,
     source_row_signature: stableRowSignature(rawPayload),
+    updated_at: nowIso,
   };
   const manualFields = Object.keys(offeringPatch).filter((key) => {
     if (key === "raw_payload" || key === "source_row_signature" || key === "search_document" || key === "domain_6m") return false;
@@ -9527,27 +9601,249 @@ async function sendCuratorMessage(
 
 // ── My Solutions helpers ──────────────────────────────────────────────
 
-async function fetchMySolutions(userCtx: { user: Record<string, unknown> }) {
+function normalizeOrgForMatch(value: unknown) {
+  return requireString(value)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitServiceCostValue(value: unknown, fallbackUnit: unknown = "") {
+  let text = requireString(value).replace(/\s+/g, " ").trim();
+  let unit = requireString(fallbackUnit).replace(/\s+/g, " ").trim();
+  const knownUnits = [
+    "Can be quoted after finalising scope",
+    "Per day",
+    "Per hour",
+    "Per person",
+  ];
+  const parenMatch = text.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  if (parenMatch) {
+    text = requireString(parenMatch[1]);
+    if (!unit) unit = requireString(parenMatch[2]);
+  }
+  for (const candidate of knownUnits) {
+    const pattern = new RegExp(`\\s*${candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
+    if (pattern.test(text)) {
+      text = text.replace(pattern, "").trim();
+      if (!unit) unit = candidate;
+      break;
+    }
+  }
+  if (unit && text.toLowerCase().endsWith(unit.toLowerCase())) {
+    text = text.slice(0, -unit.length).trim();
+  }
+  return { value: text, unit };
+}
+
+function isPrivilegedMySolutionsUser(userCtx: { user: Record<string, unknown> }, summary: Record<string, unknown>) {
+  const role = requireString(
+    userCtx.user.role ||
+    summary.role ||
+    summary.user_role ||
+    summary.access_role ||
+    summary.grameee_role,
+  ).toLowerCase();
+  return ["admin", "moderator"].includes(role);
+}
+
+function localOfferingToMySolutionRecord(offering: Record<string, unknown>) {
+  const solutionRow = Array.isArray(offering.solution) ? offering.solution[0] : offering.solution;
+  const traderRow = Array.isArray(offering.trader) ? offering.trader[0] : offering.trader;
+  const rawPayload = getStoredPayloadRecord(offering.raw_payload);
+  const solutionPayload = getStoredPayloadRecord((solutionRow as Record<string, unknown> | undefined)?.raw_payload);
+  const originalPayload = Object.keys(rawPayload).length ? rawPayload : solutionPayload;
+  const offeringId = requireString(offering.offering_id);
+  const isLocalMisOffering = offeringId.startsWith("MIS-OFFERING-");
+  const organizationName = requireString(traderRow?.organisation_name || traderRow?.trader_name || originalPayload.organization_name);
+  const submitterName = requireString(originalPayload.submitter_name || traderRow?.poc_name);
+  const submitterEmail = requireString(originalPayload.submitter_email || traderRow?.email).toLowerCase();
+  const submitterPhone = requireString(originalPayload.submitter_phone || traderRow?.mobile);
+  const offeringServiceCost = requireString(offering.service_cost);
+  const originalServiceCost = requireString(originalPayload.service_cost);
+  const serviceCostParts = splitServiceCostValue(
+    offeringServiceCost || originalServiceCost,
+    offeringServiceCost ? "" : originalPayload.service_cost_unit,
+  );
+  return {
+    id: `${isLocalMisOffering ? "local" : "offering"}:${offeringId}`,
+    submission_type: "solution",
+    source_mode: isLocalMisOffering ? "local_mis_published" : "gre_offering",
+    submitter_name: submitterName,
+    submitter_email: submitterEmail,
+    submitter_phone: submitterPhone,
+    organization_name: organizationName,
+    existing_trader_id: requireString(offering.trader_id),
+    existing_trader_name: organizationName,
+    org_exists_on_gre: Boolean(requireString(offering.trader_id)),
+    approval_status: "approved",
+    admin_review_notes: "",
+    gre_sync_status: isLocalMisOffering ? "synced_local_only" : "synced_gre",
+    synced_to_gre: !isLocalMisOffering,
+    parent_submission_id: "",
+    local_edit_version: 0,
+    conflict_with_gre_sync: false,
+    created_at: offering.created_at_source || offering.updated_at || null,
+    updated_at: offering.updated_at || offering.created_at_source || null,
+    offering_name: requireString(offering.offering_name || originalPayload.offering_name || solutionRow?.solution_name),
+    offering_category: requireString(offering.offering_category || originalPayload.offering_category),
+    offering_type: requireString(offering.offering_type || originalPayload.offering_type),
+    about_offering_text: requireString(offering.about_offering_text || originalPayload.about_offering_text || solutionRow?.about_solution_text),
+    tags: asStringArray(offering.tags || originalPayload.tags),
+    geographies: asStringArray(offering.geographies || originalPayload.geographies),
+    languages: normalizeLanguageArray(offering.languages || originalPayload.languages),
+    location_availability: requireString(offering.location_availability || originalPayload.location_availability),
+    contact_details: requireString(offering.contact_details || originalPayload.contact_details || originalPayload.product_contact_details),
+    trainer_name: requireString(offering.trainer_name || originalPayload.trainer_name),
+    trainer_email: requireString(offering.trainer_email || originalPayload.trainer_email),
+    trainer_phone: requireString(offering.trainer_phone || originalPayload.trainer_phone),
+    trainer_details_text: requireString(offering.trainer_details_text || originalPayload.trainer_details_text),
+    duration: requireString(offering.duration || originalPayload.duration),
+    duration_unit: requireString(originalPayload.duration_unit),
+    prerequisites: requireString(offering.prerequisites || originalPayload.prerequisites),
+    service_cost: serviceCostParts.value,
+    service_cost_unit: serviceCostParts.unit,
+    cost_remarks: requireString(offering.cost_remarks || originalPayload.cost_remarks),
+    support_post_service: requireString(offering.support_post_service || originalPayload.support_post_service),
+    support_post_service_cost: requireString(offering.support_post_service_cost || originalPayload.support_post_service_cost),
+    delivery_mode: requireString(offering.delivery_mode || originalPayload.delivery_mode),
+    certification_offered: requireString(offering.certification_offered || originalPayload.certification_offered || "Not Provided"),
+    grade_capacity: requireString(offering.grade_capacity || originalPayload.grade_capacity || originalPayload.grade_or_capacity),
+    product_cost: requireString(offering.product_cost || originalPayload.product_cost || originalPayload.cost),
+    product_cost_quote_on_scope: requireString(originalPayload.product_cost_quote_on_scope),
+    lead_time: requireString(offering.lead_time || originalPayload.lead_time),
+    support_details: requireString(offering.support_details || originalPayload.support_details),
+    solution_image_url: requireString(solutionRow?.solution_image_url || originalPayload.solution_image_url),
+    service_brochure_url: requireString(offering.service_brochure_url || originalPayload.service_brochure_url),
+    product_brochure_url: requireString(offering.product_brochure_url || originalPayload.product_brochure_url),
+    knowledge_content_url: requireString(offering.knowledge_content_url || originalPayload.knowledge_content_url),
+    knowledge_video_url: requireString(originalPayload.knowledge_video_url),
+    knowledge_document_url: requireString(originalPayload.knowledge_document_url),
+    parent_name: "",
+    offering_id: offeringId,
+    gre_link: requireString(offering.gre_link),
+  };
+}
+
+async function fetchMySolutions(userCtx: { user: Record<string, unknown> }, grameeeUserSummary: unknown = null) {
   const userId = requireString(userCtx.user.id);
   const userEmail = requireString(userCtx.user.email).toLowerCase();
   if (!userId && !userEmail) throw new Error("User identity not found.");
+  const summary = grameeeUserSummary && typeof grameeeUserSummary === "object"
+    ? grameeeUserSummary as Record<string, unknown>
+    : {};
+  const userOrganisation = normalizeOrgForMatch(
+    summary.organization ||
+    summary.organisation ||
+    summary.org ||
+    summary.organization_name ||
+    summary.organisation_name,
+  );
+  const isPrivilegedUser = isPrivilegedMySolutionsUser(userCtx, summary);
 
-  // Only show the user's own signed-in submissions, not shared-link (public form) ones
-  const query = adminClient
-    .from("gre_mis_form_submissions")
-    .select("*")
-    .eq("submission_type", "solution")
-    .in("source_mode", ["signed_in", "signed_in_edit"])
-    .order("created_at", { ascending: false });
-
-  if (userId) query.eq("submitter_user_id", userId);
-  else query.eq("submitter_email", userEmail);
-
-  const { data: submissions, error } = await query;
-  if (error) throw new Error(error.message);
+  // Only released solutions are shown here. Edits are stored as pending
+  // approval records and should not appear as live My Solutions cards.
+  const [submissionResult, localOfferingResult] = await Promise.all([
+    adminClient
+      .from("gre_mis_form_submissions")
+      .select("*")
+      .eq("submission_type", "solution")
+      .eq("source_mode", "signed_in")
+      .eq("approval_status", "approved")
+      .order("created_at", { ascending: false }),
+    adminClient
+      .from("offerings")
+      .select(`
+        offering_id,
+        solution_id,
+        trader_id,
+        publish_status,
+        offering_name,
+        offering_category,
+        offering_group,
+        offering_type,
+        tags,
+        languages,
+        geographies,
+        about_offering_text,
+        contact_details,
+        raw_payload,
+        trainer_name,
+        trainer_email,
+        trainer_phone,
+        trainer_details_text,
+        duration,
+        prerequisites,
+        location_availability,
+        service_cost,
+        product_cost,
+        lead_time,
+        support_details,
+        support_post_service,
+        support_post_service_cost,
+        delivery_mode,
+        certification_offered,
+        cost_remarks,
+        grade_capacity,
+        service_brochure_url,
+        product_brochure_url,
+        knowledge_content_url,
+        gre_link,
+        created_at_source,
+        updated_at,
+        solution:solutions (
+          solution_id,
+          solution_name,
+          about_solution_text,
+          solution_image_url,
+          raw_payload
+        ),
+        trader:traders (
+          trader_id,
+          trader_name,
+          organisation_name,
+          email,
+          mobile,
+          poc_name,
+          association_status
+        )
+      `)
+      .in("publish_status", ["Published", "MIS Published"])
+      .order("updated_at", { ascending: false })
+      .limit(500),
+  ]);
+  if (submissionResult.error) throw new Error(submissionResult.error.message);
+  if (localOfferingResult.error) throw new Error(localOfferingResult.error.message);
+  const submissions = (submissionResult.data || []).filter((submission: Record<string, unknown>) => {
+    return submission.synced_to_gre === true || requireString((submission.payload as Record<string, unknown> | null)?.gre_link);
+  });
+  const visibleSubmissions = (submissions || []).filter((submission: Record<string, unknown>) => {
+    const payload = (submission.payload || {}) as Record<string, unknown>;
+    const rowOrg = normalizeOrgForMatch(submission.organization_name);
+    const traderOrg = normalizeOrgForMatch(submission.existing_trader_name);
+    const payloadOrg = normalizeOrgForMatch(payload.organization_name || payload.organizationName);
+    if (userOrganisation && userOrganisation !== "individual") {
+      return [rowOrg, traderOrg, payloadOrg].some((value) => value === userOrganisation);
+    }
+    const ownerUserId = requireString(submission.submitter_user_id);
+    const ownerEmail = requireString(submission.submitter_email).toLowerCase();
+    return Boolean((userId && ownerUserId === userId) || (userEmail && ownerEmail === userEmail));
+  });
+  const visibleLocalOfferings = (localOfferingResult.data || []).filter((offering: Record<string, unknown>) => {
+    if (isPrivilegedUser && !userOrganisation) return true;
+    const traderRow = Array.isArray(offering.trader) ? offering.trader[0] : offering.trader;
+    const rawPayload = getStoredPayloadRecord(offering.raw_payload);
+    const rowOrg = normalizeOrgForMatch(traderRow?.organisation_name || traderRow?.trader_name);
+    const payloadOrg = normalizeOrgForMatch(rawPayload.organization_name || rawPayload.organizationName);
+    if (userOrganisation && userOrganisation !== "individual") {
+      return [rowOrg, payloadOrg].some((value) => value === userOrganisation);
+    }
+    const submitterEmail = requireString(rawPayload.submitter_email || traderRow?.email).toLowerCase();
+    return Boolean(userEmail && submitterEmail === userEmail);
+  });
 
   // resolve parent submission names for edit chain display
-  const parentIds = submissions
+  const parentIds = visibleSubmissions
     .map((s: Record<string, unknown>) => requireString(s.parent_submission_id))
     .filter(Boolean);
   const parentMap: Record<string, string> = {};
@@ -9565,43 +9861,53 @@ async function fetchMySolutions(userCtx: { user: Record<string, unknown> }) {
   }
 
   // Look up offering_ids for approved+synced submissions
-  const offeringLookupPromises = (submissions || []).map(async (s: Record<string, unknown>) => {
+  const offeringLookupPromises = visibleSubmissions.map(async (s: Record<string, unknown>) => {
     const traderId = requireString(s.existing_trader_id);
     const sPayload = (s.payload || {}) as Record<string, unknown>;
     const offeringName = requireString(sPayload.offering_name || sPayload.solution_name);
-    if (!offeringName) return { id: s.id, offering_id: "" };
+    if (!offeringName) return { id: s.id, offering_id: "", gre_link: "" };
 
     // Try trader_id + name match first, fall back to name-only match
     let offeringId = "";
+    let greLink = "";
     if (traderId) {
       const { data: offering } = await adminClient
         .from("offerings")
-        .select("offering_id")
+        .select("offering_id, gre_link")
         .eq("trader_id", traderId)
         .ilike("offering_name", offeringName)
         .maybeSingle();
-      if (offering) offeringId = requireString(offering.offering_id);
+      if (offering) {
+        offeringId = requireString(offering.offering_id);
+        greLink = requireString(offering.gre_link);
+      }
     }
     if (!offeringId) {
       const { data: offering } = await adminClient
         .from("offerings")
-        .select("offering_id")
+        .select("offering_id, gre_link")
         .ilike("offering_name", offeringName)
         .limit(1)
         .maybeSingle();
-      if (offering) offeringId = requireString(offering.offering_id);
+      if (offering) {
+        offeringId = requireString(offering.offering_id);
+        greLink = requireString(offering.gre_link);
+      }
     }
-    return { id: s.id, offering_id: offeringId };
+    return { id: s.id, offering_id: offeringId, gre_link: greLink };
   });
   const offeringLookups = await Promise.all(offeringLookupPromises);
   const offeringMap: Record<string, string> = {};
+  const greLinkMap: Record<string, string> = {};
   for (const item of offeringLookups) {
     if (item.offering_id) offeringMap[item.id] = item.offering_id;
+    if (item.gre_link) greLinkMap[item.id] = item.gre_link;
   }
 
   return {
     ok: true,
-    submissions: (submissions || []).map((s: Record<string, unknown>) => {
+    submissions: [
+      ...visibleSubmissions.map((s: Record<string, unknown>) => {
       const sPayload = (s.payload || {}) as Record<string, unknown>;
       return {
         id: s.id,
@@ -9650,11 +9956,19 @@ async function fetchMySolutions(userCtx: { user: Record<string, unknown> }) {
         product_cost_quote_on_scope: requireString(sPayload.product_cost_quote_on_scope),
         lead_time: requireString(sPayload.lead_time),
         support_details: requireString(sPayload.support_details),
+        solution_image_url: requireString(sPayload.solution_image_url),
+        service_brochure_url: requireString(sPayload.service_brochure_url),
+        product_brochure_url: requireString(sPayload.product_brochure_url),
         knowledge_content_url: requireString(sPayload.knowledge_content_url),
+        knowledge_video_url: requireString(sPayload.knowledge_video_url),
+        knowledge_document_url: requireString(sPayload.knowledge_document_url),
         parent_name: parentMap[requireString(s.parent_submission_id)] || "",
         offering_id: offeringMap[requireString(s.id)] || "",
+        gre_link: greLinkMap[requireString(s.id)] || "",
       };
-    }),
+      }),
+      ...visibleLocalOfferings.map((offering: Record<string, unknown>) => localOfferingToMySolutionRecord(offering)),
+    ],
   };
 }
 
@@ -9667,6 +9981,70 @@ async function submitSignedInEdit(
   const userId = requireString(userCtx.user.id);
   const userEmail = requireString(userCtx.user.email).toLowerCase();
   if (!userId && !userEmail) throw new Error("User identity not found.");
+
+  if (parentSubmissionId.startsWith("local:")) {
+    const localOfferingId = requireString(parentSubmissionId.replace(/^local:/, ""));
+    const { data: offering, error: offeringError } = await adminClient
+      .from("offerings")
+      .select("*, solution:solutions(*), trader:traders(*)")
+      .eq("offering_id", localOfferingId)
+      .maybeSingle();
+    if (offeringError) throw new Error(offeringError.message);
+    if (!offering) throw new Error("Local solution not found.");
+    if (requireString(offering.publish_status) !== "MIS Published") {
+      throw new Error("Only published local GramEEE solutions can be edited from My Solutions.");
+    }
+
+    const traderRow = Array.isArray(offering.trader) ? offering.trader[0] : offering.trader;
+    const solutionRow = Array.isArray(offering.solution) ? offering.solution[0] : offering.solution;
+    const offeringPayload = getStoredPayloadRecord(offering.raw_payload);
+    const solutionPayload = getStoredPayloadRecord(solutionRow?.raw_payload);
+    const originalPayload = Object.keys(offeringPayload).length ? offeringPayload : solutionPayload;
+    const ownerEmail = requireString(originalPayload.submitter_email || traderRow?.email).toLowerCase();
+    const actorRole = requireString(userCtx.user.role).toLowerCase();
+    const privileged = ["admin", "moderator"].includes(actorRole);
+    if (!privileged && ownerEmail && userEmail && ownerEmail !== userEmail) {
+      throw new Error("Local solution not found or access denied.");
+    }
+
+    const mergedPayload = {
+      ...originalPayload,
+      ...updatedPayload,
+      local_parent_offering_id: localOfferingId,
+      local_parent_solution_id: requireString(offering.solution_id),
+      local_parent_trader_id: requireString(offering.trader_id),
+      edit_source: "local_mis_offering",
+    };
+    const organizationName = requireString(updatedPayload.organization_name || originalPayload.organization_name || traderRow?.organisation_name || traderRow?.trader_name);
+    const submitterName = requireString(updatedPayload.submitter_name || originalPayload.submitter_name || traderRow?.poc_name || userCtx.user.full_name);
+    const submitterEmail = requireString(updatedPayload.submitter_email || originalPayload.submitter_email || traderRow?.email || userEmail).toLowerCase();
+    const submitterPhone = requireString(updatedPayload.submitter_phone || originalPayload.submitter_phone || traderRow?.mobile);
+    const { data, error } = await adminClient
+      .from("gre_mis_form_submissions")
+      .insert({
+        submission_type: "solution",
+        source_mode: "signed_in_edit",
+        submitter_name: submitterName || null,
+        submitter_email: submitterEmail || null,
+        submitter_phone: submitterPhone || null,
+        submitter_user_id: userId || null,
+        organization_name: organizationName,
+        existing_trader_id: requireString(offering.trader_id) || null,
+        existing_trader_name: organizationName || null,
+        org_exists_on_gre: Boolean(requireString(offering.trader_id)),
+        payload: mergedPayload,
+        parent_submission_id: null,
+        local_edit_version: 1,
+        approval_status: "pending_admin",
+        gre_sync_status: "pending_admin_review",
+        gre_sync_message: "Local GramEEE solution edit is waiting for admin approval.",
+      })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+
+    return { ok: true, id: data.id, version: 1, message: "Edit submitted for admin approval." };
+  }
 
   // Fetch parent to validate ownership and get current version
   const parentQuery = adminClient
@@ -9710,6 +10088,190 @@ async function submitSignedInEdit(
   if (error) throw new Error(error.message);
 
   return { ok: true, id: data.id, version: currentVersion, message: "Edit submitted for approval." };
+}
+
+async function fetchMyHelpRequests(userCtx: { user: Record<string, unknown> }, grameeeUserSummary: unknown = null) {
+  const userId = requireString(userCtx.user.id);
+  const userEmail = requireString(userCtx.user.email).toLowerCase();
+  if (!userId && !userEmail) throw new Error("User identity not found.");
+  const summary = grameeeUserSummary && typeof grameeeUserSummary === "object"
+    ? grameeeUserSummary as Record<string, unknown>
+    : {};
+  const userOrganisation = normalizeOrgForMatch(
+    summary.organization ||
+    summary.organisation ||
+    summary.org ||
+    summary.organization_name ||
+    summary.organisation_name,
+  );
+  const [needResult, submissionResult] = await Promise.all([
+    adminClient
+      .from("gre_mis_needs")
+      .select("*")
+      .eq("approval_status", "approved")
+      .eq("source_kind", "shared_form_submission")
+      .order("updated_at", { ascending: false })
+      .limit(500),
+    adminClient
+      .from("gre_mis_form_submissions")
+      .select("id, target_need_id, submitter_user_id, submitter_email, submitter_name, submitter_phone, organization_name, payload, created_at, updated_at")
+      .eq("submission_type", "need")
+      .eq("approval_status", "approved")
+      .not("target_need_id", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(500),
+  ]);
+  if (needResult.error) throw new Error(needResult.error.message);
+  if (submissionResult.error) throw new Error(submissionResult.error.message);
+  const submissionByNeed = new Map<string, Record<string, unknown>>();
+  for (const submission of submissionResult.data || []) {
+    const record = submission as Record<string, unknown>;
+    const needId = requireString(record.target_need_id);
+    if (needId && !submissionByNeed.has(needId)) submissionByNeed.set(needId, record);
+  }
+  const requests = (needResult.data || [])
+    .map((need: Record<string, unknown>) => {
+      const linked = submissionByNeed.get(requireString(need.id));
+      const payload = linked?.payload && typeof linked.payload === "object" ? linked.payload as Record<string, unknown> : {};
+      return { need, linked, payload };
+    })
+    .filter(({ need, linked, payload }) => {
+      const orgMatches = userOrganisation && userOrganisation !== "individual"
+        ? [
+          normalizeOrgForMatch(need.organization_name),
+          normalizeOrgForMatch(linked?.organization_name),
+          normalizeOrgForMatch(payload.organization_name),
+        ].some((value) => value === userOrganisation)
+        : false;
+      const emailMatches = userEmail
+        ? [
+          requireString(need.seeker_email).toLowerCase(),
+          requireString(linked?.submitter_email).toLowerCase(),
+          requireString(payload.seeker_email || payload.contact_email || payload.submitter_email).toLowerCase(),
+        ].some((value) => value === userEmail)
+        : false;
+      const userMatches = userId && requireString(linked?.submitter_user_id) === userId;
+      return Boolean(orgMatches || emailMatches || userMatches);
+    })
+    .map(({ need, linked, payload }) => ({
+      id: requireString(need.id),
+      submission_id: requireString(linked?.id),
+      organization_name: requireString(need.organization_name || linked?.organization_name || payload.organization_name),
+      contact_person: requireString(need.contact_person || payload.contact_person || linked?.submitter_name),
+      seeker_email: requireString(need.seeker_email || payload.seeker_email || linked?.submitter_email).toLowerCase(),
+      seeker_phone: requireString(need.seeker_phone || payload.seeker_phone || linked?.submitter_phone),
+      problem_statement: requireString(need.problem_statement || payload.problem_statement),
+      status: requireString(need.status),
+      internal_status: requireString(need.internal_status),
+      next_action: requireString(need.next_action),
+      curation_notes: requireString(need.curation_notes),
+      curated_need: asStringArray(need.curated_need),
+      ai_thematic_area: requireString(need.ai_thematic_area),
+      submitted_thematic_area: requireString(need.submitted_thematic_area || payload.thematic_area),
+      submitted_offering_category: requireString(need.submitted_offering_category || payload.offering_category),
+      submitted_offering_type: requireString(need.submitted_offering_type || payload.offering_type),
+      submitted_keywords: asStringArray(need.submitted_keywords || payload.keywords),
+      deployment_locations: asStringArray(need.deployment_locations || payload.deployment_locations),
+      demand_broadcast_needed: parseBoolean(need.demand_broadcast_needed ?? payload.demand_broadcast_needed) ?? false,
+      solutions_shared_count: parseNumber(need.solutions_shared_count, 0),
+      requested_on: need.requested_on || linked?.created_at || null,
+      updated_at: need.updated_at || linked?.updated_at || null,
+      gre_writeback_pending: false,
+    }));
+  return { ok: true, requests };
+}
+
+async function submitSignedInNeedEdit(
+  needId: string,
+  updatedPayload: Record<string, unknown>,
+  userCtx: { user: Record<string, unknown> },
+) {
+  const normalizedNeedId = requireString(needId);
+  if (!normalizedNeedId) throw new Error("Need ID is required.");
+  const userId = requireString(userCtx.user.id);
+  const userEmail = requireString(userCtx.user.email).toLowerCase();
+  if (!userId && !userEmail) throw new Error("User identity not found.");
+  const { data: need, error } = await adminClient
+    .from("gre_mis_needs")
+    .select("*")
+    .eq("id", normalizedNeedId)
+    .eq("source_kind", "shared_form_submission")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!need) throw new Error("Help request not found.");
+  const actorRole = requireString(userCtx.user.role).toLowerCase();
+  const ownsByEmail = userEmail && requireString(need.seeker_email).toLowerCase() === userEmail;
+  const ownsByUserId = userId && requireString(need.submitter_user_id) === userId;
+  const privilegedActor = actorRole === "admin" || actorRole === "moderator";
+  if (!privilegedActor && !ownsByEmail && !ownsByUserId) {
+    throw new Error("Help request not found or access denied.");
+  }
+  const submitterEmail = requireString(updatedPayload.seeker_email || need.seeker_email || userEmail).toLowerCase();
+  const editPayload = {
+    organization_name: requireString(updatedPayload.organization_name || need.organization_name),
+    contact_person: requireString(updatedPayload.contact_person || need.contact_person),
+    seeker_email: submitterEmail,
+    seeker_phone: requireString(updatedPayload.seeker_phone || need.seeker_phone),
+    problem_statement: requireString(updatedPayload.problem_statement || need.problem_statement),
+    deployment_locations: uniqueStrings(asStringArray(updatedPayload.deployment_locations || need.deployment_locations)),
+    keywords: uniqueStrings(asStringArray(updatedPayload.keywords || updatedPayload.submitted_keywords || need.submitted_keywords)),
+    thematic_area: requireString(updatedPayload.thematic_area || updatedPayload.submitted_thematic_area || need.submitted_thematic_area || need.ai_thematic_area),
+    offering_category: requireString(updatedPayload.offering_category || updatedPayload.submitted_offering_category || need.submitted_offering_category),
+    offering_type: requireString(updatedPayload.offering_type || updatedPayload.submitted_offering_type || need.submitted_offering_type),
+    demand_broadcast_needed: parseBoolean(updatedPayload.demand_broadcast_needed) ?? parseBoolean(need.demand_broadcast_needed) ?? false,
+    local_parent_need_id: normalizedNeedId,
+    gre_writeback_requested: false,
+  };
+  const { data, error: insertError } = await adminClient
+    .from("gre_mis_form_submissions")
+    .insert({
+      submission_type: "need",
+      source_mode: "signed_in_need_edit",
+      submitter_name: requireString(editPayload.contact_person || userCtx.user.full_name),
+      submitter_email: submitterEmail || userEmail || null,
+      submitter_phone: requireString(editPayload.seeker_phone) || null,
+      submitter_user_id: userId || null,
+      organization_name: requireString(editPayload.organization_name),
+      payload: editPayload,
+      parent_submission_id: null,
+      target_need_id: normalizedNeedId,
+      approval_status: "pending_admin",
+      gre_sync_status: "pending_admin_review",
+      gre_sync_message: "Help request edit is waiting for admin approval. GRE website write-back is not enabled yet.",
+    })
+    .select("id")
+    .single();
+  if (insertError) throw new Error(insertError.message);
+  return { ok: true, id: data.id, message: "Help request edit submitted for admin approval." };
+}
+
+async function sendHelpRequestUpdateApprovedEmail(need: Record<string, unknown>, actorEmail: string) {
+  if (!helpGmailRefreshToken) return { ok: false, reason: "Help mailbox is not configured." };
+  const seekerEmail = requireString(need.seeker_email).toLowerCase();
+  if (!seekerEmail) return { ok: false, reason: "No seeker email." };
+  const curatorEmail = requireString(need.curator_email || need.assigned_curator_email || actorEmail).toLowerCase();
+  const subject = `Help request updated: ${requireString(need.id)}`;
+  const body = [
+    `Hello ${requireString(need.contact_person) || requireString(need.organization_name) || "there"},`,
+    "",
+    "Your GramEEE help request has been updated after admin review.",
+    "",
+    `Request: ${requireString(need.problem_statement)}`,
+    `Status: ${requireString(need.status) || "Under curation"}`,
+    `Next action: ${requireString(need.next_action) || "The GRE team will continue curation."}`,
+    "",
+    "GRE website write-back is currently held pending final validation.",
+    "",
+    "Regards,",
+    "Team GRE",
+  ].join("\n");
+  return sendEmail({
+    to: seekerEmail,
+    cc: curatorEmail && curatorEmail !== seekerEmail ? curatorEmail : undefined,
+    subject,
+    body,
+    mailbox: "help",
+  });
 }
 
 async function fetchSolutionOutreach(userCtx: { user: Record<string, unknown> }) {
@@ -10009,12 +10571,24 @@ Deno.serve(async (req) => {
     }
 
     if (action === "fetchMySolutions") {
-      return jsonResponse(await fetchMySolutions(userCtx));
+      return jsonResponse(await fetchMySolutions(userCtx, payload.grameeeUserSummary));
+    }
+
+    if (action === "fetchMyHelpRequests") {
+      return jsonResponse(await fetchMyHelpRequests(userCtx, payload.grameeeUserSummary));
     }
 
     if (action === "submitSignedInEdit") {
       return jsonResponse(await submitSignedInEdit(
         requireString(payload.parentSubmissionId),
+        (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
+        userCtx,
+      ));
+    }
+
+    if (action === "submitSignedInNeedEdit") {
+      return jsonResponse(await submitSignedInNeedEdit(
+        requireString(payload.needId),
         (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
         userCtx,
       ));

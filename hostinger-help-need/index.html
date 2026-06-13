@@ -89,6 +89,14 @@
       box-shadow: 0 8px 20px rgba(8, 22, 12, 0.16);
     }
 
+    .my-requests-btn {
+      background: #ffffff;
+      color: var(--hero);
+      border: 1px solid rgba(255,255,255,0.7);
+    }
+
+    .hidden { display: none !important; }
+
     .eyebrow {
       margin: 0 0 6px;
       font-size: 0.8rem;
@@ -130,6 +138,177 @@
       display: block;
     }
 
+    .requests-shell {
+      min-height: calc(100vh - 180px);
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      box-shadow: 0 20px 60px rgba(39, 53, 37, 0.09);
+    }
+
+    .requests-top {
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+
+    .requests-search {
+      min-width: min(100%, 420px);
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font: inherit;
+    }
+
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .request-card {
+      padding: 18px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: #fffef9;
+      box-shadow: 0 12px 28px rgba(39, 53, 37, 0.06);
+      display: grid;
+      gap: 10px;
+    }
+
+    .status-row,
+    .card-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .pill {
+      display: inline-flex;
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: #e4f3e4;
+      color: #1f6b3a;
+      font-weight: 700;
+      font-size: 0.82rem;
+    }
+
+    .card-actions button {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--text);
+      padding: 10px 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .card-actions .primary {
+      background: var(--hero);
+      color: #fff;
+      border-color: var(--hero);
+    }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 24px;
+      background: rgba(16, 35, 25, 0.56);
+      overflow: auto;
+    }
+
+    .modal-card {
+      width: min(960px, 100%);
+      max-height: calc(100vh - 48px);
+      overflow: auto;
+      border-radius: 24px;
+      background: #fbfff8;
+      border: 1px solid var(--border);
+      padding: 22px;
+      box-shadow: 0 24px 70px rgba(12, 30, 18, 0.26);
+    }
+
+    .modal-head,
+    .modal-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .modal-close {
+      border: none;
+      border-radius: 999px;
+      width: 42px;
+      height: 42px;
+      font-size: 1.4rem;
+      cursor: pointer;
+    }
+
+    .detail-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+
+    .detail-table th,
+    .detail-table td {
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--border);
+      padding: 10px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+
+    .form-grid label {
+      display: grid;
+      gap: 6px;
+      font-weight: 700;
+    }
+
+    .form-grid .wide { grid-column: 1 / -1; }
+    .form-grid input,
+    .form-grid textarea,
+    .form-grid select {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      font: inherit;
+      background: #fff;
+    }
+
+    .modal-footer button {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 11px 18px;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .modal-footer .save {
+      background: var(--hero);
+      color: #fff;
+      border-color: var(--hero);
+    }
+
     @media (max-width: 900px) {
       body > .grameee-shell-mount {
         width: calc(100vw - 24px);
@@ -152,10 +331,11 @@
       <div class="lang-switch" aria-label="Select language">
         <button type="button" class="lang-btn active" data-lang="en">English</button>
         <button type="button" class="lang-btn" data-lang="hi">Hindi</button>
+        <button type="button" id="myRequestsBtn" class="lang-btn my-requests-btn">My Help Requests</button>
       </div>
     </section>
 
-    <section class="frame-shell">
+    <section id="submitShell" class="frame-shell">
       <iframe
         id="needFormFrame"
         title="GRE Need Help Form"
@@ -164,6 +344,60 @@
         referrerpolicy="strict-origin-when-cross-origin"
       ></iframe>
     </section>
+
+    <section id="requestsShell" class="requests-shell hidden">
+      <div class="requests-top">
+        <div>
+          <p class="eyebrow" style="color:var(--hero);margin:0 0 4px">My Help Requests</p>
+          <h2 style="margin:0">Track requests and curation status</h2>
+        </div>
+        <input id="requestsSearch" class="requests-search" placeholder="Search request, status, location, theme" />
+      </div>
+      <div id="requestsList" class="request-grid">
+        <div>Loading your help requests...</div>
+      </div>
+    </section>
+  </div>
+
+  <div id="detailsModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="detailsTitle">Help Request Details</h3>
+        <button class="modal-close" data-close-modal="detailsModal">&times;</button>
+      </div>
+      <div id="detailsBody"></div>
+      <div class="modal-footer">
+        <button data-close-modal="detailsModal">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="editRequestModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="editRequestTitle">Edit Help Request</h3>
+        <button class="modal-close" data-close-modal="editRequestModal">&times;</button>
+      </div>
+      <input type="hidden" id="editNeedId" />
+      <div class="form-grid">
+        <label><span>Organisation</span><input id="editOrgName" /></label>
+        <label><span>Contact Person</span><input id="editContactPerson" /></label>
+        <label><span>Email</span><input id="editSeekerEmail" type="email" /></label>
+        <label><span>Phone</span><input id="editSeekerPhone" /></label>
+        <label class="wide"><span>Problem Statement</span><textarea id="editProblemStatement" rows="4"></textarea></label>
+        <label><span>Need Category</span><select id="editNeedCategory"><option>Service offerings</option><option>Product offerings</option><option>Knowledge offerings</option></select></label>
+        <label><span>Need Type</span><input id="editNeedType" /></label>
+        <label><span>Thematic Area</span><input id="editThematicArea" /></label>
+        <label><span>Keywords (comma-separated)</span><input id="editKeywords" /></label>
+        <label class="wide"><span>Deployment Locations (semicolon-separated)</span><textarea id="editDeploymentLocations" rows="2"></textarea></label>
+        <label class="wide"><span><input id="editBroadcastNeeded" type="checkbox" style="width:auto" /> Broadcast to ecosystem if needed</span></label>
+      </div>
+      <p id="editRequestStatus"></p>
+      <div class="modal-footer">
+        <button data-close-modal="editRequestModal">Cancel</button>
+        <button id="saveRequestEditBtn" class="save">Submit Edit for Approval</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -172,8 +406,15 @@
       const iframeBaseUrl = new URL("https://gre.grameee.org/?sharedForm=need&publicForm=need&grameeeEmbed=1&embedVersion=20260602lang7");
       const iframeOrigin = iframeBaseUrl.origin;
       const languageButtons = [...document.querySelectorAll(".lang-btn")];
+      const myRequestsBtn = document.getElementById("myRequestsBtn");
+      const submitShell = document.getElementById("submitShell");
+      const requestsShell = document.getElementById("requestsShell");
       const heroTitle = document.getElementById("heroTitle");
       const heroLede = document.getElementById("heroLede");
+      let currentUser = null;
+      let currentView = "submit";
+      let requestsCache = [];
+      let requestsLoaded = false;
       const copy = {
         en: {
           title: "Need Help",
@@ -244,6 +485,206 @@
         return normalizeActor(hydrated);
       }
 
+      function esc(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+      }
+
+      async function getTokenWithTimeout(ms) {
+        if (!window.grameeeAuth || typeof window.grameeeAuth.getAccessToken !== "function") return null;
+        try {
+          return await Promise.race([
+            window.grameeeAuth.getAccessToken(),
+            new Promise((_, reject) => setTimeout(reject, ms || 5000)),
+          ]);
+        } catch {
+          return null;
+        }
+      }
+
+      async function callEdge(action, body) {
+        const token = await getTokenWithTimeout();
+        const gs = window.grameeeSupabase || {};
+        const supabaseUrl = gs.url || "https://zphabezqbboaexmmhcic.supabase.co";
+        const anonKey = gs.anonKey || "";
+        const response = await fetch(supabaseUrl.replace(/\/+$/, "") + "/functions/v1/gre-mis-admin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "apikey": anonKey, "Authorization": "Bearer " + anonKey },
+          body: JSON.stringify(Object.assign({
+            action,
+            grameeeAccessToken: token || "",
+            grameeeUserSummary: currentUser || null,
+          }, body || {})),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.error) throw new Error(data.error || "Request failed.");
+        return data;
+      }
+
+      function showSubmitView() {
+        currentView = "submit";
+        submitShell.classList.remove("hidden");
+        requestsShell.classList.add("hidden");
+        myRequestsBtn.textContent = "My Help Requests";
+      }
+
+      function showRequestsView() {
+        currentView = "requests";
+        submitShell.classList.add("hidden");
+        requestsShell.classList.remove("hidden");
+        myRequestsBtn.textContent = "Back to Form";
+        if (requestsLoaded) renderRequests();
+        else loadRequests();
+      }
+
+      async function loadRequests() {
+        const list = document.getElementById("requestsList");
+        list.innerHTML = "<div>Loading your help requests...</div>";
+        try {
+          currentUser = await getCurrentUser();
+          if (!currentUser) throw new Error("Login required to view your help requests.");
+          const result = await callEdge("fetchMyHelpRequests");
+          requestsCache = result.requests || [];
+          requestsLoaded = true;
+          renderRequests();
+        } catch (error) {
+          list.innerHTML = '<div class="request-card">Could not load help requests. ' + esc(error.message) + "</div>";
+        }
+      }
+
+      function renderRequests() {
+        const list = document.getElementById("requestsList");
+        const search = (document.getElementById("requestsSearch").value || "").toLowerCase().trim();
+        const rows = requestsCache.filter((item) => {
+          if (!search) return true;
+          return [
+            item.problem_statement,
+            item.organization_name,
+            item.status,
+            item.internal_status,
+            item.next_action,
+            item.ai_thematic_area,
+            (item.deployment_locations || []).join(" "),
+          ].join(" ").toLowerCase().includes(search);
+        });
+        if (!rows.length) {
+          list.innerHTML = '<div class="request-card">No help requests match the current search.</div>';
+          return;
+        }
+        list.innerHTML = rows.map((item) => {
+          const shortText = (item.problem_statement || "").length > 180 ? item.problem_statement.slice(0, 177) + "..." : item.problem_statement || "No request detail.";
+          return '<article class="request-card">\
+            <div class="status-row">\
+              <span class="pill">' + esc(item.status || "Under review") + '</span>\
+              <span class="pill">' + esc(item.internal_status || "Curation") + '</span>\
+            </div>\
+            <h3 style="margin:0">' + esc(item.organization_name || "Help request") + '</h3>\
+            <p style="margin:0;color:var(--muted);line-height:1.55">' + esc(shortText) + '</p>\
+            <p style="margin:0;color:var(--muted);font-size:0.92rem">' + esc((item.deployment_locations || []).join("; ")) + '</p>\
+            <div class="card-actions">\
+              <button class="primary" data-action="details" data-id="' + esc(item.id) + '">View Details</button>\
+              <button data-action="edit" data-id="' + esc(item.id) + '">Edit</button>\
+            </div>\
+          </article>';
+        }).join("");
+      }
+
+      function detailRow(label, value) {
+        if (!value && value !== 0) return "";
+        return "<tr><th>" + esc(label) + "</th><td>" + esc(Array.isArray(value) ? value.join("; ") : value) + "</td></tr>";
+      }
+
+      window.openRequestDetails = function(id) {
+        const item = requestsCache.find((row) => row.id === id);
+        if (!item) return;
+        document.getElementById("detailsTitle").textContent = item.organization_name || "Help Request Details";
+        const html = '<table class="detail-table"><tbody>' +
+          detailRow("Request ID", item.id) +
+          detailRow("Problem Statement", item.problem_statement) +
+          detailRow("Status", item.status) +
+          detailRow("Internal Status", item.internal_status) +
+          detailRow("Next Action", item.next_action) +
+          detailRow("Solutions Shared", item.solutions_shared_count) +
+          detailRow("Curation Notes", item.curation_notes) +
+          detailRow("Curated Need", item.curated_need) +
+          detailRow("Thematic Area", item.ai_thematic_area || item.submitted_thematic_area) +
+          detailRow("Need Category", item.submitted_offering_category) +
+          detailRow("Need Type", item.submitted_offering_type) +
+          detailRow("Locations", item.deployment_locations) +
+          detailRow("Contact", [item.contact_person, item.seeker_email, item.seeker_phone].filter(Boolean).join(" | ")) +
+          "</tbody></table>";
+        document.getElementById("detailsBody").innerHTML = html;
+        document.getElementById("detailsModal").classList.remove("hidden");
+      };
+
+      window.openRequestEdit = function(id) {
+        const item = requestsCache.find((row) => row.id === id);
+        if (!item) return;
+        document.getElementById("editNeedId").value = item.id;
+        document.getElementById("editRequestTitle").textContent = "Edit: " + (item.organization_name || item.id);
+        document.getElementById("editOrgName").value = item.organization_name || "";
+        document.getElementById("editContactPerson").value = item.contact_person || "";
+        document.getElementById("editSeekerEmail").value = item.seeker_email || "";
+        document.getElementById("editSeekerPhone").value = item.seeker_phone || "";
+        document.getElementById("editProblemStatement").value = item.problem_statement || "";
+        document.getElementById("editNeedCategory").value = item.submitted_offering_category || "Service offerings";
+        document.getElementById("editNeedType").value = item.submitted_offering_type || "";
+        document.getElementById("editThematicArea").value = item.submitted_thematic_area || item.ai_thematic_area || "";
+        document.getElementById("editKeywords").value = (item.submitted_keywords || []).join(", ");
+        document.getElementById("editDeploymentLocations").value = (item.deployment_locations || []).join("; ");
+        document.getElementById("editBroadcastNeeded").checked = Boolean(item.demand_broadcast_needed);
+        document.getElementById("editRequestStatus").textContent = "";
+        document.getElementById("editRequestModal").classList.remove("hidden");
+      };
+
+      document.getElementById("requestsSearch").addEventListener("input", renderRequests);
+      document.getElementById("requestsList").addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-action][data-id]");
+        if (!button) return;
+        if (button.dataset.action === "details") window.openRequestDetails(button.dataset.id);
+        if (button.dataset.action === "edit") window.openRequestEdit(button.dataset.id);
+      });
+      myRequestsBtn.addEventListener("click", async () => {
+        currentUser = await getCurrentUser();
+        if (!currentUser) {
+          const authLink = document.querySelector("[data-auth-link]");
+          authLink?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+          return;
+        }
+        if (currentView === "requests") showSubmitView();
+        else showRequestsView();
+      });
+
+      document.querySelectorAll("[data-close-modal]").forEach((button) => {
+        button.addEventListener("click", () => document.getElementById(button.dataset.closeModal).classList.add("hidden"));
+      });
+
+      document.getElementById("saveRequestEditBtn").addEventListener("click", async () => {
+        const status = document.getElementById("editRequestStatus");
+        const needId = document.getElementById("editNeedId").value;
+        status.textContent = "Submitting edit...";
+        try {
+          const payload = {
+            organization_name: document.getElementById("editOrgName").value.trim(),
+            contact_person: document.getElementById("editContactPerson").value.trim(),
+            seeker_email: document.getElementById("editSeekerEmail").value.trim(),
+            seeker_phone: document.getElementById("editSeekerPhone").value.trim(),
+            problem_statement: document.getElementById("editProblemStatement").value.trim(),
+            offering_category: document.getElementById("editNeedCategory").value,
+            offering_type: document.getElementById("editNeedType").value.trim(),
+            thematic_area: document.getElementById("editThematicArea").value.trim(),
+            keywords: document.getElementById("editKeywords").value.split(",").map((x) => x.trim()).filter(Boolean),
+            deployment_locations: document.getElementById("editDeploymentLocations").value.split(";").map((x) => x.trim()).filter(Boolean),
+            demand_broadcast_needed: document.getElementById("editBroadcastNeeded").checked,
+          };
+          const result = await callEdge("submitSignedInNeedEdit", { needId, payload });
+          status.textContent = result.message || "Edit submitted for approval.";
+          requestsLoaded = false;
+          setTimeout(() => document.getElementById("editRequestModal").classList.add("hidden"), 1200);
+        } catch (error) {
+          status.textContent = "Error: " + error.message;
+        }
+      });
+
       async function postContextToFrame() {
         const user = await getCurrentUser();
         iframe.contentWindow?.postMessage({
@@ -257,7 +698,11 @@
       }
 
       iframe.addEventListener("load", postContextToFrame);
-      document.addEventListener("grameee:auth-updated", postContextToFrame);
+      document.addEventListener("grameee:auth-updated", () => {
+        currentUser = null;
+        requestsLoaded = false;
+        postContextToFrame();
+      });
       window.addEventListener("message", (event) => {
         if (event.origin !== iframeOrigin || !event.data || typeof event.data !== "object") return;
         if (event.data.type === "grameee-form-request-context") {
