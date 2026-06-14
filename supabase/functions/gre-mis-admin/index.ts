@@ -6582,10 +6582,10 @@ async function updateLocalNeed(needId: string, payload: Record<string, unknown>)
   if (error) throw new Error(error.message);
   if (!existing) throw new Error("Local need not found.");
 
-  const submittedOfferingCategory = requireString(payload.submitted_offering_category || existing.submitted_offering_category);
-  const submittedOfferingType = requireString(payload.submitted_offering_type || existing.submitted_offering_type);
-  const submittedThematicArea = requireString(payload.submitted_thematic_area || existing.submitted_thematic_area);
-  const submittedKeywords = uniqueStrings(asStringArray(payload.submitted_keywords || existing.submitted_keywords));
+  const submittedOfferingCategory = requireString(payload.submitted_offering_category || payload.offering_category || existing.submitted_offering_category);
+  const submittedOfferingType = requireString(payload.submitted_offering_type || payload.offering_type || existing.submitted_offering_type);
+  const submittedThematicArea = requireString(payload.submitted_thematic_area || payload.thematic_area || existing.submitted_thematic_area);
+  const submittedKeywords = uniqueStrings(asStringArray(payload.submitted_keywords || payload.keywords || existing.submitted_keywords));
   const deploymentLocations = uniqueStrings(asStringArray(payload.deployment_locations || existing.deployment_locations));
   const stateFromDeployment = deploymentLocations.length
     ? deploymentLocations
@@ -10226,7 +10226,7 @@ async function submitSignedInNeedEdit(
     .from("gre_mis_form_submissions")
     .insert({
       submission_type: "need",
-      source_mode: "signed_in_need_edit",
+      source_mode: "signed_in_edit",
       submitter_name: requireString(editPayload.contact_person || userCtx.user.full_name),
       submitter_email: submitterEmail || userEmail || null,
       submitter_phone: requireString(editPayload.seeker_phone) || null,
@@ -10272,6 +10272,99 @@ async function sendHelpRequestUpdateApprovedEmail(need: Record<string, unknown>,
     body,
     mailbox: "help",
   });
+}
+
+function appendSeekerCommentToCurationNotes(existingNotes: unknown, comment: string, actorLabel: string) {
+  const cleanComment = requireString(comment);
+  if (!cleanComment) return requireString(existingNotes);
+  const stamp = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+  const block = [
+    "",
+    "Seeker Comments",
+    `${stamp} - ${actorLabel || "Solution seeker"}`,
+    cleanComment,
+  ].join("\n");
+  return [requireString(existingNotes), block].filter(Boolean).join("\n\n").trim();
+}
+
+async function submitHelpRequestCurationComment(
+  needId: string,
+  comment: string,
+  userCtx: { user: Record<string, unknown> },
+) {
+  const normalizedNeedId = requireString(needId);
+  const cleanComment = requireString(comment);
+  if (!normalizedNeedId) throw new Error("Need ID is required.");
+  if (!cleanComment) throw new Error("Comment is required.");
+  const userId = requireString(userCtx.user.id);
+  const userEmail = requireString(userCtx.user.email).toLowerCase();
+  const { data: need, error } = await adminClient
+    .from("gre_mis_needs")
+    .select("*, gre_mis_curators:curator_id(user_id, email, display_name)")
+    .eq("id", normalizedNeedId)
+    .eq("source_kind", "shared_form_submission")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!need) throw new Error("Help request not found.");
+
+  const actorRole = requireString(userCtx.user.role).toLowerCase();
+  const ownsByEmail = userEmail && requireString(need.seeker_email).toLowerCase() === userEmail;
+  const ownsByUserId = userId && requireString(need.submitter_user_id) === userId;
+  const privilegedActor = actorRole === "admin" || actorRole === "moderator";
+  if (!privilegedActor && !ownsByEmail && !ownsByUserId) {
+    throw new Error("Help request not found or access denied.");
+  }
+
+  const actorLabel =
+    requireString(userCtx.user.full_name) ||
+    requireString(userCtx.user.first_name) ||
+    requireString(need.contact_person) ||
+    requireString(need.organization_name) ||
+    userEmail;
+  const nextNotes = appendSeekerCommentToCurationNotes(need.curation_notes, cleanComment, actorLabel);
+  const { error: updateError } = await adminClient
+    .from("gre_mis_needs")
+    .update({
+      curation_notes: nextNotes || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", normalizedNeedId);
+  if (updateError) throw new Error(updateError.message);
+
+  await adminClient
+    .from("gre_mis_form_submissions")
+    .update({
+      gre_sync_message: "Seeker comments were appended to curation notes.",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("target_need_id", normalizedNeedId)
+    .eq("submission_type", "need");
+
+  const curator = Array.isArray(need.gre_mis_curators) ? need.gre_mis_curators[0] : need.gre_mis_curators;
+  const curatorEmail = requireString(curator?.email || need.curator_email || need.assigned_curator_email).toLowerCase();
+  if (curatorEmail && helpGmailRefreshToken) {
+    await sendEmail({
+      to: curatorEmail,
+      cc: userEmail || undefined,
+      subject: `Seeker comments updated for ${requireString(need.organization_name) || normalizedNeedId}`,
+      body: [
+        `Hello ${requireString(curator?.display_name) || "Curator"},`,
+        "",
+        `${actorLabel} has updated comments in the curation section for this help request.`,
+        "",
+        `Need: ${requireString(need.problem_statement)}`,
+        "",
+        "Updated Curation Notes:",
+        nextNotes,
+        "",
+        "Regards,",
+        "Team GRE",
+      ].join("\n"),
+      mailbox: "help",
+    });
+  }
+
+  return { ok: true, curation_notes: nextNotes, message: "Comments saved and curator notification triggered." };
 }
 
 async function fetchSolutionOutreach(userCtx: { user: Record<string, unknown> }) {
@@ -10590,6 +10683,14 @@ Deno.serve(async (req) => {
       return jsonResponse(await submitSignedInNeedEdit(
         requireString(payload.needId),
         (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
+        userCtx,
+      ));
+    }
+
+    if (action === "submitHelpRequestCurationComment") {
+      return jsonResponse(await submitHelpRequestCurationComment(
+        requireString(payload.needId),
+        requireString(payload.comment),
         userCtx,
       ));
     }

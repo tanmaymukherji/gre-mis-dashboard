@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://grameee.org/shared-shell.css?v=20260531b" />
   <script src="https://grameee.org/supabase-config.js?v=20260522m" defer></script>
   <script src="https://grameee.org/shared-shell.js?v=20260531b" defer></script>
-  <script src="https://grameee.org/auth.js?v=20260531b" defer></script>
+  <script src="https://grameee.org/auth.js?v=20260614a" defer></script>
   <style>
     :root {
       color-scheme: light;
@@ -269,6 +269,50 @@
       padding: 10px;
     }
 
+    .curation-sections {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .curation-section {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: #fffef9;
+      padding: 14px;
+    }
+
+    .curation-section h4 {
+      margin: 0 0 8px;
+      color: var(--hero);
+    }
+
+    .curation-section p {
+      margin: 0;
+      white-space: pre-wrap;
+      line-height: 1.55;
+    }
+
+    .comments-shell {
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: #f4fbf1;
+      display: grid;
+      gap: 10px;
+    }
+
+    .comments-shell textarea {
+      min-height: 140px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      font: inherit;
+      resize: vertical;
+      background: #fff;
+    }
+
     .form-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -366,8 +410,15 @@
         <button class="modal-close" data-close-modal="detailsModal">&times;</button>
       </div>
       <div id="detailsBody"></div>
+      <div id="commentShell" class="comments-shell hidden">
+        <strong>Add comments for the curator</strong>
+        <textarea id="curationCommentText" placeholder="Add your comments or clarifications for the curator"></textarea>
+        <p id="curationCommentStatus"></p>
+      </div>
       <div class="modal-footer">
         <button data-close-modal="detailsModal">Close</button>
+        <button id="addCommentsBtn">Add Comments</button>
+        <button id="saveCommentsBtn" class="save hidden">Save Comments</button>
       </div>
     </div>
   </div>
@@ -386,7 +437,7 @@
         <label><span>Phone</span><input id="editSeekerPhone" /></label>
         <label class="wide"><span>Problem Statement</span><textarea id="editProblemStatement" rows="4"></textarea></label>
         <label><span>Need Category</span><select id="editNeedCategory"><option>Service offerings</option><option>Product offerings</option><option>Knowledge offerings</option></select></label>
-        <label><span>Need Type</span><input id="editNeedType" /></label>
+        <label><span>Need Type</span><select id="editNeedType"></select></label>
         <label><span>Thematic Area</span><input id="editThematicArea" /></label>
         <label><span>Keywords (comma-separated)</span><input id="editKeywords" /></label>
         <label class="wide"><span>Deployment Locations (semicolon-separated)</span><textarea id="editDeploymentLocations" rows="2"></textarea></label>
@@ -415,6 +466,28 @@
       let currentView = "submit";
       let requestsCache = [];
       let requestsLoaded = false;
+      let activeDetailsId = "";
+      const NEED_TYPE_OPTIONS = {
+        "Service offerings": [
+          ["Training", "Training"],
+          ["Consulting", "Consulting / Mentoring"],
+          ["Financial support", "Financial Support"],
+          ["Market support", "Market Support"],
+          ["Tech transfer", "Technology Transfer"],
+        ],
+        "Product offerings": [
+          ["Machinery", "Machinery"],
+          ["Plant setup", "Plant Setup"],
+          ["Product bought", "Product/Raw Material Bought"],
+          ["Raw material", "Raw Material Supply"],
+        ],
+        "Knowledge offerings": [
+          ["Blogs", "Blogs"],
+          ["Market reports", "Market Reports"],
+          ["Sop manuals", "SOP / Manuals"],
+          ["Videos", "Videos"],
+        ],
+      };
       const copy = {
         en: {
           title: "Need Help",
@@ -487,6 +560,46 @@
 
       function esc(value) {
         return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+      }
+
+      function linkifyEscapedText(value) {
+        return esc(value).replace(/(https?:\/\/[^\s<]+)/g, (url) => {
+          return '<a href="' + url + '" target="_blank" rel="noreferrer">' + url + "</a>";
+        });
+      }
+
+      function renderCurationNotes(notes) {
+        const text = String(notes || "").trim();
+        if (!text) return '<div class="curation-sections"><article class="curation-section"><h4>Curation Notes</h4><p>No curation notes yet.</p></article></div>';
+        const sectionRegex = /(Suggested Questions to Seeker|Solutions Shared|Solution Links Shared With Seeker|Seeker Comments)/ig;
+        const matches = [...text.matchAll(sectionRegex)];
+        if (!matches.length) {
+          return '<div class="curation-sections"><article class="curation-section"><h4>Curation Notes</h4><p>' + linkifyEscapedText(text) + "</p></article></div>";
+        }
+        const sections = [];
+        if (matches[0].index > 0) {
+          sections.push({ title: "Comments", body: text.slice(0, matches[0].index).trim() });
+        }
+        matches.forEach((match, index) => {
+          const start = match.index + match[0].length;
+          const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
+          sections.push({ title: match[0], body: text.slice(start, end).replace(/^[:\s-]+/, "").trim() });
+        });
+        return '<div class="curation-sections">' + sections.filter((section) => section.body).map((section) => {
+          return '<article class="curation-section"><h4>' + esc(section.title) + '</h4><p>' + linkifyEscapedText(section.body) + '</p></article>';
+        }).join("") + "</div>";
+      }
+
+      function refreshNeedTypeOptions(selectedCategory, selectedType) {
+        const select = document.getElementById("editNeedType");
+        const options = NEED_TYPE_OPTIONS[selectedCategory] || [];
+        select.innerHTML = options.map(([value, label]) => '<option value="' + esc(value) + '">' + esc(label) + "</option>").join("");
+        if (selectedType && options.some(([value]) => value === selectedType)) {
+          select.value = selectedType;
+        } else if (selectedType) {
+          select.insertAdjacentHTML("beforeend", '<option value="' + esc(selectedType) + '">' + esc(selectedType) + "</option>");
+          select.value = selectedType;
+        }
       }
 
       async function getTokenWithTimeout(ms) {
@@ -596,6 +709,7 @@
       window.openRequestDetails = function(id) {
         const item = requestsCache.find((row) => row.id === id);
         if (!item) return;
+        activeDetailsId = id;
         document.getElementById("detailsTitle").textContent = item.organization_name || "Help Request Details";
         const html = '<table class="detail-table"><tbody>' +
           detailRow("Request ID", item.id) +
@@ -604,15 +718,20 @@
           detailRow("Internal Status", item.internal_status) +
           detailRow("Next Action", item.next_action) +
           detailRow("Solutions Shared", item.solutions_shared_count) +
-          detailRow("Curation Notes", item.curation_notes) +
           detailRow("Curated Need", item.curated_need) +
           detailRow("Thematic Area", item.ai_thematic_area || item.submitted_thematic_area) +
           detailRow("Need Category", item.submitted_offering_category) +
           detailRow("Need Type", item.submitted_offering_type) +
           detailRow("Locations", item.deployment_locations) +
           detailRow("Contact", [item.contact_person, item.seeker_email, item.seeker_phone].filter(Boolean).join(" | ")) +
-          "</tbody></table>";
+          "</tbody></table>" +
+          renderCurationNotes(item.curation_notes);
         document.getElementById("detailsBody").innerHTML = html;
+        document.getElementById("commentShell").classList.add("hidden");
+        document.getElementById("saveCommentsBtn").classList.add("hidden");
+        document.getElementById("addCommentsBtn").classList.remove("hidden");
+        document.getElementById("curationCommentText").value = "";
+        document.getElementById("curationCommentStatus").textContent = "";
         document.getElementById("detailsModal").classList.remove("hidden");
       };
 
@@ -627,7 +746,7 @@
         document.getElementById("editSeekerPhone").value = item.seeker_phone || "";
         document.getElementById("editProblemStatement").value = item.problem_statement || "";
         document.getElementById("editNeedCategory").value = item.submitted_offering_category || "Service offerings";
-        document.getElementById("editNeedType").value = item.submitted_offering_type || "";
+        refreshNeedTypeOptions(document.getElementById("editNeedCategory").value, item.submitted_offering_type || "");
         document.getElementById("editThematicArea").value = item.submitted_thematic_area || item.ai_thematic_area || "";
         document.getElementById("editKeywords").value = (item.submitted_keywords || []).join(", ");
         document.getElementById("editDeploymentLocations").value = (item.deployment_locations || []).join("; ");
@@ -656,6 +775,42 @@
 
       document.querySelectorAll("[data-close-modal]").forEach((button) => {
         button.addEventListener("click", () => document.getElementById(button.dataset.closeModal).classList.add("hidden"));
+      });
+
+      document.getElementById("editNeedCategory").addEventListener("change", (event) => {
+        refreshNeedTypeOptions(event.target.value, "");
+      });
+
+      document.getElementById("addCommentsBtn").addEventListener("click", () => {
+        document.getElementById("commentShell").classList.remove("hidden");
+        document.getElementById("saveCommentsBtn").classList.remove("hidden");
+        document.getElementById("addCommentsBtn").classList.add("hidden");
+        document.getElementById("curationCommentText").focus();
+      });
+
+      document.getElementById("saveCommentsBtn").addEventListener("click", async () => {
+        const status = document.getElementById("curationCommentStatus");
+        const comment = document.getElementById("curationCommentText").value.trim();
+        if (!comment) {
+          status.textContent = "Add a comment before saving.";
+          return;
+        }
+        status.textContent = "Saving comments...";
+        try {
+          const result = await callEdge("submitHelpRequestCurationComment", {
+            needId: activeDetailsId,
+            comment,
+          });
+          status.textContent = result.message || "Comments saved.";
+          const item = requestsCache.find((row) => row.id === activeDetailsId);
+          if (item) item.curation_notes = result.curation_notes || item.curation_notes;
+          requestsLoaded = false;
+          setTimeout(() => {
+            window.openRequestDetails(activeDetailsId);
+          }, 900);
+        } catch (error) {
+          status.textContent = "Error: " + error.message;
+        }
       });
 
       document.getElementById("saveRequestEditBtn").addEventListener("click", async () => {

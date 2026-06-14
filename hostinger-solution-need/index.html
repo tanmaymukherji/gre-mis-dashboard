@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="https://grameee.org/shared-shell.css?v=20260531b" />
   <script src="https://grameee.org/supabase-config.js?v=20260522m" defer></script>
   <script src="https://grameee.org/shared-shell.js?v=20260531b" defer></script>
-  <script src="https://grameee.org/auth.js?v=20260531b" defer></script>
+  <script src="https://grameee.org/auth.js?v=20260614a" defer></script>
   <style>
     :root {
       color-scheme: light;
@@ -832,7 +832,6 @@
       <div class="my-solutions-shell">
         <div class="my-solutions-header">
           <div class="my-solutions-header-left">
-            <button type="button" id="backToSubmitBtn" class="back-btn">&larr; Back to Submit</button>
             <h2 class="my-solutions-title">My Solutions</h2>
           </div>
           <div class="my-solutions-header-right">
@@ -1210,6 +1209,7 @@
         submitShell.classList.remove("frame-shell-hidden");
         mySolutionsShell.classList.add("frame-shell-hidden");
         mySolutionsBtn.classList.remove("active-view");
+        mySolutionsBtn.childNodes[0].nodeValue = "My Solutions ";
         heroTitle.textContent = copy[getStoredLanguage()].title;
         heroLede.textContent = copy[getStoredLanguage()].lede;
         updateUrl("");
@@ -1220,6 +1220,7 @@
         submitShell.classList.add("frame-shell-hidden");
         mySolutionsShell.classList.remove("frame-shell-hidden");
         mySolutionsBtn.classList.add("active-view");
+        mySolutionsBtn.childNodes[0].nodeValue = "Back to Form ";
         heroTitle.textContent = copy[getStoredLanguage()].mySolutionsTitle;
         heroLede.textContent = "View and manage your submitted solutions.";
         updateUrl("my-solutions");
@@ -1832,8 +1833,6 @@
         if (currentView === "my-solutions") showSubmitView();
         else showMySolutionsView();
       });
-
-      backToSubmitBtn.addEventListener("click", showSubmitView);
 
       document.getElementById("mySolutionsSearch").addEventListener("input", applyFiltersAndRender);
       document.getElementById("mySolutionsStatusFilter").addEventListener("change", applyFiltersAndRender);
