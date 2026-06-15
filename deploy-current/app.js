@@ -1637,6 +1637,44 @@ function stripUrls(value) {
   return String(value || "").replace(/https?:\/\/[^\s)]+/gi, "").replace(/\s{2,}/g, " ").trim();
 }
 
+function splitCurationNotesForDisplay(notes) {
+  const clean = String(stripUrls(notes || ""))
+    .replace(/\r/g, "")
+    .replace(/\bnull\b/gi, "")
+    .replace(/solutions shared\n(\d+\..*(?:\n|$))*/gi, "")
+    .replace(/solutions shared\s*:.*(?:\n|$)/gi, "")
+    .trim();
+  if (!clean) return { primary: "", seekerComments: "" };
+  const parts = clean.split(/\n\s*Seeker Comments\s*\n/i);
+  if (parts.length <= 1) return { primary: clean, seekerComments: "" };
+  return {
+    primary: parts.shift().trim(),
+    seekerComments: parts.join("\n\nSeeker Comments\n").trim(),
+  };
+}
+
+function renderCurationNoteSections(notes) {
+  const sections = splitCurationNotesForDisplay(notes);
+  const blocks = [];
+  if (sections.primary) {
+    blocks.push(`
+      <section class="curation-note-section">
+        <p class="signal-heading">Curator Notes</p>
+        <p class="detail-note">${esc(sections.primary).replace(/\n/g, "<br>")}</p>
+      </section>
+    `);
+  }
+  if (sections.seekerComments) {
+    blocks.push(`
+      <section class="curation-note-section seeker-comment-section">
+        <p class="signal-heading">Seeker Comments</p>
+        <p class="detail-note">${esc(sections.seekerComments).replace(/\n/g, "<br>")}</p>
+      </section>
+    `);
+  }
+  return blocks.join("") || `<p class="detail-note">No curation notes have been recorded yet.</p>`;
+}
+
 function normalizeLooseId(value) {
   return String(value || "").trim().replace(/\.0$/i, "");
 }
@@ -5881,13 +5919,6 @@ function renderNeedDetail() {
   const curator = getCuratorById(need.curator_id);
   const solutionLinks = extractUrls(need.curation_notes);
   const sharedSolutionEntries = getNeedSharedSolutionDisplayEntries(need);
-  const noteText = String(stripUrls(need.curation_notes || ""))
-    .replace(/\r/g, "")
-    .replace(/\bnull\b/gi, "")
-    .replace(/solutions shared\n(\d+\..*(?:\n|$))*/gi, "")
-    .replace(/solutions shared\s*:.*(?:\n|$)/gi, "")
-    .trim();
-  const noteHtml = noteText ? esc(noteText).replace(/\n/g, "<br>") : "";
   const canInspectCuration = canSeeCurationDetails();
   const summaryBadges = [
     { label: need.status, tone: badgeTone(need.status) },
@@ -5980,7 +6011,7 @@ function renderNeedDetail() {
         ${canInspectCuration
           ? `<article class="detail-card detail-stack-card">
              <h4>Curation Notes</h4>
-             ${noteText ? `<p class="detail-note">${noteHtml}</p>` : `<p class="detail-note">No curation notes have been recorded yet.</p>`}
+             ${renderCurationNoteSections(need.curation_notes)}
             ${
               sharedSolutionEntries.length
                 ? `<div class="detail-links">

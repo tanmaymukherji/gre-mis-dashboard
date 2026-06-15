@@ -1496,6 +1496,21 @@ input[type="radio"] {
   line-height: 1.65;
   white-space: pre-wrap;
 }
+.curation-note-section {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(248, 250, 246, 0.92);
+}
+.curation-note-section + .curation-note-section {
+  margin-top: 12px;
+}
+.seeker-comment-section {
+  border-color: rgba(47, 125, 84, 0.32);
+  background: linear-gradient(135deg, rgba(237, 248, 240, 0.98), rgba(255, 252, 242, 0.92));
+}
 .timeline-shell {
   margin-top: 12px;
 }
