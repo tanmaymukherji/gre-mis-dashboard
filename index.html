@@ -30,7 +30,7 @@
   <script src="https://grameee.org/supabase-config.js?v=20260519gre1"></script>
   <script src="https://grameee.org/auth.js?v=20260614a" defer></script>
   <script src="./config.js?v=20260517b"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260611gre01" />
+  <link rel="stylesheet" href="./styles.css?v=20260617gre01" />
 </head>
 <body>
   <header class="grameee-site-header">
@@ -298,6 +298,21 @@
               <span>Include Closed Needs</span>
             </label>
             <p id="requestTrackerStatus" class="helper-text"></p>
+            <div class="tracker-divider"></div>
+            <div class="filters-grid">
+              <label>
+                <span>Curator</span>
+                <select id="requestTrackerCuratorSelect"></select>
+              </label>
+              <div class="card-actions align-end">
+                <button type="button" id="downloadCuratorTrackerBtn" class="btn btn-primary">Download Curator Tracker</button>
+              </div>
+            </div>
+            <label class="toggle-row request-tracker-toggle">
+              <input type="checkbox" id="curatorTrackerIncludeClosed" />
+              <span>Include Closed Needs</span>
+            </label>
+            <p id="curatorTrackerStatus" class="helper-text"></p>
           </section>
         </div>
       </section>
@@ -1345,6 +1360,6 @@
     </form>
   </dialog>
 
-  <script src="./app.js?v=20260611gre01"></script>
+  <script src="./app.js?v=20260617gre01"></script>
 </body>
 </html>

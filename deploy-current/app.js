@@ -3448,6 +3448,10 @@ class GreMisStore {
     return this.callAdmin("sendCuratorMessage", { needId, message });
   }
 
+  async downloadCuratorRequestTracker(curatorId, includeClosed = false) {
+    return this.callAdmin("downloadCuratorRequestTracker", { curatorId, includeClosed });
+  }
+
   async directCuratorUpdate(payload) {
     return this.callAdmin("directCuratorUpdate", payload);
   }
@@ -4023,6 +4027,7 @@ function getMatchSeekerEmailActionConfig(need, match) {
 function getAssignableUsersForNeed(need) {
   const users = ensureList(state.data.users)
     .filter((user) => user && user.is_active !== false)
+    .filter((user) => !isServiceOperationsAccount(user))
     .filter((user) => ["admin", "moderator", "curator"].includes(normalizeText(user.role).toLowerCase()));
 
   if (isLocalOnlyNeed(need)) {
@@ -4033,6 +4038,27 @@ function getAssignableUsersForNeed(need) {
     const role = normalizeText(user.role).toLowerCase();
     return ["admin", "moderator", "curator"].includes(role) && normalizeText(user.gre_user_id);
   });
+}
+
+function isServiceOperationsAccount(account) {
+  const role = normalizeText(account?.role).toLowerCase();
+  const label = normalizeText(account?.display_name || account?.full_name || account?.username || account?.name || account?.label || account?.email).toLowerCase();
+  const email = normalizeText(account?.email).toLowerCase();
+  const compactLabel = label.replace(/\s+/g, " ").trim();
+  const isAdminRole = role === "admin" || /\(admin\)/i.test(normalizeText(account?.label || account?.display_label));
+  const isNamedServiceAccount = compactLabel === "admin"
+    || compactLabel === "admin (admin)"
+    || compactLabel === "ops support"
+    || compactLabel === "ops support (admin)";
+  const isServiceEmail = email === "admin@grameee.org"
+    || email === "ops@greenruraleconomy.in"
+    || email === "ops@grameee.org";
+  return isAdminRole && (isNamedServiceAccount || isServiceEmail);
+}
+
+function getVisibleCurators() {
+  return ensureList(state.data.curators)
+    .filter((curator) => !isServiceOperationsAccount({ ...curator, role: getCuratorRoleLabel(curator) || curator.role }));
 }
 
 function getCuratorRoleLabel(curator) {
@@ -4051,7 +4077,7 @@ function getCuratorWorkloadEntries(needs) {
   const entries = [];
   const seen = new Set();
 
-  ensureList(state.data.curators).forEach((curator) => {
+  getVisibleCurators().forEach((curator) => {
     const roleLabel = getCuratorRoleLabel(curator);
     const labelBase = curator.display_name || curator.email || curator.id;
     entries.push({
@@ -4067,6 +4093,7 @@ function getCuratorWorkloadEntries(needs) {
 
   ensureList(state.data.users)
     .filter((user) => user && user.is_active !== false)
+    .filter((user) => !isServiceOperationsAccount(user))
     .filter((user) => ["admin", "moderator", "curator"].includes(normalizeText(user.role).toLowerCase()))
     .forEach((user) => {
       const emailKey = String(user.email || "").toLowerCase();
@@ -4110,7 +4137,7 @@ function getCuratorAssignmentOptions(need) {
     options.push(`<option value="${esc(optionValue)}" ${selected ? "selected" : ""}>${esc(label)}</option>`);
   });
 
-  ensureList(state.data.curators).forEach((curator) => {
+  getVisibleCurators().forEach((curator) => {
     const optionValue = `curator:${curator.id}`;
     if (seen.has(optionValue)) return;
     const selected = curator.id === need.curator_id;
@@ -5736,7 +5763,7 @@ function renderFilters() {
   document.getElementById("curatorFilter").innerHTML = [
     `<option value="all">All curators</option>`,
     `<option value="unassigned">Unassigned</option>`,
-    ...ensureList(state.data.curators).map((curator) => `<option value="${esc(curator.id)}">${esc(curator.display_name)}</option>`),
+    ...getVisibleCurators().map((curator) => `<option value="${esc(curator.id)}">${esc(curator.display_name)}</option>`),
   ].join("");
   document.getElementById("stateFilter").innerHTML = stateOptions
     .map((value) => `<option value="${esc(value)}">${esc(value === "all" ? "All states" : value)}</option>`)
@@ -5755,9 +5782,11 @@ function getSeekerKey(need) {
 
 function renderRequestTrackerControls() {
   const select = byId("requestTrackerSeekerSelect");
-  if (!select) return;
+  const curatorSelect = byId("requestTrackerCuratorSelect");
+  if (!select && !curatorSelect) return;
+  const displayNeeds = getDisplayNeeds();
   const seekers = uniqBy(
-    getDisplayNeeds()
+    displayNeeds
       .map((need) => ({
         key: getSeekerKey(need),
         label: normalizeText(need.organization_name) || normalizeText(need.contact_person) || normalizeText(need.seeker_email) || "Unknown seeker",
@@ -5766,9 +5795,20 @@ function renderRequestTrackerControls() {
       .filter((item) => item.key),
     (item) => item.key,
   ).sort((left, right) => left.label.localeCompare(right.label));
-  select.innerHTML = seekers.length
-    ? seekers.map((item) => `<option value="${esc(item.key)}">${esc(item.label)}${item.email ? ` (${esc(item.email)})` : ""}</option>`).join("")
-    : `<option value="">No seekers available</option>`;
+  if (select) {
+    select.innerHTML = seekers.length
+      ? seekers.map((item) => `<option value="${esc(item.key)}">${esc(item.label)}${item.email ? ` (${esc(item.email)})` : ""}</option>`).join("")
+      : `<option value="">No seekers available</option>`;
+  }
+  if (curatorSelect) {
+    const assignedCuratorIds = new Set(displayNeeds.map((need) => normalizeText(need.curator_id)).filter(Boolean));
+    const curators = getVisibleCurators()
+      .filter((curator) => assignedCuratorIds.has(normalizeText(curator.id)))
+      .sort((left, right) => normalizeText(left.display_name || left.email || "").localeCompare(normalizeText(right.display_name || right.email || "")));
+    curatorSelect.innerHTML = curators.length
+      ? curators.map((curator) => `<option value="${esc(curator.id)}">${esc(curator.display_name || curator.email || curator.id)}</option>`).join("")
+      : `<option value="">No curators available</option>`;
+  }
 }
 
 function resetManualSolutionSearch() {
@@ -6449,7 +6489,7 @@ function renderWorkbench() {
           <span>Assigned Curator</span>
           <select id="assignCuratorSelect">${curatorOptions}</select>
         </label>
-        <button class="btn btn-secondary" id="assignCuratorBtn">Save Curator Assignment</button>
+        <button class="btn btn-primary" id="assignCuratorBtn">Save Curator Assignment</button>
         <p class="helper-text">${localOnlyNeed
           ? "This GramEEE-origin need can be assigned locally to any active admin, moderator, or curator. Its curation will remain on GramEEE only."
           : isAdmin
@@ -9125,6 +9165,24 @@ function bindStaticEvents() {
     if (statusEl) statusEl.textContent = `Downloaded ${result.download?.fileName || "request tracker"}.`;
   }));
 
+  byId("downloadCuratorTrackerBtn")?.addEventListener("click", safeAsync(async () => {
+    if (!hasAdminLikeAccess() && !isCuratorUser()) {
+      toast("Login as curator, moderator, or admin first.");
+      return;
+    }
+    const statusEl = byId("curatorTrackerStatus");
+    const curatorId = byId("requestTrackerCuratorSelect")?.value || "";
+    if (!curatorId) {
+      toast("Select a curator first.");
+      return;
+    }
+    if (statusEl) statusEl.textContent = "Preparing curator request tracker...";
+    const includeClosed = Boolean(byId("curatorTrackerIncludeClosed")?.checked);
+    const result = await store.downloadCuratorRequestTracker(curatorId, includeClosed);
+    downloadBase64Workbook(result.download);
+    if (statusEl) statusEl.textContent = `Downloaded ${result.download?.fileName || "curator tracker"}.`;
+  }));
+
   byId("actionWorkbench")?.addEventListener("click", safeAsync(async (event) => {
     const button = event.target.closest("button");
     if (!button) return;
@@ -9584,7 +9642,7 @@ async function init() {
     sessionReady = await store.bridgeGrameeeSession();
   }
   if (!sessionReady && needsGreMisSession && !hasImmediateGreLoginContext()) {
-    await waitForGrameeeAuthBootstrap(600);
+    await waitForGrameeeAuthBootstrap(3500);
     sessionReady = await store.validateUserSession();
     if (!sessionReady) {
       sessionReady = await store.bridgeGrameeeSession();

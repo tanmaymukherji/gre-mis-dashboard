@@ -1240,6 +1240,21 @@ h2 { font-size: 1.35rem; }
   display: grid;
   gap: 10px;
 }
+#categoryChart .tag-cloud {
+  align-items: flex-start;
+}
+#categoryChart .tag-cloud button {
+  max-width: 280px;
+  min-height: 42px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+  line-height: 1.2;
+  padding: 9px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .signal-section + .signal-section {
   margin-top: 14px;
 }
@@ -1495,6 +1510,11 @@ input[type="radio"] {
   color: var(--ink);
   line-height: 1.65;
   white-space: pre-wrap;
+}
+.tracker-divider {
+  height: 1px;
+  margin: 18px 0;
+  background: rgba(46, 106, 60, 0.16);
 }
 .curation-note-section {
   display: grid;

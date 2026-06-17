@@ -685,6 +685,9 @@ function buildSeekerStatusStyle(styleId: string, fontColor: string, fillColor: s
 
 function buildStyledTrackerHtml({
   seekerLabel,
+  titleLabel = "Request Tracker Sheet",
+  identityColumnLabel = "Curator",
+  identityValueResolver,
   totalNeeds,
   solutionProviderNeeded,
   seekerResponsePending,
@@ -692,6 +695,9 @@ function buildStyledTrackerHtml({
   needs,
 }: {
   seekerLabel: string;
+  titleLabel?: string;
+  identityColumnLabel?: string;
+  identityValueResolver?: (need: Record<string, unknown>) => string | null;
   totalNeeds: number;
   solutionProviderNeeded: number;
   seekerResponsePending: number;
@@ -749,16 +755,23 @@ function buildStyledTrackerHtml({
 
   const dataRows = needs.map((need, index) => {
     const solutions = buildSeekerSolutionEntries(need.curation_notes);
+    const curator = need.gre_mis_curators && typeof need.gre_mis_curators === "object"
+      ? need.gre_mis_curators as Record<string, unknown>
+      : {};
+    const curatorName = safeStr(curator.display_name) || safeStr(curator.email) || safeStr(need.curator_name);
+    const seekerName = safeStr(need.organization_name) || safeStr(need.contact_person) || safeStr(need.seeker_email);
+    const identityValue = identityValueResolver?.(need) || (identityColumnLabel.toLowerCase() === "seeker" ? seekerName : curatorName);
     return `
     <Row ss:AutoFitHeight="0" ss:Height="80">
       ${makeCell(1, index + 1, "Serial", "Number")}
       ${makeCell(2, safeStr(need.problem_statement), "BodyBordered")}
       ${makeCell(3, safeStr(solutions), "BodyBordered")}
-      ${makeCell(4, safeStr(need.status), dStyle(need))}
-      ${makeCell(5, safeStr(need.internal_status), eStyle(need))}
-      ${makeCell(6, safeStr(need.next_action), fStyle(need))}
-      ${makeCell(7, safeStr(need.seeker_provider_agreement), gStyle(need))}
-      ${makeCell(8, null, "BodyNoBorder")}
+      ${makeCell(4, identityValue, "BodyBordered")}
+      ${makeCell(5, safeStr(need.status), dStyle(need))}
+      ${makeCell(6, safeStr(need.internal_status), eStyle(need))}
+      ${makeCell(7, safeStr(need.next_action), fStyle(need))}
+      ${makeCell(8, safeStr(need.seeker_provider_agreement), gStyle(need))}
+      ${makeCell(9, null, "BodyNoBorder")}
     </Row>`;
   }).join("");
 
@@ -770,7 +783,7 @@ function buildStyledTrackerHtml({
  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
  xmlns:html="http://www.w3.org/TR/REC-html40">
   <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
-    <Title>Request Tracker Sheet - ${escapeExcelXml(seekerLabel)}</Title>
+    <Title>${escapeExcelXml(titleLabel)} - ${escapeExcelXml(seekerLabel)}</Title>
     <Author>GRE MIS</Author>
     <Created>${new Date().toISOString()}</Created>
   </DocumentProperties>
@@ -868,11 +881,12 @@ function buildStyledTrackerHtml({
     ${buildSeekerStatusStyle("StAgreeOther", "#333333", "#FFF2CC")}
   </Styles>
   <Worksheet ss:Name="Tracker">
-    <Table ss:ExpandedColumnCount="8" ss:ExpandedRowCount="${needs.length + 10}" x:FullColumns="1" x:FullRows="1"
+    <Table ss:ExpandedColumnCount="9" ss:ExpandedRowCount="${needs.length + 10}" x:FullColumns="1" x:FullRows="1"
            ss:DefaultRowHeight="16">
       <Column ss:Width="30.48"/>
       <Column ss:Width="376.63"/>
       <Column ss:Width="298.37"/>
+      <Column ss:Width="132"/>
       <Column ss:Width="108.11"/>
       <Column ss:Width="144.37"/>
       <Column ss:Width="138.63"/>
@@ -880,7 +894,7 @@ function buildStyledTrackerHtml({
       <Column ss:Width="188.26"/>
       <Row ss:Height="24">
         ${emptyCell()}
-        ${labelCell("Request Tracker Sheet", "TitleLabel")}
+        ${labelCell(titleLabel, "TitleLabel")}
         ${labelCell(seekerLabel, "TitleValue")}
       </Row>
       <Row ss:Height="20">
@@ -914,6 +928,7 @@ function buildStyledTrackerHtml({
         ${labelCell("Sr", "HeaderCenter")}
         ${labelCell("Request", "HeaderCenter")}
         ${labelCell("Solution Shared", "HeaderCenter")}
+        ${labelCell(identityColumnLabel, "HeaderCenter")}
         ${labelCell("Status", "HeaderCenter")}
         ${labelCell("Internal Status", "HeaderCenter")}
         ${labelCell("Next Action", "HeaderCenter")}
@@ -8083,7 +8098,7 @@ async function downloadSeekerRequestTracker(seekerKey: string, includeClosed = f
   const isOrgKey = key.startsWith("org:");
   let query = adminClient
     .from("gre_mis_needs")
-    .select("id, organization_name, contact_person, seeker_email, problem_statement, curation_notes, status, internal_status, next_action, requested_on, seeker_provider_agreement")
+    .select("id, organization_name, contact_person, seeker_email, problem_statement, curation_notes, status, internal_status, next_action, requested_on, seeker_provider_agreement, curator_id, gre_mis_curators:curator_id(email, display_name)")
     .eq("approval_status", "approved")
     .order("requested_on", { ascending: true });
   if (!includeClosed) {
@@ -8127,6 +8142,62 @@ async function downloadSeekerRequestTracker(seekerKey: string, includeClosed = f
     download: await createWorkbookDownloadPayload(
       buffer,
       `Solution Seeker Status - ${safeFilePart(seekerLabel)} - ${formatDdmmyy()}.xls`,
+      "application/vnd.ms-excel",
+    ),
+  };
+}
+
+async function downloadCuratorRequestTracker(curatorId: string, includeClosed = false) {
+  const id = requireString(curatorId);
+  if (!id) throw new Error("Select a curator first.");
+  let query = adminClient
+    .from("gre_mis_needs")
+    .select("id, organization_name, contact_person, seeker_email, problem_statement, curation_notes, status, internal_status, next_action, requested_on, seeker_provider_agreement, curator_id, gre_mis_curators:curator_id(email, display_name)")
+    .eq("approval_status", "approved")
+    .eq("curator_id", id)
+    .order("requested_on", { ascending: true });
+  if (!includeClosed) {
+    query = query.neq("status", "Closed");
+  }
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  const needs = data || [];
+  if (!needs.length) throw new Error("No needs were found for this curator.");
+  const curator = needs[0]?.gre_mis_curators && typeof needs[0]?.gre_mis_curators === "object"
+    ? needs[0]?.gre_mis_curators as Record<string, unknown>
+    : {};
+  const curatorLabel =
+    requireString(curator.display_name) ||
+    requireString(curator.email) ||
+    "Curator";
+  const totalNeeds = needs.length;
+  const solutionProviderNeeded = needs.filter((need) => requireString(need.internal_status).toLowerCase() === "need solution providers").length;
+  const seekerResponsePending = needs.filter((need) => {
+    const iStatus = requireString(need.internal_status).toLowerCase();
+    const nAction = requireString(need.next_action).toLowerCase();
+    return iStatus.includes("connection made") && (!nAction || nAction === "follow up with seeker");
+  }).length;
+  const solutionsImplemented = needs.filter((need) =>
+    requireString(need.status).toLowerCase() === "closed" ||
+    requireString(need.seeker_provider_agreement).toLowerCase() === "agreement completed"
+  ).length;
+
+  const html = buildStyledTrackerHtml({
+    seekerLabel: curatorLabel,
+    titleLabel: "Curator Tracker Sheet",
+    identityColumnLabel: "Seeker",
+    totalNeeds,
+    solutionProviderNeeded,
+    seekerResponsePending,
+    solutionsImplemented,
+    needs,
+  });
+  const buffer = new TextEncoder().encode(html).buffer;
+  return {
+    ok: true,
+    download: await createWorkbookDownloadPayload(
+      buffer,
+      `Curator Request Status - ${safeFilePart(curatorLabel)} - ${formatDdmmyy()}.xls`,
       "application/vnd.ms-excel",
     ),
   };
@@ -10750,6 +10821,11 @@ Deno.serve(async (req) => {
     if (action === "downloadSeekerRequestTracker") {
       assertRoles(userCtx, ["curator", "moderator", "admin"], "Curator, moderator, or admin access is required.");
       return jsonResponse(await downloadSeekerRequestTracker(requireString(payload.seekerKey), Boolean(payload.includeClosed)));
+    }
+
+    if (action === "downloadCuratorRequestTracker") {
+      assertRoles(userCtx, ["curator", "moderator", "admin"], "Curator, moderator, or admin access is required.");
+      return jsonResponse(await downloadCuratorRequestTracker(requireString(payload.curatorId), Boolean(payload.includeClosed)));
     }
 
     if (action === "getMailTemplates") {
