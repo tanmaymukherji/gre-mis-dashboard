@@ -7156,12 +7156,37 @@ async function applyNeedOverride(
 async function resolveCuratorId(curatorName: string) {
   const normalized = requireString(curatorName);
   if (!normalized) return null;
-  const { data } = await adminClient
+  const cleanName = normalizeComparable(
+    normalized
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/\b(admin|moderator|curator)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+  const { data, error } = await adminClient
     .from("gre_mis_curators")
-    .select("id, display_name")
-    .ilike("display_name", normalized)
-    .maybeSingle();
-  return data?.id || null;
+    .select("id, display_name, email")
+    .eq("is_active", true);
+  if (error) throw new Error(error.message);
+  const rows = (data || []) as Record<string, unknown>[];
+  const tokens = cleanName.split(/\s+/).filter((token) => token.length > 1);
+  const scored = rows
+    .map((row) => {
+      const display = normalizeComparable(row.display_name);
+      const email = requireString(row.email).toLowerCase();
+      let score = 0;
+      if (display === cleanName) score = 100;
+      else if (display && cleanName && (display.includes(cleanName) || cleanName.includes(display))) score = 85;
+      else if (tokens.length && tokens.every((token) => display.includes(token))) score = 75;
+      else if (tokens.length && email && tokens.some((token) => email.startsWith(token))) score = 65;
+      return { row, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score);
+  if (!scored.length) return null;
+  const [best, second] = scored;
+  if (best.score >= 75 || best.score > (second?.score || 0)) return requireString(best.row.id) || null;
+  return null;
 }
 
 function buildNeedNotes(curationCallDetails: string, solutionsShared: string) {
@@ -7880,6 +7905,9 @@ async function importInboundWorkbook(rowsInput: unknown, fileName: string, actor
     }
 
     if (existing.source_row_signature !== sourceRowSignature) {
+      if (!curatorId && requireString(existing.curator_id)) {
+        patch.curator_id = requireString(existing.curator_id);
+      }
       toUpdate.push({
         ...patch,
         source_row_signature: sourceRowSignature,
