@@ -1,12 +1,8 @@
-import { createReadStream, statSync } from "fs";
+import { createReadStream, statSync, rmSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { createRequire } from "module";
-
-const require = createRequire(import.meta.url);
-
-// TUS client is available from the hostinger MCP package
-const tus = require("C:\\Users\\tmukh\\AppData\\Roaming\\npm\\node_modules\\hostinger-api-mcp\\node_modules\\tus-js-client");
+import { execFileSync } from "child_process";
+import * as tus from "tus-js-client";
 
 const TOKEN = "tsAkruR0VW24ayQyL0TRlWTuoxXdbjUSzluPhrSS16c6ca26";
 const BASE = "https://developers.hostinger.com";
@@ -25,6 +21,18 @@ const ARCHIVE_NAME = `gre-mis_${datestamp}.zip`;
 const ARCHIVE_PATH = join(process.env.TEMP || "C:\\Users\\tmukh\\AppData\\Local\\Temp", ARCHIVE_NAME);
 
 async function main() {
+  console.log("Creating fresh deployment archive...");
+  rmSync(ARCHIVE_PATH, { force: true });
+  execFileSync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-Command",
+      `Compress-Archive -Path index.html,admin.html,offering-detail.html,styles.css,app.js,config.js,assets -DestinationPath '${ARCHIVE_PATH.replace(/'/g, "''")}' -Force`
+    ],
+    { cwd: dirname(fileURLToPath(import.meta.url)), stdio: "inherit" }
+  );
+
   // 1. Get upload credentials
   console.log("Getting upload credentials...");
   const credResp = await fetch(`${BASE}/api/hosting/v1/files/upload-urls`, {
