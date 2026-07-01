@@ -1311,7 +1311,6 @@
       const kind = offeringKind(match);
       const providerRows = buildProviderRows(match).map(([label, value]) => ({ label, value: formatValue(value) }));
       const providerName = providerRows.find((row) => row.label === "Provider")?.value || "Solution Provider";
-      const providerEmail = providerRows.find((row) => row.label === "Email")?.value || "";
       const documents = buildDocuments(match, kind);
       const media = buildMedia(match);
       const quickCards = buildQuickCards(match, kind, providerName, documents, media);
@@ -1344,7 +1343,6 @@
           </div>
           ` : ""}
           <div class="offering-hero-actions" aria-label="Offering actions">
-            ${providerEmail ? `<a class="offering-cta offering-cta-primary" href="mailto:${esc(providerEmail)}">Email Provider</a>` : `<span class="offering-cta offering-cta-secondary">Email unavailable</span>`}
             ${kind === "knowledge" ? `<a class="offering-cta offering-cta-soft" href="${esc(knowledgeContentUrl || "#offering-detail-tabs")}" ${knowledgeContentUrl ? `target="_blank" rel="noreferrer"` : ""}>${knowledgeContentUrl ? "View content" : "Read overview"}</a>` : ""}
             ${primaryDoc ? `<a class="offering-cta offering-cta-soft" href="${esc(primaryDoc.url)}" target="_blank" rel="noreferrer">${kind === "knowledge" ? "Download guide" : "Download brochure"}</a>` : ""}
             ${greHref ? `<a class="offering-cta offering-cta-outline" href="${esc(greHref)}" target="_blank" rel="noreferrer">View on GRE</a>` : ""}
