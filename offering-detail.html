@@ -298,6 +298,412 @@
       text-align: center;
       color: var(--muted);
     }
+    .offering-action-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 0.82fr) minmax(220px, 280px);
+      gap: 24px;
+      align-items: center;
+      padding: clamp(24px, 3vw, 38px);
+      border-radius: 30px;
+      background:
+        radial-gradient(circle at 76% 12%, rgba(226, 184, 80, 0.18), transparent 32%),
+        linear-gradient(135deg, #063f2c 0%, #0f6040 52%, #063322 100%);
+      color: #fffaf0;
+      box-shadow: 0 24px 60px rgba(18, 61, 42, 0.24);
+    }
+    .offering-hero-no-media {
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.42fr);
+    }
+    .offering-hero-copy h1 {
+      margin: 0;
+      font-size: clamp(2.1rem, 4vw, 3.7rem);
+      line-height: 1.02;
+      letter-spacing: -0.045em;
+      color: #fffaf0;
+    }
+    .offering-hero-copy p {
+      margin: 16px 0 0;
+      color: rgba(255, 252, 245, 0.9);
+      font-size: 1.05rem;
+      line-height: 1.55;
+    }
+    .offering-hero-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .offering-page-kicker {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.82);
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .offering-hero-back {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 18px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      color: #fffdf4;
+      font-weight: 850;
+    }
+    .offering-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .offering-chip-row span {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(232, 247, 236, 0.94);
+      color: #174735;
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+    .offering-chip-row span:first-child,
+    .offering-service .offering-chip-row span:nth-child(2),
+    .offering-knowledge .offering-chip-row span:nth-child(2) {
+      background: #e4b850;
+      color: #173121;
+    }
+    .offering-hero-media {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(126px, 150px);
+      gap: 18px;
+      align-items: stretch;
+    }
+    .offering-hero-image-card,
+    .offering-hero-doc-card {
+      margin: 0;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 18px;
+      background: rgba(255, 250, 240, 0.96);
+      color: #173121;
+      box-shadow: 0 16px 38px rgba(0, 0, 0, 0.14);
+    }
+    .offering-hero-image-card img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      border: 0;
+      object-fit: cover;
+    }
+    .offering-hero-image-card figcaption {
+      padding: 12px 14px;
+      color: #33483b;
+      font-weight: 700;
+    }
+    .offering-hero-doc-card {
+      display: grid;
+      place-items: center;
+      align-content: center;
+      gap: 9px;
+      min-height: 180px;
+      padding: 18px;
+      text-align: center;
+    }
+    .offering-hero-doc-card span,
+    .offering-document-icon,
+    .offering-featured-resource span {
+      display: grid;
+      place-items: center;
+      width: 54px;
+      height: 62px;
+      border-radius: 14px;
+      background: #dff2e4;
+      color: #177044;
+      font-weight: 900;
+      font-size: 0.78rem;
+    }
+    .offering-hero-actions {
+      display: grid;
+      gap: 14px;
+      justify-self: end;
+      width: 100%;
+    }
+    .offering-hero-no-media .offering-hero-actions {
+      width: min(100%, 520px);
+    }
+    .offering-cta {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      min-height: 58px;
+      border: 1px solid rgba(23, 49, 33, 0.12);
+      border-radius: 18px;
+      padding: 14px 18px;
+      font-weight: 900;
+      text-align: center;
+      cursor: pointer;
+    }
+    .offering-cta-primary {
+      background: linear-gradient(135deg, #df9f24 0%, #f1c85f 52%, #f8dc83 100%);
+      border-color: rgba(99, 59, 8, 0.22);
+      color: #173121;
+      box-shadow: 0 18px 34px rgba(86, 61, 14, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.42);
+    }
+    .offering-cta-secondary {
+      background: #fffdf8;
+      color: #15533a;
+    }
+    .offering-cta-soft {
+      background: #e7f4e8;
+      color: #15533a;
+    }
+    .offering-cta-outline {
+      background: rgba(255, 250, 240, 0.08);
+      color: #fffaf0;
+      border-color: rgba(255, 250, 240, 0.42);
+    }
+    .offering-featured-media,
+    .offering-summary-card,
+    .offering-tabs-card,
+    .offering-quick-card {
+      border: 1px solid rgba(33, 92, 61, 0.14);
+      background: rgba(255, 251, 243, 0.92);
+      box-shadow: 0 16px 42px rgba(47, 56, 42, 0.1);
+    }
+    .offering-featured-media {
+      display: grid;
+      gap: 22px;
+      margin: 24px 0;
+      padding: clamp(22px, 3vw, 34px);
+      border-radius: 28px;
+      background: linear-gradient(135deg, rgba(255, 253, 248, 0.96), rgba(232, 244, 232, 0.88));
+    }
+    .offering-section-kicker {
+      margin: 0 0 8px;
+      color: #2b7046;
+      font-size: 0.78rem;
+      font-weight: 900;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+    .offering-featured-media h2,
+    .offering-summary-card h2 {
+      margin: 0;
+      color: #173121;
+    }
+    .offering-featured-media-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
+      gap: 22px;
+    }
+    .offering-featured-player {
+      min-height: 320px;
+      border-radius: 24px;
+      overflow: hidden;
+      background: #092c20;
+    }
+    .offering-featured-player iframe,
+    .offering-featured-player video {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 320px;
+      border: 0;
+      object-fit: cover;
+    }
+    .offering-external-media-card {
+      display: flex;
+      min-height: 320px;
+      flex-direction: column;
+      justify-content: center;
+      gap: 12px;
+      padding: clamp(24px, 4vw, 44px);
+      color: #fffdf4;
+      background: linear-gradient(135deg, #0f4a34, #08281e);
+    }
+    .offering-external-media-card span {
+      color: #f2cf72;
+      font-size: 0.78rem;
+      font-weight: 900;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+    .offering-external-media-card strong {
+      font-size: clamp(1.8rem, 3vw, 3.2rem);
+      line-height: 1.02;
+    }
+    .offering-featured-resource-list,
+    .offering-document-grid,
+    .offering-media-grid,
+    .offering-tab-card-grid {
+      display: grid;
+      gap: 14px;
+    }
+    .offering-featured-resource,
+    .offering-document-card {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 12px 14px;
+      align-items: center;
+      padding: 16px;
+      border: 1px solid rgba(33, 92, 61, 0.16);
+      border-radius: 20px;
+      background: #fffdf8;
+      color: #173121;
+    }
+    .offering-featured-image-link {
+      grid-template-columns: 70px minmax(0, 1fr);
+    }
+    .offering-featured-image-link img {
+      width: 70px;
+      height: 54px;
+      border-radius: 12px;
+      object-fit: cover;
+    }
+    .offering-quick-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+    }
+    .offering-quick-card {
+      min-height: 104px;
+      padding: 22px 20px;
+      border-radius: 18px;
+    }
+    .offering-quick-card span {
+      display: block;
+      margin-bottom: 8px;
+      color: #647267;
+      font-size: 0.88rem;
+    }
+    .offering-quick-card strong {
+      display: block;
+      color: #177044;
+      font-size: clamp(1.05rem, 1.5vw, 1.32rem);
+      line-height: 1.2;
+    }
+    .offering-summary-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 20px;
+      margin-top: 24px;
+    }
+    .offering-summary-card,
+    .offering-tabs-card {
+      border-radius: 24px;
+      padding: 28px;
+    }
+    .offering-help-list {
+      display: grid;
+      gap: 18px;
+      margin-top: 18px;
+    }
+    .offering-help-list div {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .offering-help-list span {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      background: #e0f4e6;
+      color: #177044;
+      font-weight: 900;
+    }
+    .offering-help-list p {
+      margin: 3px 0 0;
+      color: #33483b;
+      line-height: 1.5;
+    }
+    .offering-snapshot-rows div,
+    .offering-detail-row {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr);
+      gap: 16px;
+      padding: 13px 0;
+      border-bottom: 1px solid rgba(31, 43, 30, 0.1);
+    }
+    .offering-snapshot-rows span,
+    .offering-detail-row span {
+      color: #647267;
+      font-weight: 700;
+    }
+    .offering-snapshot-rows strong,
+    .offering-detail-row strong,
+    .offering-snapshot-rows a {
+      color: #174735;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    .offering-tabs-card {
+      margin-top: 24px;
+      padding: 24px;
+    }
+    .offering-tab-list {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+      border-bottom: 1px solid rgba(31, 43, 30, 0.12);
+      padding-bottom: 14px;
+    }
+    .offering-tab-button {
+      border: 0;
+      border-radius: 14px;
+      padding: 14px 16px;
+      background: rgba(246, 238, 221, 0.78);
+      color: #174735;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .offering-tab-button.active {
+      background: #23734d;
+      color: #fffaf0;
+    }
+    .offering-tab-panel {
+      padding: 24px 0 4px;
+    }
+    .offering-tab-card-grid,
+    .offering-media-grid,
+    .offering-document-grid {
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      margin-top: 18px;
+    }
+    .offering-tab-info-card,
+    .offering-media-card {
+      padding: 18px;
+      border: 1px solid rgba(31, 43, 30, 0.1);
+      border-radius: 18px;
+      background: #fffdf8;
+      color: #174735;
+    }
+    .offering-media-card img,
+    .offering-media-card video,
+    .offering-media-card iframe {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      border: 0;
+      border-radius: 14px;
+      object-fit: cover;
+      background: rgba(31, 43, 30, 0.06);
+    }
+    .offering-note {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: #e6f4e8;
+      color: #174735;
+    }
     @media (max-width: 920px) {
       .grameee-site-header {
         width: min(100vw - 20px, 1280px);
@@ -354,6 +760,51 @@
       .detail-table td {
         padding-top: 0;
       }
+      .offering-action-hero,
+      .offering-hero-no-media,
+      .offering-featured-media-grid,
+      .offering-summary-grid {
+        grid-template-columns: 1fr;
+      }
+      .offering-hero-media {
+        grid-template-columns: minmax(0, 1fr) minmax(130px, 170px);
+      }
+      .offering-hero-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .offering-quick-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .offering-tab-list {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .offering-detail-row,
+      .offering-snapshot-rows div {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+    }
+    @media (max-width: 640px) {
+      .offering-action-hero {
+        padding: 20px;
+        border-radius: 24px;
+      }
+      .offering-hero-topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .offering-hero-media,
+      .offering-hero-actions,
+      .offering-quick-grid,
+      .offering-tab-list {
+        grid-template-columns: 1fr;
+      }
+      .offering-featured-player,
+      .offering-featured-player iframe,
+      .offering-featured-player video,
+      .offering-external-media-card {
+        min-height: 240px;
+      }
     }
     body.embedded-offering-detail {
       background: #fff;
@@ -376,6 +827,10 @@
     }
     body.embedded-offering-detail .hero {
       border-top: 0;
+    }
+    body.embedded-offering-detail .offering-action-hero {
+      border-radius: 0;
+      box-shadow: none;
     }
   </style>
 </head>
@@ -537,62 +992,385 @@
       ].filter(([, value]) => isPresent(value));
     }
 
+    function uniqueValues(values) {
+      const seen = new Set();
+      return values.flatMap((value) => {
+        if (Array.isArray(value)) return value;
+        return normalizeText(value).split(/[;,|\n]/);
+      }).map((value) => normalizeText(value)).filter((value) => {
+        if (!value) return false;
+        const key = value.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    function getPayload(match) {
+      const raw = match?.raw_payload && typeof match.raw_payload === "object" ? match.raw_payload : {};
+      const nested = raw?.payload && typeof raw.payload === "object" ? raw.payload : {};
+      const solutionRaw = match?.solution?.raw_payload && typeof match.solution.raw_payload === "object" ? match.solution.raw_payload : {};
+      return { ...solutionRaw, ...raw, ...nested };
+    }
+
+    function getAttachmentUrl(value) {
+      if (typeof value === "string") return value;
+      if (value && typeof value === "object") {
+        return normalizeText(value.dataUrl || value.url || value.href || value.link);
+      }
+      return "";
+    }
+
+    function collectResourceValues(value) {
+      if (!value) return [];
+      if (Array.isArray(value)) return value.flatMap(collectResourceValues);
+      if (typeof value === "object") {
+        const direct = getAttachmentUrl(value);
+        const nested = Object.values(value).flatMap(collectResourceValues);
+        return direct ? [direct, ...nested] : nested;
+      }
+      const text = normalizeText(value);
+      if (!text) return [];
+      const urlMatches = text.match(/(?:https?:\/\/|www\.|youtube\.com|youtu\.be|vimeo\.com)[^\s<>"')]+/gi);
+      return urlMatches?.length ? urlMatches : [text];
+    }
+
+    function normalizeResourceUrl(url) {
+      const text = normalizeText(url);
+      if (!text) return "";
+      if (/^data:/i.test(text) || /^https?:\/\//i.test(text)) return text;
+      if (/^(www\.|youtube\.com|youtu\.be|vimeo\.com)/i.test(text)) return `https://${text}`;
+      return text;
+    }
+
+    function urlList(...values) {
+      return uniqueValues(values.flatMap(collectResourceValues).map(normalizeResourceUrl))
+        .filter((url) => /^https?:\/\//i.test(url) || /^data:/i.test(url));
+    }
+
+    function isPdfUrl(url) {
+      return /\.pdf(?:[?#]|$)/i.test(url) || /^data:application\/pdf/i.test(url) || /drive\.google\.com/i.test(url);
+    }
+
+    function isImageUrl(url) {
+      return /^data:image\//i.test(url) || /\.(jpe?g|png|webp|gif|avif)(?:[?#]|$)/i.test(url);
+    }
+
+    function isDirectVideoUrl(url) {
+      return /\.(mp4|webm|ogg|mov)(?:[?#]|$)/i.test(url);
+    }
+
+    function isVideoUrl(url) {
+      return isDirectVideoUrl(url) || /youtube\.com\/watch\?/i.test(url) || /youtube\.com\/embed\//i.test(url) || /youtu\.be\//i.test(url) || /vimeo\.com\//i.test(url);
+    }
+
+    function toEmbedUrl(url) {
+      const text = normalizeText(url);
+      const youtubeWatch = text.match(/[?&]v=([^&]+)/i);
+      if (/youtube\.com\/watch\?/i.test(text) && youtubeWatch?.[1]) return `https://www.youtube.com/embed/${youtubeWatch[1]}`;
+      const youtuBe = text.match(/youtu\.be\/([^?&]+)/i);
+      if (youtuBe?.[1]) return `https://www.youtube.com/embed/${youtuBe[1]}`;
+      if (/youtube\.com\/embed\//i.test(text)) return text;
+      const vimeoMatch = text.match(/vimeo\.com\/(\d+)/i);
+      if (vimeoMatch?.[1]) return `https://player.vimeo.com/video/${vimeoMatch[1]}`;
+      return "";
+    }
+
+    function documentType(url) {
+      if (isPdfUrl(url)) return "PDF";
+      const extension = url.split(/[?#]/)[0]?.split(".").pop()?.toUpperCase();
+      return extension && extension.length <= 5 ? extension : "DOC";
+    }
+
+    function offeringKind(match) {
+      const text = [match.offering_group, match.offering_category, match.offering_type].map((value) => normalizeText(value).toLowerCase()).join(" ");
+      if (text.includes("knowledge") || text.includes("manual") || text.includes("video") || text.includes("sop") || text.includes("blog")) return "knowledge";
+      if (text.includes("product") || text.includes("machinery") || text.includes("plant setup") || text.includes("raw material")) return "product";
+      return "service";
+    }
+
+    function rowsOf(rows) {
+      return rows.map(([label, value]) => ({ label, value: formatValue(value) })).filter((row) => row.value);
+    }
+
+    function chipList(match, kind) {
+      return uniqueValues([
+        kind === "product" ? "Product offering" : kind === "knowledge" ? "Knowledge offering" : "Service offering",
+        match.offering_type,
+        match.domain_6m ? `${match.domain_6m} - 6M` : "",
+        match.primary_valuechain,
+        match.primary_application
+      ]).slice(0, 6);
+    }
+
+    function buildDocuments(match, kind) {
+      const payload = getPayload(match);
+      const values = [
+        kind === "service" ? match.service_brochure_url : "",
+        kind === "product" ? match.product_brochure_url : "",
+        kind === "knowledge" ? match.knowledge_content_url : "",
+        kind === "service" ? payload["Service offering Brochure"] : "",
+        kind === "product" ? payload["Product Brochure"] : "",
+        kind === "knowledge" ? payload["Knowledge Offering Content"] : "",
+        payload.brochure,
+        payload.brochure_url,
+        payload.document,
+        payload.document_url,
+        payload.documentLink,
+        payload.documentLinks,
+        payload.documents,
+        payload.document_urls,
+        payload.attachmentUrls,
+        payload.attachments
+      ];
+      return urlList(...values)
+        .filter((url) => !isImageUrl(url) && !isVideoUrl(url))
+        .map((url, index) => ({
+          title: index === 0 ? (kind === "knowledge" ? "Knowledge guide" : kind === "service" ? "Service brochure" : "Product brochure") : `Resource ${index + 1}`,
+          url,
+          typeLabel: documentType(url)
+        }));
+    }
+
+    function buildMedia(match) {
+      const payload = getPayload(match);
+      const primaryImage = match.solution?.solution_image_url || payload.SolutionImage || payload.solutionImage;
+      const images = urlList(primaryImage, payload.OfferingImage, payload.offering_image, payload.galleryUrls, payload.imageUrls, payload.images, payload.product_gallery_urls).filter(isImageUrl);
+      const links = urlList(
+        match.knowledge_content_url,
+        payload["Knowledge Offering Content"],
+        payload.knowledge_content,
+        payload.knowledgeContent,
+        payload.video,
+        payload.video_url,
+        payload.Video,
+        payload.VideoUrl,
+        payload["Video Link"],
+        payload["Video URL"],
+        payload.videoUrls,
+        payload.videos,
+        payload.product_video_urls
+      );
+      const media = [];
+      images.forEach((url, index) => media.push({ title: index === 0 ? normalizeText(match.offering_name) || "Offering image" : `Image ${index + 1}`, url, kind: "image" }));
+      links.forEach((url, index) => {
+        if (isPdfUrl(url) || isImageUrl(url)) return;
+        media.push({
+          title: index === 0 ? normalizeText(match.offering_name) || "Offering media" : `Media ${index + 1}`,
+          url,
+          kind: isVideoUrl(url) ? "video" : "external",
+          embedUrl: isDirectVideoUrl(url) ? "" : toEmbedUrl(url)
+        });
+      });
+      return media;
+    }
+
+    function buildQuickCards(match, kind, providerName, documents, media) {
+      if (kind === "product") {
+        return rowsOf([
+          ["Capacity / Grade", match.grade_capacity || match.grade_or_capacity || match.capacity || "To be discussed"],
+          ["Product cost", match.product_cost || match.cost_remarks || "Quote after scope"],
+          ["Lead time", match.lead_time || "To be discussed"],
+          ["Support", match.support_details || "To be discussed"],
+          ["Audience", match.audience || "Groups, individuals, organisations, SHGs"]
+        ]);
+      }
+      if (kind === "knowledge") {
+        const format = [
+          media.some((item) => item.kind === "video") ? "Video" : "",
+          documents.length ? "PDF" : "",
+          media.some((item) => item.kind === "image") ? "Images" : ""
+        ].filter(Boolean).join(" + ") || "Content";
+        return rowsOf([
+          ["Format", format],
+          ["Value chain", match.primary_valuechain],
+          ["Applications", match.applications || match.primary_application],
+          ["Best for", match.primary_application || match.tags],
+          ["Provider", providerName]
+        ]);
+      }
+      return rowsOf([
+        ["Duration", match.duration || "To be discussed"],
+        ["Service cost", match.service_cost || match.cost_remarks || "Quote after scope"],
+        ["Languages", match.languages],
+        ["Delivery mode", match.delivery_mode || match.location_availability],
+        ["Certification", match.certification_offered || "To be discussed"],
+        ["Support", match.support_post_service || match.support_details || "At service location"]
+      ]);
+    }
+
+    function summaryBullets(match, kind) {
+      const source = normalizeText(match.solution?.about_solution_text || match.about_offering_text);
+      const parts = source.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter(Boolean).slice(0, kind === "knowledge" ? 4 : 3);
+      if (parts.length) return parts;
+      if (kind === "product") return ["Helps evaluate the product quickly for deployment decisions."];
+      if (kind === "knowledge") return ["Helps understand the practice, process, or knowledge resource."];
+      return ["Helps evaluate the service, training, or advisory support."];
+    }
+
+    function renderRows(rows) {
+      if (!rows?.length) return "";
+      return `<div class="offering-detail-rows">${rows.map((row) => `<div class="offering-detail-row"><span>${esc(row.label)}</span><strong>${isLinkValue(row.value) ? `<a href="${esc(row.value)}" target="_blank" rel="noreferrer">${esc(row.value)}</a>` : esc(row.value)}</strong></div>`).join("")}</div>`;
+    }
+
+    function renderDocuments(documents) {
+      if (!documents?.length) return "";
+      return `<div class="offering-document-grid">${documents.map((doc) => `<a class="offering-document-card" href="${esc(doc.url)}" target="_blank" rel="noreferrer"><span class="offering-document-icon">${esc(doc.typeLabel)}</span><span><strong>${esc(doc.title)}</strong><small>${esc(doc.typeLabel)} resource</small></span><strong>Open</strong></a>`).join("")}</div>`;
+    }
+
+    function renderMedia(media) {
+      if (!media?.length) return "";
+      return `<div class="offering-media-grid">${media.map((item) => {
+        if (item.kind === "image") return `<a class="offering-media-card" href="${esc(item.url)}" target="_blank" rel="noreferrer"><img src="${esc(item.url)}" alt="${esc(item.title)}" referrerpolicy="no-referrer" /><strong>${esc(item.title)}</strong></a>`;
+        if (item.kind === "video" && item.embedUrl) return `<div class="offering-media-card"><iframe src="${esc(item.embedUrl)}" title="${esc(item.title)}" allow="fullscreen; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe><strong>${esc(item.title)}</strong></div>`;
+        if (item.kind === "video") return `<div class="offering-media-card"><video controls preload="metadata"><source src="${esc(item.url)}" /></video><strong>${esc(item.title)}</strong></div>`;
+        return `<a class="offering-document-card" href="${esc(item.url)}" target="_blank" rel="noreferrer"><span class="offering-document-icon">EXT</span><span><strong>${esc(item.title)}</strong><small>External media</small></span><strong>Open</strong></a>`;
+      }).join("")}</div>`;
+    }
+
+    function buildTabs(match, kind, providerRows, documents, media) {
+      const commonRows = rowsOf([
+        ["Offering category", match.offering_category],
+        ["Offering group", match.offering_group],
+        ["Offering type", match.offering_type],
+        ["6M domain", match.domain_6m],
+        ["Primary value chain", match.primary_valuechain],
+        ["Primary application", match.primary_application],
+        ["All value chains", parseArray(match.valuechains)],
+        ["All applications", parseArray(match.applications)],
+        ["Tags", parseArray(match.tags)],
+        ["Languages", parseArray(match.languages)],
+        ["Geography", parseArray(match.geographies)],
+        ["Location availability", match.location_availability],
+        ["Audience", match.audience]
+      ]);
+      if (kind === "product") {
+        return [
+          { id: "overview", label: "Overview", intro: match.about_offering_text || match.solution?.about_solution_text, rows: commonRows, cards: summaryBullets(match, kind).map((body, index) => ({ title: index === 0 ? "Product use case" : `Decision point ${index + 1}`, body })) },
+          { id: "specs", label: "Specs", rows: rowsOf([["Capacity / Grade", match.grade_capacity], ["Product cost", match.product_cost], ["Lead time", match.lead_time], ["Support details", match.support_details], ["Cost remarks", match.cost_remarks]]) },
+          { id: "deployment", label: "Deployment", rows: rowsOf([["Geography", parseArray(match.geographies)], ["Location availability", match.location_availability], ["Audience", match.audience], ["Contact details", match.preferred_contact_details || match.contact_details]]) },
+          { id: "documents", label: "Documents", documents, media: media.filter((item) => item.kind === "image"), note: documents.length ? "" : "No documents added." },
+          { id: "provider", label: "Provider", rows: providerRows }
+        ];
+      }
+      if (kind === "knowledge") {
+        return [
+          { id: "overview", label: "Overview", intro: match.about_offering_text || match.solution?.about_solution_text, rows: commonRows, cards: summaryBullets(match, kind).map((body, index) => ({ title: index === 0 ? "What you will learn" : `Learning point ${index + 1}`, body })) },
+          { id: "media", label: "Media", media, documents, note: !media.length && !documents.length ? "No media resources added." : "" },
+          { id: "step-by-step", label: "Step-by-step", cards: summaryBullets(match, kind).map((body, index) => ({ title: `Step ${index + 1}`, body })) },
+          { id: "downloads", label: "Downloads", documents, note: documents.length ? "" : "No downloadable guides added." },
+          { id: "provider", label: "Provider", rows: providerRows }
+        ];
+      }
+      return [
+        { id: "overview", label: "Overview", intro: match.about_offering_text || match.solution?.about_solution_text, rows: commonRows, cards: summaryBullets(match, kind).map((body, index) => ({ title: index === 0 ? "Service use case" : `Outcome ${index + 1}`, body })) },
+        { id: "training-format", label: "Training format", rows: rowsOf([["Trainer", match.trainer_name], ["Trainer details", match.trainer_details_text], ["Duration", match.duration], ["Delivery mode", match.delivery_mode], ["Training venue", match.geographies || match.location_availability], ["Languages", match.languages]]) },
+        { id: "costs", label: "Costs", rows: rowsOf([["Service cost", match.service_cost], ["Cost remarks", match.cost_remarks], ["Support post service", match.support_post_service], ["Support post service cost", match.support_post_service_cost]]) },
+        { id: "eligibility", label: "Eligibility", rows: rowsOf([["Prerequisites", match.prerequisites], ["Certification offered", match.certification_offered], ["Audience", match.audience], ["Contact details", match.preferred_contact_details || match.contact_details]]), documents, media },
+        { id: "provider", label: "Provider", rows: providerRows }
+      ];
+    }
+
+    function renderTabs(tabs) {
+      const first = tabs[0]?.id || "overview";
+      return `<section class="offering-tabs-card" id="offering-detail-tabs">
+        <div class="offering-tab-list" role="tablist" aria-label="Offering detail sections">
+          ${tabs.map((tab) => `<button class="offering-tab-button ${tab.id === first ? "active" : ""}" type="button" role="tab" aria-selected="${tab.id === first ? "true" : "false"}" data-tab="${esc(tab.id)}">${esc(tab.label)}</button>`).join("")}
+        </div>
+        ${tabs.map((tab) => `<div class="offering-tab-panel" data-panel="${esc(tab.id)}" ${tab.id === first ? "" : "hidden"}>
+          ${tab.intro ? `<p class="section-copy">${esc(tab.intro)}</p>` : ""}
+          ${tab.cards?.length ? `<div class="offering-tab-card-grid">${tab.cards.map((card) => `<article class="offering-tab-info-card"><h3>${esc(card.title)}</h3><p>${esc(card.body)}</p></article>`).join("")}</div>` : ""}
+          ${renderRows(tab.rows)}
+          ${renderMedia(tab.media)}
+          ${renderDocuments(tab.documents)}
+          ${tab.note ? `<div class="offering-note">${esc(tab.note)}</div>` : ""}
+        </div>`).join("")}
+      </section>`;
+    }
+
+    function wireTabs() {
+      document.querySelectorAll("[data-tab]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const tab = button.getAttribute("data-tab");
+          document.querySelectorAll("[data-tab]").forEach((item) => {
+            const active = item.getAttribute("data-tab") === tab;
+            item.classList.toggle("active", active);
+            item.setAttribute("aria-selected", active ? "true" : "false");
+          });
+          document.querySelectorAll("[data-panel]").forEach((panel) => {
+            panel.hidden = panel.getAttribute("data-panel") !== tab;
+          });
+        });
+      });
+    }
+
     function renderDetail(match) {
       const offeringName = normalizeText(match.offering_name || match.solution?.solution_name || "Unnamed offering");
       const heroCopy = normalizeText(match.about_offering_text || match.solution?.about_solution_text || "No description is available for this offering yet.");
-      const solutionText = normalizeText(match.solution?.about_solution_text || match.about_offering_text || "No additional solution description is available.");
       const greHref = normalizeText(match.gre_link || "");
-      const { primaryRows, secondaryRows } = buildOfferingRows(match);
-      const providerRows = buildProviderRows(match);
-      const solutionImage = normalizeText(match.solution?.solution_image_url || "");
+      const kind = offeringKind(match);
+      const providerRows = buildProviderRows(match).map(([label, value]) => ({ label, value: formatValue(value) }));
+      const providerName = providerRows.find((row) => row.label === "Provider")?.value || "Solution Provider";
+      const providerEmail = providerRows.find((row) => row.label === "Email")?.value || "";
+      const documents = buildDocuments(match, kind);
+      const media = buildMedia(match);
+      const quickCards = buildQuickCards(match, kind, providerName, documents, media);
+      const tabs = buildTabs(match, kind, providerRows, documents, media);
+      const chips = chipList(match, kind);
+      const primaryDoc = documents[0];
+      const primaryImage = media.find((item) => item.kind === "image");
+      const featured = media.find((item) => item.kind === "video" || item.kind === "external");
+      const hasHeroMedia = Boolean(primaryDoc || primaryImage);
+      const knowledgeContentUrl = kind === "knowledge" ? (primaryDoc?.url || media.find((item) => item.kind === "external")?.url || "") : "";
+      const summaryTitle = kind === "product" ? "What this product helps with" : kind === "knowledge" ? "What you will learn" : "What this service helps with";
+      const snapshotTitle = kind === "product" ? "Provider snapshot" : kind === "knowledge" ? "Knowledge source snapshot" : "Trainer & provider snapshot";
 
       document.body.classList.toggle("embedded-offering-detail", isEmbedded);
       mount.className = "";
       mount.innerHTML = `
-        <section class="hero">
-          ${isEmbedded ? "" : `<div class="detail-hero-top">
-            <div class="detail-hero-actions-left">
-              ${greHref ? `<a class="btn hero-link" href="${esc(greHref)}" target="_blank" rel="noreferrer">View on GRE</a>` : ""}
+        <section class="offering-action-hero offering-${esc(kind)}${hasHeroMedia ? "" : " offering-hero-no-media"}">
+          <div class="offering-hero-copy">
+            <div class="offering-hero-topbar">
+              <p class="offering-page-kicker">${kind === "product" ? "Product Offering View" : kind === "knowledge" ? "Knowledge Offering View" : "Service Offering View"}</p>
+              ${isEmbedded ? "" : `<a class="offering-hero-back" href="./">Back to Search</a>`}
             </div>
-            <a class="btn hero-link detail-hero-back" href="./">Back to Search</a>
-          </div>`}
-          <div class="detail-hero-main">
-            <div class="detail-hero-copy">
               <h1>${esc(offeringName)}</h1>
-              <p class="hero-copy">${esc(heroCopy)}</p>
+              <p>${esc(heroCopy)}</p>
+              <div class="offering-chip-row">${chips.map((chip) => `<span>${esc(chip)}</span>`).join("")}</div>
             </div>
-            ${solutionImage ? `<div class="detail-hero-image-wrap"><img class="detail-hero-image" src="${esc(solutionImage)}" alt="${esc(offeringName || "Offering image")}" /></div>` : ""}
+          ${hasHeroMedia ? `<div class="offering-hero-media">
+            ${primaryImage ? `<figure class="offering-hero-image-card"><img src="${esc(primaryImage.url)}" alt="${esc(primaryImage.title || offeringName)}" referrerpolicy="no-referrer" /><figcaption>${esc(primaryImage.title || offeringName)}</figcaption></figure>` : ""}
+            ${primaryDoc ? `<a class="offering-hero-doc-card" href="${esc(primaryDoc.url)}" target="_blank" rel="noreferrer"><span>${esc(primaryDoc.typeLabel)}</span><strong>${esc(primaryDoc.title)}</strong><small>Open resource</small></a>` : ""}
+          </div>
+          ` : ""}
+          <div class="offering-hero-actions" aria-label="Offering actions">
+            ${providerEmail ? `<a class="offering-cta offering-cta-primary" href="mailto:${esc(providerEmail)}">Email Provider</a>` : `<span class="offering-cta offering-cta-secondary">Email unavailable</span>`}
+            ${kind === "knowledge" ? `<a class="offering-cta offering-cta-soft" href="${esc(knowledgeContentUrl || "#offering-detail-tabs")}" ${knowledgeContentUrl ? `target="_blank" rel="noreferrer"` : ""}>${knowledgeContentUrl ? "View content" : "Read overview"}</a>` : ""}
+            ${primaryDoc ? `<a class="offering-cta offering-cta-soft" href="${esc(primaryDoc.url)}" target="_blank" rel="noreferrer">${kind === "knowledge" ? "Download guide" : "Download brochure"}</a>` : ""}
+            ${greHref ? `<a class="offering-cta offering-cta-outline" href="${esc(greHref)}" target="_blank" rel="noreferrer">View on GRE</a>` : ""}
           </div>
         </section>
-        <section class="detail-stack" style="margin-top:24px">
-          ${solutionText ? `<section class="panel panel-pad">
-            <h2 class="section-title">About the Solution</h2>
-            <p class="section-copy" style="margin-bottom:0">${esc(solutionText)}</p>
-          </section>` : ""}
-          <section class="detail-grid">
-            <section class="stack">
-              <section class="panel panel-pad">
-                <h2 class="section-title">Offering Category</h2>
-                <p class="section-copy">Only the parameters relevant to this ${esc(normalizeText(match.offering_group || "offering").toLowerCase())} offering are shown below.</p>
-                <table class="detail-table"><tbody>${primaryRows.map(([label, value]) => buildRow(label, value)).join("") || `<tr><th>Offering Category</th><td>Not available</td></tr>`}</tbody></table>
-              </section>
-              ${secondaryRows.length ? `<section class="panel panel-pad">
-                <h2 class="section-title">Offering Details</h2>
-                <table class="detail-table"><tbody>${secondaryRows.map(([label, value]) => buildRow(label, value)).join("")}</tbody></table>
-              </section>` : ""}
-            </section>
-            <section class="stack">
-              <section class="panel panel-pad">
-                <h2 class="section-title">Provider and Solution</h2>
-                <table class="detail-table"><tbody>${providerRows.map(([label, value]) => buildRow(label, value)).join("") || `<tr><th>Provider and Solution</th><td>Not available</td></tr>`}</tbody></table>
-              </section>
-            </section>
-          </section>
+        ${featured || documents.length || media.filter((item) => item.kind === "image").length ? `<section class="offering-featured-media" id="media">
+          <div><p class="offering-section-kicker">Embedded content and resources</p><h2>Media and documents</h2></div>
+          <div class="offering-featured-media-grid">
+            ${featured ? `<div class="offering-featured-player">${featured.kind === "video" && featured.embedUrl ? `<iframe src="${esc(featured.embedUrl)}" title="${esc(featured.title)}" allow="fullscreen; accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>` : featured.kind === "video" ? `<video controls preload="metadata"><source src="${esc(featured.url)}" /></video>` : `<a class="offering-external-media-card" href="${esc(featured.url)}" target="_blank" rel="noreferrer"><span>External content</span><strong>${esc(featured.title || offeringName)}</strong><small>Open video or learning page</small></a>`}</div>` : ""}
+            <div class="offering-featured-resource-list">
+              ${documents.map((doc) => `<a class="offering-featured-resource" href="${esc(doc.url)}" target="_blank" rel="noreferrer"><span>${esc(doc.typeLabel)}</span><strong>${esc(doc.title)}</strong><small>Open resource</small></a>`).join("")}
+              ${media.filter((item) => item.kind === "image").slice(0, 4).map((image) => `<a class="offering-featured-resource offering-featured-image-link" href="${esc(image.url)}" target="_blank" rel="noreferrer"><img src="${esc(image.url)}" alt="${esc(image.title)}" referrerpolicy="no-referrer" /><strong>${esc(image.title)}</strong></a>`).join("")}
+            </div>
+          </div>
+        </section>` : ""}
+        <section class="offering-quick-grid">${quickCards.map((card) => `<article class="offering-quick-card"><span>${esc(card.label)}</span><strong>${esc(card.value)}</strong></article>`).join("")}</section>
+        <section class="offering-summary-grid">
+          <section class="offering-summary-card"><h2>${esc(summaryTitle)}</h2><div class="offering-help-list">${summaryBullets(match, kind).map((bullet) => `<div><span>OK</span><p>${esc(bullet)}</p></div>`).join("")}</div></section>
+          <section class="offering-summary-card"><h2>${esc(snapshotTitle)}</h2><div class="offering-snapshot-rows">${providerRows.slice(0, 7).map((row) => `<div><span>${esc(row.label)}</span><strong>${isLinkValue(row.value) ? `<a href="${esc(row.value)}" target="_blank" rel="noreferrer">${esc(row.value)}</a>` : esc(row.value)}</strong></div>`).join("")}</div></section>
         </section>
+        ${renderTabs(tabs)}
         ${isEmbedded ? "" : `<div class="page-bottom-actions">
           <a class="btn hero-link" href="./">Back to Search</a>
         </div>`}
       `;
+      wireTabs();
     }
 
     async function loadFromSupabase() {
