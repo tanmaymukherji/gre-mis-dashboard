@@ -734,6 +734,65 @@
       font-weight: 600;
     }
 
+    .edit-location-row {
+      display: flex;
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .edit-location-row input {
+      flex: 1 1 auto;
+    }
+
+    .edit-location-row button {
+      flex: 0 0 auto;
+      border: 1px solid var(--brand);
+      border-radius: 12px;
+      padding: 8px 14px;
+      background: var(--brand);
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .edit-location-row button:hover {
+      background: var(--brand-dark);
+    }
+
+    .edit-location-hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.4;
+    }
+
+    .edit-location-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: #e4f3e4;
+      color: #1f6b3a;
+      border: 1px solid rgba(31, 107, 58, 0.16);
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .edit-location-chip button {
+      width: 18px;
+      height: 18px;
+      border: 0;
+      border-radius: 999px;
+      background: rgba(31, 107, 58, 0.14);
+      color: #1f6b3a;
+      cursor: pointer;
+      font: inherit;
+      line-height: 1;
+      padding: 0;
+    }
+
     .edit-section-divider {
       font-weight: 700;
       font-size: 0.85rem;
@@ -1038,10 +1097,19 @@
             <input id="editTags" placeholder="e.g. training, renewable, solar" />
             <div id="editTagsDisplay" class="edit-tags-area"></div>
           </label>
-          <label class="wide">
-            <span>Geographies (semicolon-separated)</span>
-            <textarea id="editGeographies" rows="2" placeholder="e.g. Patna, Bihar, India; Ranchi, Jharkhand, India"></textarea>
-          </label>
+          <div class="wide">
+            <label>
+              <span>Geographies</span>
+              <div class="edit-location-row">
+                <input id="editGeographySearch" list="editGeographySuggestions" placeholder="Search block, city, state, or country" autocomplete="off" />
+                <button type="button" id="addEditGeographyBtn">Add Location</button>
+              </div>
+            </label>
+            <datalist id="editGeographySuggestions"></datalist>
+            <p class="edit-location-hint">Choose from LGD suggestions. Manual text is not saved. India can be added for country-wide offerings.</p>
+            <input type="hidden" id="editGeographies" />
+            <div id="editGeographiesDisplay" class="edit-tags-area"></div>
+          </div>
         </div>
       </div>
       <p id="editModalStatus" class="modal-status"></p>
@@ -1089,6 +1157,9 @@
           mySolutionsTitle: "मेरे समाधान",
         }
       };
+      var editGeographiesState = [];
+      var editGeographySuggestions = ["India"];
+      var editGeographySearchTimer = null;
 
       function getStoredLanguage() {
         return localStorage.getItem("grameee-solution-form-lang") === "hi" ? "hi" : "en";
@@ -1684,8 +1755,7 @@
         var tags = Array.isArray(p.tags) ? p.tags.join(", ") : "";
         document.getElementById("editTags").value = tags;
         renderEditTags(tags);
-        var geos = Array.isArray(p.geographies) ? p.geographies.join("; ") : "";
-        document.getElementById("editGeographies").value = geos;
+        setEditGeographies(Array.isArray(p.geographies) ? p.geographies : []);
         document.getElementById("editModalStatus").textContent = "";
         toggleEditCategorySections();
         document.getElementById("editModal").classList.remove("hidden");
@@ -1699,6 +1769,114 @@
 
       document.getElementById("editTags").addEventListener("input", function() {
         renderEditTags(this.value);
+      });
+
+      function normalizeLocation(value) {
+        return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+      }
+
+      function uniqueLocations(values) {
+        var seen = new Set();
+        return (values || []).map(function(value) { return String(value || "").trim(); }).filter(function(value) {
+          var key = normalizeLocation(value);
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
+
+      function isAllowedEditGeography(value) {
+        var key = normalizeLocation(value);
+        if (!key) return false;
+        if (key === "india") return true;
+        return editGeographySuggestions.some(function(option) {
+          return normalizeLocation(option) === key;
+        });
+      }
+
+      function renderEditGeographySuggestions() {
+        var datalist = document.getElementById("editGeographySuggestions");
+        datalist.innerHTML = editGeographySuggestions.map(function(option) {
+          return '<option value="' + esc(option) + '"></option>';
+        }).join("");
+      }
+
+      function renderEditGeographies() {
+        document.getElementById("editGeographies").value = editGeographiesState.join("; ");
+        var area = document.getElementById("editGeographiesDisplay");
+        if (!editGeographiesState.length) {
+          area.innerHTML = '<span class="edit-location-chip">No LGD geography added yet</span>';
+          return;
+        }
+        area.innerHTML = editGeographiesState.map(function(location, index) {
+          return '<span class="edit-location-chip">' + esc(location) + '<button type="button" data-remove-edit-geography="' + index + '" aria-label="Remove ' + esc(location) + '">&times;</button></span>';
+        }).join("");
+      }
+
+      function setEditGeographies(values) {
+        editGeographiesState = uniqueLocations(values);
+        editGeographySuggestions = uniqueLocations(["India"].concat(editGeographiesState));
+        renderEditGeographySuggestions();
+        renderEditGeographies();
+      }
+
+      async function refreshEditGeographySuggestions(query) {
+        var clean = String(query || "").trim();
+        if (clean.length < 2) {
+          editGeographySuggestions = uniqueLocations(["India"].concat(editGeographiesState));
+          renderEditGeographySuggestions();
+          return;
+        }
+        try {
+          var response = await fetch("https://grameee.org/api/lgd/s.php?q=" + encodeURIComponent(clean), { cache: "no-store" });
+          var data = await response.json();
+          var rows = Array.isArray(data) ? data : (Array.isArray(data.results) ? data.results : []);
+          var labels = rows.map(function(row) {
+            if (typeof row === "string") return row;
+            return row.label || row.name || row.display_name || row.location || row.full_name || "";
+          }).filter(Boolean);
+          editGeographySuggestions = uniqueLocations(["India"].concat(editGeographiesState).concat(labels));
+          renderEditGeographySuggestions();
+        } catch (error) {
+          editGeographySuggestions = uniqueLocations(["India"].concat(editGeographiesState));
+          renderEditGeographySuggestions();
+        }
+      }
+
+      document.getElementById("editGeographySearch").addEventListener("input", function() {
+        var value = this.value;
+        clearTimeout(editGeographySearchTimer);
+        editGeographySearchTimer = setTimeout(function() {
+          refreshEditGeographySuggestions(value);
+        }, 220);
+      });
+
+      document.getElementById("addEditGeographyBtn").addEventListener("click", function() {
+        var input = document.getElementById("editGeographySearch");
+        var value = input.value.trim();
+        var statusEl = document.getElementById("editModalStatus");
+        if (!value) {
+          statusEl.textContent = "Search and choose a geography before adding.";
+          return;
+        }
+        if (!isAllowedEditGeography(value)) {
+          statusEl.textContent = "Please choose a matching LGD suggestion. Manual geography text is not saved.";
+          return;
+        }
+        editGeographiesState = uniqueLocations(editGeographiesState.concat([value]));
+        editGeographySuggestions = uniqueLocations(["India"].concat(editGeographiesState).concat(editGeographySuggestions));
+        input.value = "";
+        statusEl.textContent = "";
+        renderEditGeographySuggestions();
+        renderEditGeographies();
+      });
+
+      document.getElementById("editGeographiesDisplay").addEventListener("click", function(event) {
+        var button = event.target.closest("[data-remove-edit-geography]");
+        if (!button) return;
+        var index = Number(button.dataset.removeEditGeography);
+        editGeographiesState.splice(index, 1);
+        renderEditGeographies();
       });
 
       document.getElementById("closeEditModal").addEventListener("click", function() { closeEditModal(); });
@@ -1741,8 +1919,8 @@
           var tagsStr = document.getElementById("editTags").value;
           var tags = tagsStr.split(",").map(function(t) { return t.trim(); }).filter(Boolean);
 
-          var geosStr = document.getElementById("editGeographies").value;
-          var geographies = geosStr.split(";").map(function(g) { return g.trim(); }).filter(Boolean);
+          var geographies = editGeographiesState.slice();
+          if (!geographies.length) throw new Error("Please add at least one LGD geography.");
 
           var langsStr = document.getElementById("editLanguages").value;
           var languages = langsStr.split(",").map(function(l) { return l.trim(); }).filter(Boolean);
