@@ -442,6 +442,7 @@
         <button type="button" class="lang-btn active" data-lang="en">English</button>
         <button type="button" class="lang-btn" data-lang="hi">Hindi</button>
         <button type="button" id="myRequestsBtn" class="lang-btn my-requests-btn">My Help Requests</button>
+        <button type="button" id="myOrganisationBtn" class="lang-btn my-requests-btn hidden">My Organisation</button>
       </div>
     </section>
 
@@ -466,6 +467,27 @@
       <div id="requestsList" class="request-grid">
         <div>Loading your help requests...</div>
       </div>
+    </section>
+
+    <section id="organisationShell" class="requests-shell hidden">
+      <div class="requests-top">
+        <div>
+          <p class="eyebrow" style="color:var(--hero);margin:0 0 4px">Organisation Access</p>
+          <h2 style="margin:0">My Organisation</h2>
+          <p id="organisationMeta" style="margin:6px 0 0;color:var(--muted)">Only approved organisation admins can update roles.</p>
+        </div>
+        <select id="organisationSelect" class="requests-search" aria-label="Select organisation"></select>
+      </div>
+      <form id="organisationMemberForm" class="form-grid hidden">
+        <label><span>User Email</span><input id="organisationMemberEmail" type="email" required placeholder="name@example.org" /></label>
+        <label><span>Role</span><select id="organisationMemberRole"><option value="org_viewer">Viewer</option><option value="org_editor">Editor</option><option value="org_admin">Organisation Admin</option></select></label>
+        <label><span>Status</span><select id="organisationMemberStatus"><option value="approved">Approved</option><option value="pending">Pending</option><option value="revoked">Revoked</option></select></label>
+        <div class="wide modal-footer" style="justify-content:flex-start">
+          <button type="submit" class="save">Add / Update Member</button>
+          <span id="organisationMemberStatusText" style="color:var(--muted)"></span>
+        </div>
+      </form>
+      <div id="organisationMembersList" class="request-grid"></div>
     </section>
   </div>
 
@@ -534,10 +556,12 @@
       const iframe = document.getElementById("needFormFrame");
       const iframeBaseUrl = new URL("https://gre.grameee.org/?sharedForm=need&publicForm=need&grameeeEmbed=1&embedVersion=20260602lang7");
       const iframeOrigin = iframeBaseUrl.origin;
-      const languageButtons = [...document.querySelectorAll(".lang-btn")];
+      const languageButtons = [...document.querySelectorAll(".lang-btn:not(.my-requests-btn)")];
       const myRequestsBtn = document.getElementById("myRequestsBtn");
+      const myOrganisationBtn = document.getElementById("myOrganisationBtn");
       const submitShell = document.getElementById("submitShell");
       const requestsShell = document.getElementById("requestsShell");
+      const organisationShell = document.getElementById("organisationShell");
       const heroTitle = document.getElementById("heroTitle");
       const heroLede = document.getElementById("heroLede");
       let currentUser = null;
@@ -545,6 +569,10 @@
       let requestsCache = [];
       let requestsLoaded = false;
       let activeDetailsId = "";
+      let orgAccessLoaded = false;
+      let orgAccessLoading = false;
+      let orgAccessData = { organisations: [], memberships: [] };
+      let selectedOrganisationId = "";
       let editDeploymentState = [];
       let editDeploymentSuggestions = ["India"];
       let editDeploymentSearchTimer = null;
@@ -787,16 +815,118 @@
         currentView = "submit";
         submitShell.classList.remove("hidden");
         requestsShell.classList.add("hidden");
+        organisationShell.classList.add("hidden");
         myRequestsBtn.textContent = "My Help Requests";
+        myOrganisationBtn.textContent = "My Organisation";
       }
 
       function showRequestsView() {
         currentView = "requests";
         submitShell.classList.add("hidden");
         requestsShell.classList.remove("hidden");
+        organisationShell.classList.add("hidden");
         myRequestsBtn.textContent = "Back to Form";
+        myOrganisationBtn.textContent = "My Organisation";
         if (requestsLoaded) renderRequests();
         else loadRequests();
+      }
+
+      function showOrganisationView() {
+        currentView = "organisation";
+        submitShell.classList.add("hidden");
+        requestsShell.classList.add("hidden");
+        organisationShell.classList.remove("hidden");
+        myRequestsBtn.textContent = "My Help Requests";
+        myOrganisationBtn.textContent = "Back to Form";
+        if (orgAccessLoaded) renderOrganisationAccess();
+        else loadOrganisationAccess();
+      }
+
+      async function loadOrganisationAccess() {
+        if (orgAccessLoading) return;
+        orgAccessLoading = true;
+        const list = document.getElementById("organisationMembersList");
+        const meta = document.getElementById("organisationMeta");
+        list.innerHTML = '<div class="request-card">Loading organisation access...</div>';
+        try {
+          orgAccessData = await callEdge("fetchMyOrganisationAccess");
+          orgAccessLoaded = true;
+          if (!selectedOrganisationId && orgAccessData.organisations?.length) selectedOrganisationId = orgAccessData.organisations[0].id;
+          renderOrganisationAccess();
+          if (meta) meta.textContent = (orgAccessData.organisations || []).length ? "Only approved organisation admins can update roles." : "No organisation admin access found.";
+          myOrganisationBtn.classList.toggle("hidden", !(orgAccessData.organisations || []).length);
+        } catch (error) {
+          list.innerHTML = '<div class="request-card">Could not load organisation access. ' + esc(error.message) + '</div>';
+        } finally {
+          orgAccessLoading = false;
+        }
+      }
+
+      function getOrgRow(row) {
+        return Array.isArray(row.organisation) ? row.organisation[0] : row.organisation || {};
+      }
+
+      function roleLabel(role) {
+        return { org_admin: "Organisation Admin", org_editor: "Editor", org_viewer: "Viewer" }[role] || role || "Viewer";
+      }
+
+      function renderOrganisationAccess() {
+        const orgSelect = document.getElementById("organisationSelect");
+        const form = document.getElementById("organisationMemberForm");
+        const list = document.getElementById("organisationMembersList");
+        const orgs = orgAccessData.organisations || [];
+        if (!orgs.length) {
+          orgSelect.innerHTML = "";
+          form.classList.add("hidden");
+          list.innerHTML = '<div class="request-card">You are not an approved organisation admin yet.</div>';
+          return;
+        }
+        form.classList.remove("hidden");
+        orgSelect.innerHTML = orgs.map((org) => '<option value="' + esc(org.id) + '">' + esc(org.name || "Organisation") + '</option>').join("");
+        if (!selectedOrganisationId || !orgs.some((org) => org.id === selectedOrganisationId)) selectedOrganisationId = orgs[0].id;
+        orgSelect.value = selectedOrganisationId;
+        const members = (orgAccessData.memberships || []).filter((row) => row.organisation_id === selectedOrganisationId);
+        list.innerHTML = members.length ? members.map((row) => {
+          const org = getOrgRow(row);
+          return '<article class="request-card">\
+            <h3 style="margin:0">' + esc(row.user_email || "Member") + '</h3>\
+            <p style="margin:0;color:var(--muted)">' + esc(org.name || "") + '</p>\
+            <p style="margin:0;color:var(--muted)">' + esc(roleLabel(row.role)) + ' &middot; ' + esc(row.status || "pending") + '</p>\
+            <div class="card-actions">\
+              <select class="requests-search" data-org-member-role="' + esc(row.id) + '">\
+                <option value="org_viewer"' + (row.role === "org_viewer" ? " selected" : "") + '>Viewer</option>\
+                <option value="org_editor"' + (row.role === "org_editor" ? " selected" : "") + '>Editor</option>\
+                <option value="org_admin"' + (row.role === "org_admin" ? " selected" : "") + '>Organisation Admin</option>\
+              </select>\
+              <select class="requests-search" data-org-member-status="' + esc(row.id) + '">\
+                <option value="approved"' + (row.status === "approved" ? " selected" : "") + '>Approved</option>\
+                <option value="pending"' + (row.status === "pending" ? " selected" : "") + '>Pending</option>\
+                <option value="revoked"' + (row.status === "revoked" ? " selected" : "") + '>Revoked</option>\
+              </select>\
+              <button class="primary" type="button" data-update-org-member="' + esc(row.id) + '">Update</button>\
+            </div>\
+          </article>';
+        }).join("") : '<div class="request-card">No members found for this organisation.</div>';
+      }
+
+      async function saveOrganisationMember(memberId) {
+        const statusText = document.getElementById("organisationMemberStatusText");
+        const existing = memberId ? (orgAccessData.memberships || []).find((row) => row.id === memberId) : null;
+        const email = existing ? existing.user_email : document.getElementById("organisationMemberEmail").value.trim().toLowerCase();
+        const role = memberId ? document.querySelector('[data-org-member-role="' + CSS.escape(memberId) + '"]').value : document.getElementById("organisationMemberRole").value;
+        const status = memberId ? document.querySelector('[data-org-member-status="' + CSS.escape(memberId) + '"]').value : document.getElementById("organisationMemberStatus").value;
+        if (statusText) statusText.textContent = "Saving organisation member...";
+        await callEdge("updateMyOrganisationMember", {
+          membershipId: memberId || "",
+          organisation_id: selectedOrganisationId,
+          user_email: email,
+          role,
+          status,
+        });
+        if (statusText) statusText.textContent = "Organisation member updated.";
+        document.getElementById("organisationMemberForm").reset();
+        orgAccessLoaded = false;
+        await loadOrganisationAccess();
       }
 
       async function loadRequests() {
@@ -923,6 +1053,43 @@
         else showRequestsView();
       });
 
+      myOrganisationBtn.addEventListener("click", async () => {
+        currentUser = await getCurrentUser();
+        if (!currentUser) {
+          const authLink = document.querySelector("[data-auth-link]");
+          authLink?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+          return;
+        }
+        if (currentView === "organisation") showSubmitView();
+        else showOrganisationView();
+      });
+
+      document.getElementById("organisationSelect").addEventListener("change", (event) => {
+        selectedOrganisationId = event.target.value;
+        renderOrganisationAccess();
+      });
+
+      document.getElementById("organisationMemberForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          await saveOrganisationMember("");
+        } catch (error) {
+          const statusText = document.getElementById("organisationMemberStatusText");
+          if (statusText) statusText.textContent = "Error: " + error.message;
+        }
+      });
+
+      document.getElementById("organisationMembersList").addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-update-org-member]");
+        if (!button) return;
+        try {
+          await saveOrganisationMember(button.dataset.updateOrgMember || "");
+        } catch (error) {
+          const statusText = document.getElementById("organisationMemberStatusText");
+          if (statusText) statusText.textContent = "Error: " + error.message;
+        }
+      });
+
       document.querySelectorAll("[data-close-modal]").forEach((button) => {
         button.addEventListener("click", () => document.getElementById(button.dataset.closeModal).classList.add("hidden"));
       });
@@ -1042,6 +1209,13 @@
       document.addEventListener("grameee:auth-updated", () => {
         currentUser = null;
         requestsLoaded = false;
+        orgAccessLoaded = false;
+        orgAccessData = { organisations: [], memberships: [] };
+        myOrganisationBtn.classList.add("hidden");
+        getCurrentUser().then((user) => {
+          currentUser = user;
+          if (currentUser) loadOrganisationAccess();
+        });
         postContextToFrame();
       });
       window.addEventListener("message", (event) => {
@@ -1061,6 +1235,10 @@
       ensureIframeLanguage(getStoredLanguage());
       applyLanguage(getStoredLanguage());
       postContextToFrame();
+      getCurrentUser().then((user) => {
+        currentUser = user;
+        if (currentUser) loadOrganisationAccess();
+      });
     });
   </script>
 </body>

@@ -9951,6 +9951,99 @@ async function fetchOrganisationMemberships(userCtx: { user: Record<string, unkn
   return { ok: true, memberships: data || [] };
 }
 
+async function fetchMyOrganisationAccess(userCtx: { user: Record<string, unknown> }) {
+  const memberships = await getApprovedOrgMemberships(userCtx);
+  const adminMemberships = memberships.filter((membership) => membership.role === "org_admin");
+  if (!adminMemberships.length) {
+    return { ok: true, organisations: [], memberships: [] };
+  }
+  const organisationIds = uniqueStrings(adminMemberships.map((membership) => membership.organisation_id));
+  const { data, error } = await adminClient
+    .from("gre_mis_organisation_memberships")
+    .select("id,organisation_id,user_id,user_email,role,status,requested_at,approved_at,notes,organisation:gre_mis_organisations(id,name,normalized_name,gre_trader_id)")
+    .in("organisation_id", organisationIds)
+    .order("requested_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return {
+    ok: true,
+    organisations: adminMemberships.map((membership) => ({
+      id: membership.organisation_id,
+      name: membership.organisation_name,
+      gre_trader_id: membership.gre_trader_id,
+      role: membership.role,
+    })),
+    memberships: data || [],
+  };
+}
+
+async function updateMyOrganisationMember(payload: Record<string, unknown>, userCtx: { user: Record<string, unknown> }) {
+  const actorMemberships = await getApprovedOrgMemberships(userCtx);
+  const organisationId = requireString(payload.organisation_id || payload.organization_id);
+  const membershipId = requireString(payload.membershipId || payload.id);
+  const userEmail = requireString(payload.user_email || payload.email).toLowerCase();
+  const userId = requireString(payload.user_id);
+  const role = requireString(payload.role) || "org_viewer";
+  const status = requireString(payload.status) || "pending";
+  if (!organisationId) throw new Error("Organisation is required.");
+  if (!userEmail && !membershipId) throw new Error("User email is required.");
+  if (!["org_admin", "org_editor", "org_viewer"].includes(role)) throw new Error("Invalid organisation role.");
+  if (!["pending", "approved", "rejected", "revoked"].includes(status)) throw new Error("Invalid membership status.");
+  const actorCanManage = actorMemberships.some((membership) => (
+    membership.organisation_id === organisationId &&
+    membership.status === "approved" &&
+    membership.role === "org_admin"
+  ));
+  if (!actorCanManage) throw new Error("Organisation admin access is required.");
+
+  let existing: Record<string, unknown> | null = null;
+  if (membershipId) {
+    const { data, error } = await adminClient
+      .from("gre_mis_organisation_memberships")
+      .select("*")
+      .eq("id", membershipId)
+      .eq("organisation_id", organisationId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error("Organisation membership not found.");
+    existing = data;
+  }
+
+  const targetEmail = requireString(userEmail || existing?.user_email).toLowerCase();
+  if (!targetEmail) throw new Error("User email is required.");
+  if (existing && requireString(existing.role) === "org_admin" && requireString(existing.status) === "approved") {
+    const downgradingAdmin = role !== "org_admin" || status !== "approved";
+    if (downgradingAdmin) {
+      const { count, error } = await adminClient
+        .from("gre_mis_organisation_memberships")
+        .select("id", { count: "exact", head: true })
+        .eq("organisation_id", organisationId)
+        .eq("role", "org_admin")
+        .eq("status", "approved");
+      if (error) throw new Error(error.message);
+      if ((count || 0) <= 1) throw new Error("At least one approved organisation admin is required.");
+    }
+  }
+
+  const row: Record<string, unknown> = {
+    organisation_id: organisationId,
+    user_email: targetEmail,
+    user_id: userId || existing?.user_id || null,
+    role,
+    status,
+    notes: requireString(payload.notes) || requireString(existing?.notes) || null,
+  };
+  if (["approved", "rejected", "revoked"].includes(status)) {
+    row.approved_at = new Date().toISOString();
+  }
+
+  const query = adminClient.from("gre_mis_organisation_memberships");
+  const { error } = membershipId
+    ? await query.update(row).eq("id", membershipId).eq("organisation_id", organisationId)
+    : await query.upsert(row, { onConflict: "organisation_id,user_email" });
+  if (error) throw new Error(error.message);
+  return { ok: true, message: "Organisation member updated." };
+}
+
 async function updateOrganisationMembership(payload: Record<string, unknown>, userCtx: { user: Record<string, unknown> }) {
   assertRoles(userCtx, ["admin", "moderator"], "Admin or moderator access is required.");
   const membershipId = requireString(payload.membershipId || payload.id);
@@ -9977,7 +10070,6 @@ async function updateOrganisationMembership(payload: Record<string, unknown>, us
     notes: requireString(payload.notes) || null,
   };
   if (["approved", "rejected", "revoked"].includes(status)) {
-    row.approved_by = requireString(userCtx.user.id) || null;
     row.approved_at = new Date().toISOString();
   }
   const query = adminClient.from("gre_mis_organisation_memberships");
@@ -11103,6 +11195,14 @@ Deno.serve(async (req) => {
 
     if (action === "updateOrganisationMembership") {
       return jsonResponse(await updateOrganisationMembership(payload, userCtx));
+    }
+
+    if (action === "fetchMyOrganisationAccess") {
+      return jsonResponse(await fetchMyOrganisationAccess(userCtx));
+    }
+
+    if (action === "updateMyOrganisationMember") {
+      return jsonResponse(await updateMyOrganisationMember(payload, userCtx));
     }
 
     if (action === "submitSignedInEdit") {

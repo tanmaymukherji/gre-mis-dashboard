@@ -874,6 +874,9 @@
           My Solutions
           <span id="mySolutionsBadge" class="my-solutions-badge hidden">0</span>
         </button>
+        <button type="button" id="myOrganisationToggleBtn" class="lang-btn my-solutions-btn hidden">
+          My Organisation
+        </button>
       </div>
     </section>
 
@@ -918,6 +921,50 @@
         </div>
         <p id="mySolutionsMeta" class="my-solutions-meta"></p>
         <div id="mySolutionsList" class="my-solutions-list"></div>
+      </div>
+    </section>
+
+    <section id="myOrganisationShell" class="frame-shell frame-shell-hidden">
+      <div class="my-solutions-shell">
+        <div class="my-solutions-header">
+          <div class="my-solutions-header-left">
+            <h2 class="my-solutions-title">My Organisation</h2>
+          </div>
+          <div class="my-solutions-header-right">
+            <select id="organisationSelect" class="filter-select"></select>
+          </div>
+        </div>
+        <p id="myOrganisationMeta" class="my-solutions-meta"></p>
+        <form id="organisationMemberForm" class="view-panel">
+          <p class="view-panel-subtitle">Add or update member</p>
+          <div class="form-grid">
+            <label>
+              <span>Email</span>
+              <input id="organisationMemberEmail" type="email" required />
+            </label>
+            <label>
+              <span>Role</span>
+              <select id="organisationMemberRole">
+                <option value="org_viewer">Viewer</option>
+                <option value="org_editor">Editor</option>
+                <option value="org_admin">Organisation Admin</option>
+              </select>
+            </label>
+            <label>
+              <span>Status</span>
+              <select id="organisationMemberStatus">
+                <option value="approved">Approved</option>
+                <option value="pending">Pending</option>
+                <option value="revoked">Revoked</option>
+              </select>
+            </label>
+          </div>
+          <div class="modal-footer" style="padding:12px 0 0">
+            <button type="submit" class="btn-modal btn-modal-primary">Save Member</button>
+          </div>
+          <p id="organisationMemberStatusText" class="my-solutions-meta"></p>
+        </form>
+        <div id="organisationMembersList" class="my-solutions-list"></div>
       </div>
     </section>
   </div>
@@ -1138,9 +1185,11 @@
       const iframeOrigin = iframeBaseUrl.origin;
       const languageButtons = [...document.querySelectorAll(".lang-btn:not(.my-solutions-btn)")];
       const mySolutionsBtn = document.getElementById("mySolutionsToggleBtn");
+      const myOrganisationBtn = document.getElementById("myOrganisationToggleBtn");
       const mySolutionsBadge = document.getElementById("mySolutionsBadge");
       const submitShell = document.getElementById("submitSolutionShell");
       const mySolutionsShell = document.getElementById("mySolutionsShell");
+      const myOrganisationShell = document.getElementById("myOrganisationShell");
       const backToSubmitBtn = document.getElementById("backToSubmitBtn");
       const heroTitle = document.getElementById("heroTitle");
       const heroLede = document.getElementById("heroLede");
@@ -1274,13 +1323,20 @@
       let mySolutionsLoaded = false;
       let mySolutionsLoading = false;
       let mySolutionsLoadedAt = 0;
+      let orgAccessLoaded = false;
+      let orgAccessLoading = false;
+      let orgAccessData = { organisations: [], memberships: [] };
+      let selectedOrganisationId = "";
 
       function showSubmitView() {
         currentView = "submit";
         submitShell.classList.remove("frame-shell-hidden");
         mySolutionsShell.classList.add("frame-shell-hidden");
+        myOrganisationShell.classList.add("frame-shell-hidden");
         mySolutionsBtn.classList.remove("active-view");
+        myOrganisationBtn.classList.remove("active-view");
         mySolutionsBtn.childNodes[0].nodeValue = "My Solutions ";
+        myOrganisationBtn.textContent = "My Organisation";
         heroTitle.textContent = copy[getStoredLanguage()].title;
         heroLede.textContent = copy[getStoredLanguage()].lede;
         updateUrl("");
@@ -1290,14 +1346,33 @@
         currentView = "my-solutions";
         submitShell.classList.add("frame-shell-hidden");
         mySolutionsShell.classList.remove("frame-shell-hidden");
+        myOrganisationShell.classList.add("frame-shell-hidden");
         mySolutionsBtn.classList.add("active-view");
+        myOrganisationBtn.classList.remove("active-view");
         mySolutionsBtn.childNodes[0].nodeValue = "Back to Form ";
+        myOrganisationBtn.textContent = "My Organisation";
         heroTitle.textContent = copy[getStoredLanguage()].mySolutionsTitle;
         heroLede.textContent = "View and manage your submitted solutions.";
         updateUrl("my-solutions");
         mySolutionsBadge.classList.add("hidden");
         if (mySolutionsLoaded) applyFiltersAndRender();
         else loadMySolutions();
+      }
+
+      function showMyOrganisationView() {
+        currentView = "my-organisation";
+        submitShell.classList.add("frame-shell-hidden");
+        mySolutionsShell.classList.add("frame-shell-hidden");
+        myOrganisationShell.classList.remove("frame-shell-hidden");
+        mySolutionsBtn.classList.remove("active-view");
+        mySolutionsBtn.childNodes[0].nodeValue = "My Solutions ";
+        myOrganisationBtn.classList.add("active-view");
+        myOrganisationBtn.textContent = "Back to Form";
+        heroTitle.textContent = "My Organisation";
+        heroLede.textContent = "Manage organisation members and roles for your approved organisation.";
+        updateUrl("my-organisation");
+        if (orgAccessLoaded) renderOrganisationAccess();
+        else loadOrganisationAccess();
       }
 
       function updateUrl(view) {
@@ -1775,6 +1850,102 @@
         return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
       }
 
+      async function loadOrganisationAccess() {
+        if (orgAccessLoading) return;
+        orgAccessLoading = true;
+        const list = document.getElementById("organisationMembersList");
+        const meta = document.getElementById("myOrganisationMeta");
+        list.innerHTML = '<div class="my-solutions-loading">Loading organisation access...</div>';
+        try {
+          orgAccessData = await callEdge("fetchMyOrganisationAccess");
+          orgAccessLoaded = true;
+          if (!selectedOrganisationId && orgAccessData.organisations?.length) {
+            selectedOrganisationId = orgAccessData.organisations[0].id;
+          }
+          renderOrganisationAccess();
+          if (meta) meta.textContent = (orgAccessData.organisations || []).length ? "Only approved organisation admins can update roles." : "No organisation admin access found.";
+        } catch (err) {
+          list.innerHTML = '<div class="my-solutions-empty"><p class="my-solutions-empty-text">Could not load organisation access. ' + esc(err.message) + '</p></div>';
+        } finally {
+          orgAccessLoading = false;
+        }
+      }
+
+      function getOrgRow(row) {
+        return Array.isArray(row.organisation) ? row.organisation[0] : row.organisation || {};
+      }
+
+      function roleLabel(role) {
+        return { org_admin: "Organisation Admin", org_editor: "Editor", org_viewer: "Viewer" }[role] || role || "Viewer";
+      }
+
+      function renderOrganisationAccess() {
+        const orgSelect = document.getElementById("organisationSelect");
+        const list = document.getElementById("organisationMembersList");
+        const form = document.getElementById("organisationMemberForm");
+        const orgs = orgAccessData.organisations || [];
+        if (!orgs.length) {
+          orgSelect.innerHTML = "";
+          form.classList.add("hidden");
+          list.innerHTML = '<div class="my-solutions-empty"><p class="my-solutions-empty-text">You are not an approved organisation admin yet.</p></div>';
+          return;
+        }
+        form.classList.remove("hidden");
+        orgSelect.innerHTML = orgs.map((org) => '<option value="' + esc(org.id) + '">' + esc(org.name || "Organisation") + '</option>').join("");
+        if (!selectedOrganisationId || !orgs.some((org) => org.id === selectedOrganisationId)) selectedOrganisationId = orgs[0].id;
+        orgSelect.value = selectedOrganisationId;
+        const members = (orgAccessData.memberships || []).filter((row) => row.organisation_id === selectedOrganisationId);
+        list.innerHTML = members.length ? members.map((row) => {
+          const org = getOrgRow(row);
+          return '<article class="solution-card">\
+            <div class="solution-card-top">\
+              <div class="solution-card-info">\
+                <h4 class="solution-card-name">' + esc(row.user_email || "Member") + '</h4>\
+                <p class="solution-card-category">' + esc(org.name || "") + '</p>\
+                <p class="solution-card-org">' + esc(roleLabel(row.role)) + ' &middot; ' + esc(row.status || "pending") + '</p>\
+              </div>\
+            </div>\
+            <div class="solution-card-actions solution-card-actions-bottom">\
+              <select class="filter-select" data-org-member-role="' + esc(row.id) + '">\
+                <option value="org_viewer"' + (row.role === "org_viewer" ? " selected" : "") + '>Viewer</option>\
+                <option value="org_editor"' + (row.role === "org_editor" ? " selected" : "") + '>Editor</option>\
+                <option value="org_admin"' + (row.role === "org_admin" ? " selected" : "") + '>Organisation Admin</option>\
+              </select>\
+              <select class="filter-select" data-org-member-status="' + esc(row.id) + '">\
+                <option value="approved"' + (row.status === "approved" ? " selected" : "") + '>Approved</option>\
+                <option value="pending"' + (row.status === "pending" ? " selected" : "") + '>Pending</option>\
+                <option value="revoked"' + (row.status === "revoked" ? " selected" : "") + '>Revoked</option>\
+              </select>\
+              <button class="btn-card btn-card-primary" type="button" data-update-org-member="' + esc(row.id) + '">Update</button>\
+            </div>\
+          </article>';
+        }).join("") : '<div class="my-solutions-empty"><p class="my-solutions-empty-text">No members found for this organisation.</p></div>';
+      }
+
+      async function saveOrganisationMember(memberId) {
+        const statusText = document.getElementById("organisationMemberStatusText");
+        const existing = memberId ? (orgAccessData.memberships || []).find((row) => row.id === memberId) : null;
+        const email = existing ? existing.user_email : document.getElementById("organisationMemberEmail").value.trim().toLowerCase();
+        const role = memberId
+          ? document.querySelector('[data-org-member-role="' + CSS.escape(memberId) + '"]').value
+          : document.getElementById("organisationMemberRole").value;
+        const status = memberId
+          ? document.querySelector('[data-org-member-status="' + CSS.escape(memberId) + '"]').value
+          : document.getElementById("organisationMemberStatus").value;
+        if (statusText) statusText.textContent = "Saving organisation member...";
+        await callEdge("updateMyOrganisationMember", {
+          membershipId: memberId || "",
+          organisation_id: selectedOrganisationId,
+          user_email: email,
+          role,
+          status,
+        });
+        if (statusText) statusText.textContent = "Organisation member updated.";
+        document.getElementById("organisationMemberForm").reset();
+        orgAccessLoaded = false;
+        await loadOrganisationAccess();
+      }
+
       function uniqueLocations(values) {
         var seen = new Set();
         return (values || []).map(function(value) { return String(value || "").trim(); }).filter(function(value) {
@@ -1998,10 +2169,18 @@
           mySolutionsBtn.classList.remove("hidden");
           mySolutionsBadge.textContent = "!";
           mySolutionsBadge.classList.remove("hidden");
+          try {
+            await loadOrganisationAccess();
+            if ((orgAccessData.organisations || []).length) myOrganisationBtn.classList.remove("hidden");
+          } catch {
+            myOrganisationBtn.classList.add("hidden");
+          }
         }
         const params = new URLSearchParams(window.location.search);
         if (params.get("view") === "my-solutions" && currentUser) {
           showMySolutionsView();
+        } else if (params.get("view") === "my-organisation" && currentUser) {
+          showMyOrganisationView();
         }
       }
 
@@ -2010,6 +2189,37 @@
       mySolutionsBtn.addEventListener("click", () => {
         if (currentView === "my-solutions") showSubmitView();
         else showMySolutionsView();
+      });
+
+      myOrganisationBtn.addEventListener("click", () => {
+        if (currentView === "my-organisation") showSubmitView();
+        else showMyOrganisationView();
+      });
+
+      document.getElementById("organisationSelect").addEventListener("change", (event) => {
+        selectedOrganisationId = event.target.value;
+        renderOrganisationAccess();
+      });
+
+      document.getElementById("organisationMemberForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          await saveOrganisationMember("");
+        } catch (error) {
+          const statusText = document.getElementById("organisationMemberStatusText");
+          if (statusText) statusText.textContent = "Error: " + error.message;
+        }
+      });
+
+      document.getElementById("organisationMembersList").addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-update-org-member]");
+        if (!button) return;
+        try {
+          await saveOrganisationMember(button.dataset.updateOrgMember || "");
+        } catch (error) {
+          const statusText = document.getElementById("organisationMemberStatusText");
+          if (statusText) statusText.textContent = "Error: " + error.message;
+        }
       });
 
       document.getElementById("mySolutionsSearch").addEventListener("input", applyFiltersAndRender);
@@ -2038,6 +2248,9 @@
       iframe.addEventListener("load", postContextToFrame);
       document.addEventListener("grameee:auth-updated", () => {
         currentUser = null;
+        orgAccessLoaded = false;
+        orgAccessData = { organisations: [], memberships: [] };
+        myOrganisationBtn.classList.add("hidden");
         initAuthAndView();
         postContextToFrame();
       });
