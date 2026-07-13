@@ -10075,11 +10075,22 @@ async function submitSignedInEdit(
   parentSubmissionId: string,
   updatedPayload: Record<string, unknown>,
   userCtx: { user: Record<string, unknown> },
+  grameeeUserSummary: unknown = null,
 ) {
   if (!parentSubmissionId) throw new Error("Parent submission ID is required.");
   const userId = requireString(userCtx.user.id);
   const userEmail = requireString(userCtx.user.email).toLowerCase();
   if (!userId && !userEmail) throw new Error("User identity not found.");
+  const summary = grameeeUserSummary && typeof grameeeUserSummary === "object"
+    ? grameeeUserSummary as Record<string, unknown>
+    : {};
+  const userOrganisation = normalizeOrgForMatch(
+    summary.organization ||
+    summary.organisation ||
+    summary.org ||
+    summary.organization_name ||
+    summary.organisation_name,
+  );
 
   if (parentSubmissionId.startsWith("local:")) {
     const localOfferingId = requireString(parentSubmissionId.replace(/^local:/, ""));
@@ -10100,9 +10111,17 @@ async function submitSignedInEdit(
     const solutionPayload = getStoredPayloadRecord(solutionRow?.raw_payload);
     const originalPayload = Object.keys(offeringPayload).length ? offeringPayload : solutionPayload;
     const ownerEmail = requireString(originalPayload.submitter_email || traderRow?.email).toLowerCase();
-    const actorRole = requireString(userCtx.user.role).toLowerCase();
-    const privileged = ["admin", "moderator"].includes(actorRole);
-    if (!privileged && ownerEmail && userEmail && ownerEmail !== userEmail) {
+    const privileged = isPrivilegedMySolutionsUser(userCtx, summary);
+    const traderOrg = normalizeOrgForMatch(traderRow?.organisation_name || traderRow?.trader_name);
+    const payloadOrg = normalizeOrgForMatch(originalPayload.organization_name || originalPayload.organizationName);
+    const updatedOrg = normalizeOrgForMatch(updatedPayload.organization_name || updatedPayload.organizationName);
+    const emailMatches = Boolean(ownerEmail && userEmail && ownerEmail === userEmail);
+    const orgMatches = Boolean(
+      userOrganisation &&
+      userOrganisation !== "individual" &&
+      [traderOrg, payloadOrg, updatedOrg].some((value) => value === userOrganisation),
+    );
+    if (!privileged && !emailMatches && !orgMatches) {
       throw new Error("Local solution not found or access denied.");
     }
 
@@ -10775,6 +10794,7 @@ Deno.serve(async (req) => {
         requireString(payload.parentSubmissionId),
         (payload.payload && typeof payload.payload === "object") ? payload.payload as Record<string, unknown> : {},
         userCtx,
+        payload.grameeeUserSummary,
       ));
     }
 
