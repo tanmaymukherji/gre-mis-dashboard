@@ -6319,6 +6319,22 @@ async function submitFormSubmission(
     trader = data;
   }
 
+  const organisationId = await ensureGreMisOrganisation(
+    trader ? requireString(trader.organisation_name || trader.trader_name) : organizationName,
+    trader ? requireString(trader.trader_id) : existingTraderId,
+    normalizedType === "solution" ? "solution_submission" : "need_submission",
+  );
+  if (sourceMode === "signed_in" && organisationId && submitterEmail) {
+    await upsertOrganisationMembership({
+      organisationId,
+      userId: userCtx?.user?.id,
+      userEmail: submitterEmail,
+      role: "org_viewer",
+      status: "pending",
+      notes: "Membership request created from signed-in public submission.",
+    });
+  }
+
   const submissionRow = {
     submission_type: normalizedType,
     source_mode: sourceMode === "signed_in" ? "signed_in" : "shared_link",
@@ -6327,6 +6343,7 @@ async function submitFormSubmission(
     submitter_phone: submitterPhone || null,
     submitter_user_id: requireString(userCtx?.user?.id) || null,
     organization_name: organizationName,
+    organisation_id: organisationId || null,
     existing_trader_id: trader ? requireString(trader.trader_id) : existingTraderId || null,
     existing_trader_name: trader ? requireString(trader.organisation_name || trader.trader_name) : existingTraderName || null,
     org_exists_on_gre: Boolean(trader),
@@ -6450,6 +6467,7 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       contact_person: requireString(payload.contact_person),
       seeker_email: requireString(payload.seeker_email).toLowerCase(),
       seeker_phone: requireString(payload.seeker_phone),
+      organisation_id: requireString(submission.organisation_id) || null,
       state: requireString(payload.state),
       district: requireString(payload.district),
       problem_statement: requireString(payload.problem_statement),
@@ -6502,6 +6520,7 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       })
       .eq("id", submissionId);
     if (approveError) throw new Error(approveError.message);
+    await approveSubmitterMembershipForSubmission(submission, payload);
     generateSuggestedQuestionsForNeed(nextNeedId, actorEmail).catch((questionError) => {
       console.warn("Suggested questions could not be prepared automatically:", questionError instanceof Error ? questionError.message : String(questionError));
     });
@@ -6563,6 +6582,7 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
       })
       .eq("id", submissionId);
     if (approveError) throw new Error(approveError.message);
+    await approveSubmitterMembershipForSubmission(submission, nextPayload);
     invalidateAskGreSearchCache().catch(() => undefined);
     return {
       ok: true,
@@ -9746,6 +9766,228 @@ function isPrivilegedMySolutionsUser(userCtx: { user: Record<string, unknown> },
   return ["admin", "moderator"].includes(role);
 }
 
+type GreMisOrgMembership = {
+  role: string;
+  status: string;
+  organisation_id: string;
+  organisation_name: string;
+  normalized_name: string;
+  gre_trader_id: string;
+};
+
+const ORG_ROLE_LEVELS: Record<string, number> = {
+  org_viewer: 1,
+  org_editor: 2,
+  org_admin: 3,
+};
+
+function orgRoleMeets(role: unknown, minimumRole: "org_viewer" | "org_editor" | "org_admin") {
+  return (ORG_ROLE_LEVELS[requireString(role)] || 0) >= ORG_ROLE_LEVELS[minimumRole];
+}
+
+async function getApprovedOrgMemberships(userCtx: { user: Record<string, unknown> }): Promise<GreMisOrgMembership[]> {
+  const userId = requireString(userCtx.user.id);
+  const userEmail = requireString(userCtx.user.email).toLowerCase();
+  if (!userId && !userEmail) return [];
+
+  const membershipMap = new Map<string, GreMisOrgMembership>();
+  const collect = (rows: Array<Record<string, unknown>> | null | undefined) => {
+    for (const row of rows || []) {
+      const orgRow = Array.isArray(row.organisation) ? row.organisation[0] : row.organisation;
+      const org = (orgRow && typeof orgRow === "object" ? orgRow : {}) as Record<string, unknown>;
+      const membership: GreMisOrgMembership = {
+        role: requireString(row.role),
+        status: requireString(row.status),
+        organisation_id: requireString(row.organisation_id),
+        organisation_name: requireString(org.name),
+        normalized_name: normalizeOrgForMatch(org.normalized_name || org.name),
+        gre_trader_id: requireString(org.gre_trader_id),
+      };
+      if (membership.status === "approved" && membership.organisation_id) {
+        membershipMap.set(`${membership.organisation_id}:${membership.role}`, membership);
+      }
+    }
+  };
+
+  if (userId) {
+    const { data, error } = await adminClient
+      .from("gre_mis_organisation_memberships")
+      .select("role,status,organisation_id,organisation:gre_mis_organisations(id,name,normalized_name,gre_trader_id)")
+      .eq("status", "approved")
+      .eq("user_id", userId);
+    if (error) throw new Error(error.message);
+    collect(data as Array<Record<string, unknown>>);
+  }
+  if (userEmail) {
+    const { data, error } = await adminClient
+      .from("gre_mis_organisation_memberships")
+      .select("role,status,organisation_id,organisation:gre_mis_organisations(id,name,normalized_name,gre_trader_id)")
+      .eq("status", "approved")
+      .eq("user_email", userEmail);
+    if (error) throw new Error(error.message);
+    collect(data as Array<Record<string, unknown>>);
+  }
+  return Array.from(membershipMap.values());
+}
+
+function membershipMatches(
+  memberships: GreMisOrgMembership[],
+  input: { organisationId?: unknown; organisationNames?: unknown[]; traderIds?: unknown[] },
+  minimumRole: "org_viewer" | "org_editor" | "org_admin" = "org_viewer",
+) {
+  const organisationId = requireString(input.organisationId);
+  const orgNames = (input.organisationNames || []).map(normalizeOrgForMatch).filter(Boolean);
+  const traderIds = (input.traderIds || []).map(requireString).filter(Boolean);
+  return memberships.some((membership) => {
+    if (!orgRoleMeets(membership.role, minimumRole)) return false;
+    if (organisationId && membership.organisation_id === organisationId) return true;
+    if (membership.gre_trader_id && traderIds.includes(membership.gre_trader_id)) return true;
+    if (membership.normalized_name && orgNames.includes(membership.normalized_name)) return true;
+    return false;
+  });
+}
+
+async function ensureGreMisOrganisation(
+  organisationName: unknown,
+  traderId: unknown = "",
+  source: unknown = "gre_mis",
+) {
+  const name = requireString(organisationName);
+  const normalizedName = normalizeOrgForMatch(name);
+  if (!normalizedName) return "";
+  const greTraderId = requireString(traderId);
+  const { data: existing, error: existingError } = await adminClient
+    .from("gre_mis_organisations")
+    .select("id, gre_trader_id")
+    .eq("normalized_name", normalizedName)
+    .maybeSingle();
+  if (existingError) throw new Error(existingError.message);
+  if (existing) {
+    if (greTraderId && !requireString(existing.gre_trader_id)) {
+      await adminClient
+        .from("gre_mis_organisations")
+        .update({ gre_trader_id: greTraderId })
+        .eq("id", existing.id);
+    }
+    return requireString(existing.id);
+  }
+  const { data, error } = await adminClient
+    .from("gre_mis_organisations")
+    .insert({
+      name,
+      normalized_name: normalizedName,
+      gre_trader_id: greTraderId || null,
+      source: requireString(source) || "gre_mis",
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return requireString(data.id);
+}
+
+async function upsertOrganisationMembership(input: {
+  organisationId: unknown;
+  userId?: unknown;
+  userEmail?: unknown;
+  role?: unknown;
+  status?: unknown;
+  approvedBy?: unknown;
+  notes?: unknown;
+}) {
+  const organisationId = requireString(input.organisationId);
+  const userEmail = requireString(input.userEmail).toLowerCase();
+  if (!organisationId || !userEmail) return;
+  const role = requireString(input.role) || "org_viewer";
+  const status = requireString(input.status) || "pending";
+  const row: Record<string, unknown> = {
+    organisation_id: organisationId,
+    user_id: requireString(input.userId) || null,
+    user_email: userEmail,
+    role,
+    status,
+    requested_by: requireString(input.userId) || null,
+    notes: requireString(input.notes) || null,
+  };
+  if (status === "approved") {
+    row.approved_by = requireString(input.approvedBy) || null;
+    row.approved_at = new Date().toISOString();
+  }
+  const { error } = await adminClient
+    .from("gre_mis_organisation_memberships")
+    .upsert(row, { onConflict: "organisation_id,user_email" });
+  if (error) throw new Error(error.message);
+}
+
+async function approveSubmitterMembershipForSubmission(
+  submission: Record<string, unknown>,
+  payload: Record<string, unknown>,
+) {
+  const submitterEmail = requireString(submission.submitter_email || payload.submitter_email || payload.submitterEmail).toLowerCase();
+  if (requireString(submission.source_mode) !== "signed_in" || !submitterEmail) return;
+  const organisationId = requireString(submission.organisation_id) || await ensureGreMisOrganisation(
+    submission.organization_name || payload.organization_name || payload.organizationName,
+    submission.existing_trader_id || payload.existing_trader_id || payload.existingTraderId,
+    "approved_submission",
+  );
+  if (!organisationId) return;
+  await upsertOrganisationMembership({
+    organisationId,
+    userId: submission.submitter_user_id,
+    userEmail: submitterEmail,
+    role: "org_admin",
+    status: "approved",
+    notes: "Approved automatically when signed-in organisation submission was approved by GramEEE admin.",
+  });
+}
+
+async function fetchOrganisationMemberships(userCtx: { user: Record<string, unknown> }) {
+  assertRoles(userCtx, ["admin", "moderator"], "Admin or moderator access is required.");
+  const { data, error } = await adminClient
+    .from("gre_mis_organisation_memberships")
+    .select("id,organisation_id,user_id,user_email,role,status,requested_at,approved_at,notes,organisation:gre_mis_organisations(id,name,normalized_name,gre_trader_id)")
+    .order("requested_at", { ascending: false })
+    .limit(500);
+  if (error) throw new Error(error.message);
+  return { ok: true, memberships: data || [] };
+}
+
+async function updateOrganisationMembership(payload: Record<string, unknown>, userCtx: { user: Record<string, unknown> }) {
+  assertRoles(userCtx, ["admin", "moderator"], "Admin or moderator access is required.");
+  const membershipId = requireString(payload.membershipId || payload.id);
+  const organisationName = requireString(payload.organization_name || payload.organisation_name || payload.organisationName);
+  const traderId = requireString(payload.gre_trader_id || payload.trader_id);
+  const userEmail = requireString(payload.user_email || payload.email).toLowerCase();
+  const userId = requireString(payload.user_id);
+  const role = requireString(payload.role) || "org_viewer";
+  const status = requireString(payload.status) || "pending";
+  if (!["org_admin", "org_editor", "org_viewer"].includes(role)) throw new Error("Invalid organisation role.");
+  if (!["pending", "approved", "rejected", "revoked"].includes(status)) throw new Error("Invalid membership status.");
+
+  let organisationId = requireString(payload.organisation_id || payload.organization_id);
+  if (!organisationId) {
+    organisationId = await ensureGreMisOrganisation(organisationName, traderId, "admin_membership");
+  }
+  if (!organisationId || !userEmail) throw new Error("Organisation and user email are required.");
+  const row: Record<string, unknown> = {
+    organisation_id: organisationId,
+    user_id: userId || null,
+    user_email: userEmail,
+    role,
+    status,
+    notes: requireString(payload.notes) || null,
+  };
+  if (["approved", "rejected", "revoked"].includes(status)) {
+    row.approved_by = requireString(userCtx.user.id) || null;
+    row.approved_at = new Date().toISOString();
+  }
+  const query = adminClient.from("gre_mis_organisation_memberships");
+  const { error } = membershipId
+    ? await query.update(row).eq("id", membershipId)
+    : await query.upsert(row, { onConflict: "organisation_id,user_email" });
+  if (error) throw new Error(error.message);
+  return { ok: true, message: "Organisation membership updated." };
+}
+
 function localOfferingToMySolutionRecord(offering: Record<string, unknown>) {
   const solutionRow = Array.isArray(offering.solution) ? offering.solution[0] : offering.solution;
   const traderRow = Array.isArray(offering.trader) ? offering.trader[0] : offering.trader;
@@ -9839,6 +10081,7 @@ async function fetchMySolutions(userCtx: { user: Record<string, unknown> }, gram
     summary.organisation_name,
   );
   const isPrivilegedUser = isPrivilegedMySolutionsUser(userCtx, summary);
+  const orgMemberships = await getApprovedOrgMemberships(userCtx);
 
   // Only released solutions are shown here. Edits are stored as pending
   // approval records and should not appear as live My Solutions cards.
@@ -9918,27 +10161,37 @@ async function fetchMySolutions(userCtx: { user: Record<string, unknown> }, gram
   });
   const visibleSubmissions = (submissions || []).filter((submission: Record<string, unknown>) => {
     const payload = (submission.payload || {}) as Record<string, unknown>;
-    const rowOrg = normalizeOrgForMatch(submission.organization_name);
-    const traderOrg = normalizeOrgForMatch(submission.existing_trader_name);
-    const payloadOrg = normalizeOrgForMatch(payload.organization_name || payload.organizationName);
-    if (userOrganisation && userOrganisation !== "individual") {
-      return [rowOrg, traderOrg, payloadOrg].some((value) => value === userOrganisation);
-    }
     const ownerUserId = requireString(submission.submitter_user_id);
     const ownerEmail = requireString(submission.submitter_email).toLowerCase();
-    return Boolean((userId && ownerUserId === userId) || (userEmail && ownerEmail === userEmail));
+    const ownerMatches = Boolean((userId && ownerUserId === userId) || (userEmail && ownerEmail === userEmail));
+    const membershipAllows = membershipMatches(orgMemberships, {
+      organisationId: submission.organisation_id,
+      organisationNames: [
+        submission.organization_name,
+        submission.existing_trader_name,
+        payload.organization_name,
+        payload.organizationName,
+      ],
+      traderIds: [submission.existing_trader_id, payload.existing_trader_id, payload.existingTraderId],
+    });
+    return Boolean(ownerMatches || membershipAllows);
   });
   const visibleLocalOfferings = (localOfferingResult.data || []).filter((offering: Record<string, unknown>) => {
     if (isPrivilegedUser && !userOrganisation) return true;
     const traderRow = Array.isArray(offering.trader) ? offering.trader[0] : offering.trader;
     const rawPayload = getStoredPayloadRecord(offering.raw_payload);
-    const rowOrg = normalizeOrgForMatch(traderRow?.organisation_name || traderRow?.trader_name);
-    const payloadOrg = normalizeOrgForMatch(rawPayload.organization_name || rawPayload.organizationName);
-    if (userOrganisation && userOrganisation !== "individual") {
-      return [rowOrg, payloadOrg].some((value) => value === userOrganisation);
-    }
     const submitterEmail = requireString(rawPayload.submitter_email || traderRow?.email).toLowerCase();
-    return Boolean(userEmail && submitterEmail === userEmail);
+    const emailAllows = Boolean(userEmail && submitterEmail === userEmail);
+    const membershipAllows = membershipMatches(orgMemberships, {
+      organisationNames: [
+        traderRow?.organisation_name,
+        traderRow?.trader_name,
+        rawPayload.organization_name,
+        rawPayload.organizationName,
+      ],
+      traderIds: [offering.trader_id, rawPayload.existing_trader_id, rawPayload.existingTraderId],
+    });
+    return Boolean(emailAllows || membershipAllows);
   });
 
   // resolve parent submission names for edit chain display
@@ -10084,13 +10337,7 @@ async function submitSignedInEdit(
   const summary = grameeeUserSummary && typeof grameeeUserSummary === "object"
     ? grameeeUserSummary as Record<string, unknown>
     : {};
-  const userOrganisation = normalizeOrgForMatch(
-    summary.organization ||
-    summary.organisation ||
-    summary.org ||
-    summary.organization_name ||
-    summary.organisation_name,
-  );
+  const orgMemberships = await getApprovedOrgMemberships(userCtx);
 
   if (parentSubmissionId.startsWith("local:")) {
     const localOfferingId = requireString(parentSubmissionId.replace(/^local:/, ""));
@@ -10116,12 +10363,11 @@ async function submitSignedInEdit(
     const payloadOrg = normalizeOrgForMatch(originalPayload.organization_name || originalPayload.organizationName);
     const updatedOrg = normalizeOrgForMatch(updatedPayload.organization_name || updatedPayload.organizationName);
     const emailMatches = Boolean(ownerEmail && userEmail && ownerEmail === userEmail);
-    const orgMatches = Boolean(
-      userOrganisation &&
-      userOrganisation !== "individual" &&
-      [traderOrg, payloadOrg, updatedOrg].some((value) => value === userOrganisation),
-    );
-    if (!privileged && !emailMatches && !orgMatches) {
+    const memberCanEdit = membershipMatches(orgMemberships, {
+      organisationNames: [traderOrg, payloadOrg, updatedOrg],
+      traderIds: [offering.trader_id, originalPayload.existing_trader_id, originalPayload.existingTraderId],
+    }, "org_editor");
+    if (!privileged && !emailMatches && !memberCanEdit) {
       throw new Error("Local solution not found or access denied.");
     }
 
@@ -10134,6 +10380,7 @@ async function submitSignedInEdit(
       edit_source: "local_mis_offering",
     };
     const organizationName = requireString(updatedPayload.organization_name || originalPayload.organization_name || traderRow?.organisation_name || traderRow?.trader_name);
+    const organisationId = await ensureGreMisOrganisation(organizationName, offering.trader_id, "local_mis_offering_edit");
     const submitterName = requireString(updatedPayload.submitter_name || originalPayload.submitter_name || traderRow?.poc_name || userCtx.user.full_name);
     const submitterEmail = requireString(updatedPayload.submitter_email || originalPayload.submitter_email || traderRow?.email || userEmail).toLowerCase();
     const submitterPhone = requireString(updatedPayload.submitter_phone || originalPayload.submitter_phone || traderRow?.mobile);
@@ -10147,6 +10394,7 @@ async function submitSignedInEdit(
         submitter_phone: submitterPhone || null,
         submitter_user_id: userId || null,
         organization_name: organizationName,
+        organisation_id: organisationId || null,
         existing_trader_id: requireString(offering.trader_id) || null,
         existing_trader_name: organizationName || null,
         org_exists_on_gre: Boolean(requireString(offering.trader_id)),
@@ -10170,12 +10418,27 @@ async function submitSignedInEdit(
     .select("*")
     .eq("id", parentSubmissionId)
     .eq("submission_type", "solution");
-  if (userId) parentQuery.eq("submitter_user_id", userId);
-  else parentQuery.eq("submitter_email", userEmail);
   const { data: parent } = await parentQuery.single();
   if (!parent) throw new Error("Parent submission not found or access denied.");
 
   const parentPayload = (parent.payload || {}) as Record<string, unknown>;
+  const parentOwnerMatches = Boolean(
+    (userId && requireString(parent.submitter_user_id) === userId) ||
+    (userEmail && requireString(parent.submitter_email).toLowerCase() === userEmail),
+  );
+  const parentMemberCanEdit = membershipMatches(orgMemberships, {
+    organisationId: parent.organisation_id,
+    organisationNames: [
+      parent.organization_name,
+      parent.existing_trader_name,
+      parentPayload.organization_name,
+      parentPayload.organizationName,
+    ],
+    traderIds: [parent.existing_trader_id, parentPayload.existing_trader_id, parentPayload.existingTraderId],
+  }, "org_editor");
+  if (!isPrivilegedMySolutionsUser(userCtx, summary) && !parentOwnerMatches && !parentMemberCanEdit) {
+    throw new Error("Parent submission not found or access denied.");
+  }
   const currentVersion = (parent.local_edit_version ?? 0) as number + 1;
 
   // Merge: updatedPayload overrides parentPayload
@@ -10191,6 +10454,11 @@ async function submitSignedInEdit(
       submitter_phone: requireString(updatedPayload.submitter_phone || parent.submitter_phone),
       submitter_user_id: userId || parent.submitter_user_id || null,
       organization_name: requireString(updatedPayload.organization_name || parent.organization_name),
+      organisation_id: requireString(parent.organisation_id) || await ensureGreMisOrganisation(
+        updatedPayload.organization_name || parent.organization_name,
+        updatedPayload.existing_trader_id || parent.existing_trader_id,
+        "signed_in_solution_edit",
+      ) || null,
       existing_trader_id: requireString(updatedPayload.existing_trader_id || parent.existing_trader_id),
       existing_trader_name: requireString(updatedPayload.existing_trader_name || parent.existing_trader_name),
       org_exists_on_gre: parent.org_exists_on_gre ?? false,
@@ -10212,16 +10480,7 @@ async function fetchMyHelpRequests(userCtx: { user: Record<string, unknown> }, g
   const userId = requireString(userCtx.user.id);
   const userEmail = requireString(userCtx.user.email).toLowerCase();
   if (!userId && !userEmail) throw new Error("User identity not found.");
-  const summary = grameeeUserSummary && typeof grameeeUserSummary === "object"
-    ? grameeeUserSummary as Record<string, unknown>
-    : {};
-  const userOrganisation = normalizeOrgForMatch(
-    summary.organization ||
-    summary.organisation ||
-    summary.org ||
-    summary.organization_name ||
-    summary.organisation_name,
-  );
+  const orgMemberships = await getApprovedOrgMemberships(userCtx);
   const [needResult, submissionResult] = await Promise.all([
     adminClient
       .from("gre_mis_needs")
@@ -10232,7 +10491,7 @@ async function fetchMyHelpRequests(userCtx: { user: Record<string, unknown> }, g
       .limit(500),
     adminClient
       .from("gre_mis_form_submissions")
-      .select("id, target_need_id, submitter_user_id, submitter_email, submitter_name, submitter_phone, organization_name, payload, created_at, updated_at")
+      .select("id, target_need_id, submitter_user_id, submitter_email, submitter_name, submitter_phone, organization_name, organisation_id, payload, created_at, updated_at")
       .eq("submission_type", "need")
       .eq("approval_status", "approved")
       .not("target_need_id", "is", null)
@@ -10254,13 +10513,15 @@ async function fetchMyHelpRequests(userCtx: { user: Record<string, unknown> }, g
       return { need, linked, payload };
     })
     .filter(({ need, linked, payload }) => {
-      const orgMatches = userOrganisation && userOrganisation !== "individual"
-        ? [
-          normalizeOrgForMatch(need.organization_name),
-          normalizeOrgForMatch(linked?.organization_name),
-          normalizeOrgForMatch(payload.organization_name),
-        ].some((value) => value === userOrganisation)
-        : false;
+      const orgMatches = membershipMatches(orgMemberships, {
+        organisationId: need.organisation_id || linked?.organisation_id,
+        organisationNames: [
+          need.organization_name,
+          linked?.organization_name,
+          payload.organization_name,
+        ],
+        traderIds: [payload.existing_trader_id, payload.existingTraderId],
+      });
       const emailMatches = userEmail
         ? [
           requireString(need.seeker_email).toLowerCase(),
@@ -10321,7 +10582,13 @@ async function submitSignedInNeedEdit(
   const ownsByEmail = userEmail && requireString(need.seeker_email).toLowerCase() === userEmail;
   const ownsByUserId = userId && requireString(need.submitter_user_id) === userId;
   const privilegedActor = actorRole === "admin" || actorRole === "moderator";
-  if (!privilegedActor && !ownsByEmail && !ownsByUserId) {
+  const orgMemberships = await getApprovedOrgMemberships(userCtx);
+  const memberCanEdit = membershipMatches(orgMemberships, {
+    organisationId: need.organisation_id,
+    organisationNames: [need.organization_name, updatedPayload.organization_name],
+    traderIds: [updatedPayload.existing_trader_id, updatedPayload.existingTraderId],
+  }, "org_editor");
+  if (!privilegedActor && !ownsByEmail && !ownsByUserId && !memberCanEdit) {
     throw new Error("Help request not found or access denied.");
   }
   const submitterEmail = requireString(updatedPayload.seeker_email || need.seeker_email || userEmail).toLowerCase();
@@ -10340,6 +10607,11 @@ async function submitSignedInNeedEdit(
     local_parent_need_id: normalizedNeedId,
     gre_writeback_requested: false,
   };
+  const organisationId = requireString(need.organisation_id) || await ensureGreMisOrganisation(
+    editPayload.organization_name,
+    updatedPayload.existing_trader_id || updatedPayload.existingTraderId,
+    "signed_in_need_edit",
+  );
   const { data, error: insertError } = await adminClient
     .from("gre_mis_form_submissions")
     .insert({
@@ -10350,6 +10622,7 @@ async function submitSignedInNeedEdit(
       submitter_phone: requireString(editPayload.seeker_phone) || null,
       submitter_user_id: userId || null,
       organization_name: requireString(editPayload.organization_name),
+      organisation_id: organisationId || null,
       payload: editPayload,
       parent_submission_id: null,
       target_need_id: normalizedNeedId,
@@ -10493,21 +10766,39 @@ async function fetchSolutionOutreach(userCtx: { user: Record<string, unknown> })
   // Get user's submission IDs and offering IDs
   const subQuery = adminClient
     .from("gre_mis_form_submissions")
-    .select("id, existing_trader_id, existing_trader_name, submitter_email, payload")
-    .eq("submission_type", "solution");
-  if (userId) subQuery.eq("submitter_user_id", userId);
-  else subQuery.eq("submitter_email", userEmail);
+    .select("id, organisation_id, organization_name, existing_trader_id, existing_trader_name, submitter_user_id, submitter_email, payload")
+    .eq("submission_type", "solution")
+    .limit(500);
   const { data: submissions } = await subQuery;
   if (!submissions) return { ok: true, offering_views: [], email_logs: [] };
+  const orgMemberships = await getApprovedOrgMemberships(userCtx);
+  const visibleSubmissions = (submissions as Array<Record<string, unknown>>).filter((submission) => {
+    const payload = (submission.payload || {}) as Record<string, unknown>;
+    const ownerMatches = Boolean(
+      (userId && requireString(submission.submitter_user_id) === userId) ||
+      (userEmail && requireString(submission.submitter_email).toLowerCase() === userEmail),
+    );
+    const membershipAllows = membershipMatches(orgMemberships, {
+      organisationId: submission.organisation_id,
+      organisationNames: [
+        submission.organization_name,
+        submission.existing_trader_name,
+        payload.organization_name,
+        payload.organizationName,
+      ],
+      traderIds: [submission.existing_trader_id, payload.existing_trader_id, payload.existingTraderId],
+    });
+    return ownerMatches || membershipAllows;
+  });
 
-  const submissionIds = (submissions as Array<Record<string, unknown>>).map((s) => s.id);
-  const traderEmails = (submissions as Array<Record<string, unknown>>)
+  const submissionIds = visibleSubmissions.map((s) => s.id);
+  const traderEmails = visibleSubmissions
     .map((s) => {
       const p = (s.payload || {}) as Record<string, unknown>;
       return requireString(p.submitter_email || s.submitter_email);
     })
     .filter(Boolean);
-  const submitterEmails = (submissions as Array<Record<string, unknown>>)
+  const submitterEmails = visibleSubmissions
     .map((s) => requireString(s.submitter_email))
     .filter(Boolean);
   const allEmails = [...new Set([...traderEmails, ...submitterEmails, userEmail])];
@@ -10546,14 +10837,31 @@ async function deleteMySubmission(submissionId: string, userCtx: { user: Record<
   // Verify ownership and only allow deletion of pending_admin submissions
   const query = adminClient
     .from("gre_mis_form_submissions")
-    .select("id, approval_status")
+    .select("id, approval_status, submitter_user_id, submitter_email, organization_name, organisation_id, existing_trader_id, existing_trader_name, payload")
     .eq("id", submissionId)
     .eq("submission_type", "solution");
-  if (userId) query.eq("submitter_user_id", userId);
-  else query.eq("submitter_email", userEmail);
   const { data: sub } = await query.single();
   if (!sub) throw new Error("Submission not found or access denied.");
   if (sub.approval_status !== "pending_admin") throw new Error("Only pending submissions can be deleted.");
+  const payload = (sub.payload || {}) as Record<string, unknown>;
+  const ownsByUser = Boolean(
+    (userId && requireString(sub.submitter_user_id) === userId) ||
+    (userEmail && requireString(sub.submitter_email).toLowerCase() === userEmail),
+  );
+  const orgMemberships = await getApprovedOrgMemberships(userCtx);
+  const orgAdminCanDelete = membershipMatches(orgMemberships, {
+    organisationId: sub.organisation_id,
+    organisationNames: [
+      sub.organization_name,
+      sub.existing_trader_name,
+      payload.organization_name,
+      payload.organizationName,
+    ],
+    traderIds: [sub.existing_trader_id, payload.existing_trader_id, payload.existingTraderId],
+  }, "org_admin");
+  if (!ownsByUser && !orgAdminCanDelete) {
+    throw new Error("Submission not found or access denied.");
+  }
 
   const { error } = await adminClient.from("gre_mis_form_submissions").delete().eq("id", submissionId);
   if (error) throw new Error(error.message);
@@ -10787,6 +11095,14 @@ Deno.serve(async (req) => {
 
     if (action === "fetchMyHelpRequests") {
       return jsonResponse(await fetchMyHelpRequests(userCtx, payload.grameeeUserSummary));
+    }
+
+    if (action === "fetchOrganisationMemberships") {
+      return jsonResponse(await fetchOrganisationMemberships(userCtx));
+    }
+
+    if (action === "updateOrganisationMembership") {
+      return jsonResponse(await updateOrganisationMembership(payload, userCtx));
     }
 
     if (action === "submitSignedInEdit") {
