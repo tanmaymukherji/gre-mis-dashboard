@@ -44,6 +44,11 @@ const greSiteOrigin = Deno.env.get("GRE_SITE_ORIGIN") ?? "https://greenruralecon
 const greMasterLogin = Deno.env.get("GRE_MASTER_LOGIN") ?? "";
 const greMasterTenant = Deno.env.get("GRE_MASTER_TENANT") ?? "green_rural_economy";
 const greMasterPassword = Deno.env.get("GRE_MASTER_PASSWORD") ?? "";
+const greGovernorLogin = Deno.env.get("GRE_GOVERNOR_LOGIN") ?? greMasterLogin;
+const greGovernorTenant = Deno.env.get("GRE_GOVERNOR_TENANT") ?? greMasterTenant;
+const greGovernorPassword = Deno.env.get("GRE_GOVERNOR_PASSWORD") ?? greMasterPassword;
+const greTraderCredentialsJson = Deno.env.get("GRE_TRADER_CREDENTIALS_JSON") ?? "{}";
+const greTraderCredentialsBase64 = Deno.env.get("GRE_TRADER_CREDENTIALS_BASE64") ?? "";
 const greTemporaryUserPassword = Deno.env.get("GRE_TEMP_USER_PASSWORD") ?? "gre@1234";
 const greMarketId = Deno.env.get("GRE_MARKET_ID") ?? "5";
 const greChannelId = Deno.env.get("GRE_CHANNEL_ID") ?? "4";
@@ -81,6 +86,41 @@ function jsonResponse(body: unknown, status = 200) {
 
 function requireString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+type GreLoginCredentials = {
+  userLogin: string;
+  tenantLogin: string;
+  password: string;
+};
+
+function getGreTraderCredentials(traderId: string, tenantLoginFallback: string): GreLoginCredentials {
+  let registry: Record<string, unknown> = {};
+  try {
+    const registryJson = greTraderCredentialsBase64
+      ? atob(greTraderCredentialsBase64)
+      : greTraderCredentialsJson;
+    const parsed = JSON.parse(registryJson);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      registry = parsed as Record<string, unknown>;
+    }
+  } catch {
+    throw new Error("GRE trader credential registry is not valid JSON.");
+  }
+  const entry = registry[traderId];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new Error(`GRE credentials are not configured for trader ${traderId}.`);
+  }
+  const record = entry as Record<string, unknown>;
+  const credentials = {
+    userLogin: requireString(record.userLogin) || greGovernorLogin,
+    tenantLogin: requireString(record.tenantLogin) || tenantLoginFallback,
+    password: requireString(record.password),
+  };
+  if (!credentials.userLogin || !credentials.tenantLogin || !credentials.password) {
+    throw new Error(`GRE credentials are incomplete for trader ${traderId}.`);
+  }
+  return credentials;
 }
 
 function normalizeEmailList(value: unknown): string[] {
@@ -948,12 +988,10 @@ function buildStyledTrackerHtml({
 </Workbook>`;
 }
 
-async function loginToGre(tenantLoginOverride?: string) {
-  if (!greMasterLogin || !greMasterPassword || !greMasterTenant) {
-    throw new Error("GRE master credentials are not configured in Supabase secrets.");
+async function loginToGreWithCredentials(credentials: GreLoginCredentials): Promise<string> {
+  if (!credentials.userLogin || !credentials.password || !credentials.tenantLogin) {
+    throw new Error("GRE login credentials are incomplete in Supabase secrets.");
   }
-
-  const tenantLogin = tenantLoginOverride ?? greMasterTenant;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
   try {
@@ -965,9 +1003,9 @@ async function loginToGre(tenantLoginOverride?: string) {
         Referer: `${greSiteOrigin}/`,
       },
       body: JSON.stringify({
-        userLogin: greMasterLogin,
-        tenantLogin,
-        password: greMasterPassword,
+        userLogin: credentials.userLogin,
+        tenantLogin: credentials.tenantLogin,
+        password: credentials.password,
       }),
       signal: controller.signal,
     });
@@ -987,21 +1025,29 @@ async function loginToGre(tenantLoginOverride?: string) {
   }
 }
 
+async function loginToGre(): Promise<string> {
+  return loginToGreWithCredentials({
+    userLogin: greGovernorLogin,
+    tenantLogin: greGovernorTenant,
+    password: greGovernorPassword,
+  });
+}
+
 async function loginToGreForTrader(
   ctx: { greTraderId: string; tenantLoginCandidate: string },
   localOfferingId: string,
   actorEmail: string,
 ): Promise<string> {
-  const tenantLogin = ctx.tenantLoginCandidate;
+  const credentials = getGreTraderCredentials(ctx.greTraderId, ctx.tenantLoginCandidate);
   try {
-    const sid = await loginToGre(tenantLogin);
+    const sid = await loginToGreWithCredentials(credentials);
     await logGreSyncEvent({
       localOfferingId,
       action: "login_retry",
-      step: "login_attempt_c1",
+      step: "trader_login",
       httpStatus: 200,
       actorEmail,
-      errorSanitised: JSON.stringify({ tenantLogin, result: "ok" }),
+      errorSanitised: JSON.stringify({ traderId: ctx.greTraderId, tenantLogin: credentials.tenantLogin, result: "ok" }),
     }).catch(() => {});
     return sid;
   } catch (err) {
@@ -1009,10 +1055,10 @@ async function loginToGreForTrader(
     await logGreSyncEvent({
       localOfferingId,
       action: "login_retry",
-      step: "login_attempt_c1",
+      step: "trader_login",
       httpStatus: 0,
       actorEmail,
-      errorSanitised: JSON.stringify({ tenantLogin, error: message.slice(0, 300) }),
+      errorSanitised: JSON.stringify({ traderId: ctx.greTraderId, tenantLogin: credentials.tenantLogin, error: message.slice(0, 300) }),
     }).catch(() => {});
     throw err;
   }
@@ -1178,6 +1224,44 @@ async function requestGreGatewayJson(
     }
     throw err;
   }
+}
+
+function extractGreReportRows(data: unknown): Record<string, unknown>[] {
+  if (Array.isArray(data)) return data.filter((row) => row && typeof row === "object") as Record<string, unknown>[];
+  if (!data || typeof data !== "object") return [];
+  const record = data as Record<string, unknown>;
+  const rows = Array.isArray(record.content)
+    ? record.content
+    : (record.data && typeof record.data === "object" && Array.isArray((record.data as Record<string, unknown>).content))
+    ? (record.data as Record<string, unknown>).content
+    : [];
+  return rows.filter((row) => row && typeof row === "object") as Record<string, unknown>[];
+}
+
+async function verifyGreTraderSessionScope(sessionId: string, traderId: string) {
+  const path = `/commons-report-service/api/v3/datasets/name/GET_SOLUTION_FOR_TENANT_OR_MARKET_GOVERNOR/execute?page=0&size=20&params=${encodeURIComponent(`MARKET_ID=${greMarketId}`)}`;
+  const { data } = await requestGreGatewayJson(path, "GET", undefined, sessionId);
+  const rows = extractGreReportRows(data);
+  const unexpectedTraderIds = [...new Set(rows
+    .map((row) => row.solutionTraderId === null || row.solutionTraderId === undefined ? "" : String(row.solutionTraderId).trim())
+    .filter((value) => value && value !== traderId))];
+  if (unexpectedTraderIds.length > 0) {
+    throw new Error(`GRE trader session scope mismatch for trader ${traderId}.`);
+  }
+  return { rowCount: rows.length, verifiedTraderId: traderId };
+}
+
+async function findGreSolutionInGovernorReport(sessionId: string, solutionId: number) {
+  const pageSize = 100;
+  for (let page = 0; page < 25; page += 1) {
+    const path = `/commons-report-service/api/v3/datasets/name/GET_SOLUTION_FOR_TENANT_OR_MARKET_GOVERNOR/execute?page=${page}&size=${pageSize}&params=${encodeURIComponent(`MARKET_ID=${greMarketId}`)}`;
+    const { data } = await requestGreGatewayJson(path, "GET", undefined, sessionId);
+    const rows = extractGreReportRows(data);
+    const match = rows.find((row) => parseNumber(row.solutionId, 0) === solutionId);
+    if (match) return match;
+    if (rows.length < pageSize) break;
+  }
+  return null;
 }
 
 async function fetchGreProductRefData(classCode: string, sessionId?: string) {
@@ -3483,6 +3567,15 @@ async function dryRunGreSolutionUpload(payload: Record<string, unknown>, actorEm
   // Resolve hierarchy (value chain / application)
   const traderContext = await resolveGreTraderContext(offering.trader_id);
   const sessionId = await loginToGreForTrader(traderContext, offeringId, actorEmail);
+  const traderSessionScope = await verifyGreTraderSessionScope(sessionId, traderContext.greTraderId);
+  await logGreSyncEvent({
+    localOfferingId: offeringId,
+    action: "dry_run",
+    step: "trader_session_verified",
+    httpStatus: 200,
+    verificationResult: traderSessionScope,
+    actorEmail,
+  });
   const genericProductId = parseNumber(payload.generic_product_id, 0);
   const genericApplicationId = parseNumber(payload.generic_application_id, 0);
 
@@ -3640,6 +3733,15 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
   const category = requireString(offering.offering_category);
   const traderContext = await resolveGreTraderContext(offering.trader_id);
   const traderSession = await loginToGreForTrader(traderContext, offeringId, actorEmail);
+  const traderSessionScope = await verifyGreTraderSessionScope(traderSession, traderContext.greTraderId);
+  await logGreSyncEvent({
+    localOfferingId: offeringId,
+    action: "create_solution",
+    step: "trader_session_verified",
+    httpStatus: 200,
+    verificationResult: traderSessionScope,
+    actorEmail,
+  });
   const governorSession = await loginToGre();
   const genericProductId = parseNumber(payload.generic_product_id, 0);
   const genericApplicationId = parseNumber(payload.generic_application_id, 0);
@@ -3786,6 +3888,37 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
     return { ok: true, dryRun: true, payload: bundle, message: "Dry-run complete — no GRE calls made" };
   }
 
+  const payloadHash = fingerprint(bundle.solutionCreate);
+  const { data: existingLink, error: existingLinkError } = await adminClient
+    .from("gre_solution_links")
+    .select("*")
+    .eq("local_offering_id", offeringId)
+    .maybeSingle();
+  if (existingLinkError) throw new Error(`Could not check GRE sync mapping: ${existingLinkError.message}`);
+  if (existingLink?.upload_state === "synced") {
+    return { ok: true, dryRun: false, message: "This offering is already synced to GRE.", link: existingLink };
+  }
+  if (existingLink && existingLink.upload_state !== "rolled_back") {
+    throw new Error(`A prior GRE sync attempt is in state "${existingLink.upload_state}". Reconcile it before retrying.`);
+  }
+  const { error: pendingLinkError } = await adminClient.from("gre_solution_links").upsert({
+    local_offering_id: offeringId,
+    local_solution_id: offering.solution_id,
+    local_submission_id: offering.submission_id,
+    local_trader_id: offering.trader_id,
+    gre_trader_id: bundle.greTraderId,
+    gre_solution_id: null,
+    gre_product_id: null,
+    gre_sku_id: null,
+    gre_channel_product_id: null,
+    payload_hash: payloadHash,
+    upload_state: "pending_create",
+    last_attempted_at: new Date().toISOString(),
+    uploaded_by_email: actorEmail,
+    manual_review_reason: null,
+  }, { onConflict: "local_offering_id" });
+  if (pendingLinkError) throw new Error(`Could not create GRE sync mapping: ${pendingLinkError.message}`);
+
   // ===== REAL EXECUTION (4 stages) =====
   let greSolutionId: number | null = null;
   let greProductId: number | null = null;
@@ -3880,9 +4013,8 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
     if (finalStatus !== "SOLUTION_STATUS.PUBLISHED") {
       throw new Error(`Read-back verify failed after approve: status = ${finalStatus}`);
     }
-    // Also check report
-    const { data: report } = await requestGreGatewayJson("/commons-report-service/api/v3/datasets/name/GET_SOLUTION_FOR_TENANT_OR_MARKET_GOVERNOR/execute?page=0&size=10&params=MARKET_ID%3D5", "GET", undefined, governorSession);
-    const reportRow = (Array.isArray((report as Record<string, unknown>)?.content) ? (report as Record<string, unknown>).content : []).find((r: Record<string, unknown>) => r.solutionId === greSolutionId);
+    // Also check the paginated market-governor report.
+    const reportRow = await findGreSolutionInGovernorReport(governorSession, greSolutionId);
     const marketStatus = reportRow ? requireString(reportRow.marketSolutionStatus) : "";
     if (marketStatus !== "TMA_CHANNEL_SOLUTION_PUBLISH_STATUS.PUBLISHED") {
       throw new Error(`Report verify failed: marketSolutionStatus = ${marketStatus}`);
@@ -3907,23 +4039,34 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
 
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    await logGreSyncEvent({ localOfferingId: offeringId, action: "create_solution", step: "compensating_delete", httpStatus: 0, errorSanitised: msg, actorEmail });
-
-    // Compensating delete in reverse order
-    if (greChannelProductId) {
-      try { await requestGreGatewayJson(`/commons-market-service/api/v1/tma-channel-product/${greChannelProductId}`, "DELETE", undefined, traderSession); } catch {}
-    }
-    if (greProductId) {
-      try { await requestGreGatewayJson(`/commons-market-service/api/v1/tma-channel-solution/${greSolutionId}/product/${greProductId}`, "DELETE", undefined, traderSession); } catch {}
-    }
-    if (greSkuId) {
-      try { await requestGreGatewayJson(`/commons-market-service/api/v1/tma-channel-solution/${greSolutionId}/sku/${greSkuId}`, "DELETE", undefined, traderSession); } catch {}
-    }
-    if (greSolutionId) {
-      try { await requestGreGatewayJson(`/commons-market-service/api/v1/tma-channel-solution/${greSolutionId}`, "DELETE", undefined, traderSession); } catch {}
-    }
-
-    await adminClient.from("gre_solution_links").update({ upload_state: "quarantined", manual_review_reason: msg }).eq("local_offering_id", offeringId);
+    await logGreSyncEvent({
+      localOfferingId: offeringId,
+      action: "create_solution",
+      step: "quarantined_no_automatic_delete",
+      httpStatus: 0,
+      errorSanitised: msg,
+      greIds: {
+        solutionId: greSolutionId,
+        productId: greProductId,
+        skuId: greSkuId,
+        channelProductId: greChannelProductId,
+      },
+      actorEmail,
+    });
+    await adminClient.from("gre_solution_links").update({
+      gre_solution_id: greSolutionId,
+      gre_product_id: greProductId,
+      gre_sku_id: greSkuId,
+      gre_channel_product_id: greChannelProductId,
+      upload_state: "quarantined",
+      manual_review_reason: msg,
+    }).eq("local_offering_id", offeringId);
+    await adminClient.from("gre_mis_settings").update({
+      value_text: "true",
+      value_json: true,
+      updated_at: new Date().toISOString(),
+      updated_by_email: actorEmail,
+    }).eq("key", "solution_sync_circuit_open");
     throw error;
   }
 }
@@ -12319,10 +12462,6 @@ Deno.serve(async (req) => {
       return jsonResponse(await adminLogin(requireString(payload.username), requireString(payload.password)));
     }
 
-    if (action === "probeGreTenantLogin") {
-      return jsonResponse(await probeGreTenantLogin(payload, "debug"));
-    }
-
     if (action === "validateUserSession") {
       const userCtx = await requireUserSession(req, requireString(payload.userSessionToken));
       return jsonResponse({
@@ -12774,6 +12913,10 @@ Deno.serve(async (req) => {
       }
 
     // ===== GRE SOLUTION SYNC ACTIONS =====
+    if (action === "probeGreTenantLogin") {
+      return jsonResponse(await probeGreTenantLogin(payload, adminActorEmail));
+    }
+
     if (action === "dryRunGreSolutionUpload") {
       return jsonResponse(await dryRunGreSolutionUpload(payload, adminActorEmail));
     }
