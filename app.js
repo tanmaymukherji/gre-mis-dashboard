@@ -2984,7 +2984,19 @@ class GreMisStore {
       this.fallbackMode = true;
       return null;
     }
-    this.client = window.supabase.createClient(this.config.SUPABASE_URL, this.config.SUPABASE_ANON_KEY);
+    // Base dashboard reads are public/RLS-scoped and must not inherit a stale
+    // Supabase Auth session left by another GramEEE surface in localStorage.
+    this.client = window.supabase.createClient(
+      this.config.SUPABASE_URL,
+      this.config.SUPABASE_ANON_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+          detectSessionInUrl: false,
+        },
+      },
+    );
     return this.client;
   }
 
@@ -3016,12 +3028,25 @@ class GreMisStore {
       client.from("gre_mis_need_updates").select("*").order("created_at", { ascending: false }),
     ]);
 
-      const curatorsResult = curators.status === "fulfilled" && !curators.value.error ? ensureList(curators.value.data) : [];
-      const tradersResult = traders.status === "fulfilled" && !traders.value.error ? ensureList(traders.value.data) : [];
-      const offeringsResult = offerings.status === "fulfilled" && !offerings.value.error ? ensureList(offerings.value.data) : [];
-      const optionsResult = options.status === "fulfilled" && !options.value.error ? ensureList(options.value.data) : [];
-      const needsResult = needs.status === "fulfilled" && !needs.value.error ? ensureList(needs.value.data) : [];
-      const updatesResult = updates.status === "fulfilled" && !updates.value.error ? ensureList(updates.value.data) : [];
+      const queryResults = { curators, traders, offerings, options, needs, updates };
+      const queryErrors = Object.entries(queryResults)
+        .map(([name, result]) => {
+          if (result.status === "rejected") return { name, error: result.reason };
+          if (result.value.error) return { name, error: result.value.error };
+          return null;
+        })
+        .filter(Boolean);
+      if (queryErrors.length) {
+        queryErrors.forEach(({ name, error }) => console.error(`GRE MIS ${name} query failed`, error));
+        throw new Error(`GRE MIS data could not load (${queryErrors.map(({ name }) => name).join(", ")}). Please retry.`);
+      }
+
+      const curatorsResult = ensureList(curators.value.data);
+      const tradersResult = ensureList(traders.value.data);
+      const offeringsResult = ensureList(offerings.value.data);
+      const optionsResult = ensureList(options.value.data);
+      const needsResult = ensureList(needs.value.data);
+      const updatesResult = ensureList(updates.value.data);
 
       state.data.curators = curatorsResult.length ? curatorsResult : FALLBACK_CURATORS;
       state.data.traders = tradersResult;
