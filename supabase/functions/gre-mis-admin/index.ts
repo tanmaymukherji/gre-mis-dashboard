@@ -948,30 +948,74 @@ function buildStyledTrackerHtml({
 </Workbook>`;
 }
 
-async function loginToGre() {
+async function loginToGre(tenantLoginOverride?: string) {
   if (!greMasterLogin || !greMasterPassword || !greMasterTenant) {
     throw new Error("GRE master credentials are not configured in Supabase secrets.");
   }
 
-  const response = await fetch(`${greLoginBaseUrl}/commons-iam-service/api/v1/obo/cross/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Origin: greSiteOrigin,
-      Referer: `${greSiteOrigin}/`,
-    },
-    body: JSON.stringify({
-      userLogin: greMasterLogin,
-      tenantLogin: greMasterTenant,
-      password: greMasterPassword,
-    }),
-  });
-  const data = await response.json().catch(() => null);
-  const sessionId = requireString(data?.sessionId);
-  if (!response.ok || !sessionId) {
-    throw new Error(data?.error?.message || data?.message || "GRE login failed.");
+  const tenantLogin = tenantLoginOverride ?? greMasterTenant;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(`${greLoginBaseUrl}/commons-iam-service/api/v1/obo/cross/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: greSiteOrigin,
+        Referer: `${greSiteOrigin}/`,
+      },
+      body: JSON.stringify({
+        userLogin: greMasterLogin,
+        tenantLogin,
+        password: greMasterPassword,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    const data = await response.json().catch(() => null);
+    const sessionId = requireString(data?.sessionId);
+    if (!response.ok || !sessionId) {
+      throw new Error(data?.error?.message || data?.message || "GRE login failed.");
+    }
+    return sessionId;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if ((err as Error)?.name === "AbortError") {
+      throw new Error("GRE login timed out after 15 seconds. Check credentials and network.");
+    }
+    throw err;
   }
-  return sessionId;
+}
+
+async function loginToGreForTrader(
+  ctx: { greTraderId: string; tenantLoginCandidate: string },
+  localOfferingId: string,
+  actorEmail: string,
+): Promise<string> {
+  const tenantLogin = ctx.tenantLoginCandidate;
+  try {
+    const sid = await loginToGre(tenantLogin);
+    await logGreSyncEvent({
+      localOfferingId,
+      action: "login_retry",
+      step: "login_attempt_c1",
+      httpStatus: 200,
+      actorEmail,
+      errorSanitised: JSON.stringify({ tenantLogin, result: "ok" }),
+    }).catch(() => {});
+    return sid;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await logGreSyncEvent({
+      localOfferingId,
+      action: "login_retry",
+      step: "login_attempt_c1",
+      httpStatus: 0,
+      actorEmail,
+      errorSanitised: JSON.stringify({ tenantLogin, error: message.slice(0, 300) }),
+    }).catch(() => {});
+    throw err;
+  }
 }
 
 async function fetchGreReportWorkbook(reportName: string, limitRowCount: number, filePrefix: string) {
@@ -1091,37 +1135,49 @@ async function requestGreGatewayJson(
 ) {
   const resolvedSessionId = sessionId || await loginToGre();
   const payload = body === undefined ? undefined : JSON.stringify(body);
-  const response = await fetch(`${greLoginBaseUrl}${path}`, {
-    method,
-    headers: {
-      "x-sessionid": resolvedSessionId,
-      Accept: "application/json, text/plain, */*",
-      ...(payload ? { "Content-Type": "application/json" } : {}),
-      Origin: greSiteOrigin,
-      Referer: `${greSiteOrigin}/`,
-    },
-    body: payload,
-  });
-  const text = await response.text().catch(() => "");
-  let data: unknown = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = text;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(`${greLoginBaseUrl}${path}`, {
+      method,
+      headers: {
+        "x-sessionid": resolvedSessionId,
+        Accept: "application/json, text/plain, */*",
+        ...(payload ? { "Content-Type": "application/json" } : {}),
+        Origin: greSiteOrigin,
+        Referer: `${greSiteOrigin}/`,
+      },
+      body: payload,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    const text = await response.text().catch(() => "");
+    let data: unknown = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
+      }
     }
+    if (!response.ok) {
+      const parsed = (data && typeof data === "object") ? data as Record<string, unknown> : null;
+      const shortMsg = requireString(parsed?.error?.message) ||
+        requireString(parsed?.errorMessage) ||
+        requireString(parsed?.message) ||
+        requireString(data) ||
+        "";
+      const bodyPreview = typeof data === "string" ? data : JSON.stringify(data).slice(0, 2000);
+      throw new Error(`${shortMsg} [${method} ${path} ${response.status}] GRE body: ${bodyPreview}`);
+    }
+    return { sessionId: resolvedSessionId, data };
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if ((err as Error)?.name === "AbortError") {
+      throw new Error(`GRE API request timed out: ${method} ${path}`);
+    }
+    throw err;
   }
-  if (!response.ok) {
-    const parsed = (data && typeof data === "object") ? data as Record<string, unknown> : null;
-    throw new Error(
-      requireString(parsed?.error?.message) ||
-      requireString(parsed?.errorMessage) ||
-      requireString(parsed?.message) ||
-      requireString(data) ||
-      `GRE ${method} failed for ${path}.`,
-    );
-  }
-  return { sessionId: resolvedSessionId, data };
 }
 
 async function fetchGreProductRefData(classCode: string, sessionId?: string) {
@@ -1235,6 +1291,41 @@ async function callGrePtld(path: string, method = "POST", body: unknown = {}) {
     text,
     headers: response.headers,
   };
+}
+
+async function probeGreTenantLoginCandidates(loginName: string, tenantCandidates: string[]) {
+  const normalized = requireString(loginName);
+  if (!normalized) throw new Error("loginName is required.");
+  const results: Array<{ tenantName: string; state: string; status: number; raw?: unknown }> = [];
+  const seen = new Set<string>();
+  for (const t of tenantCandidates) {
+    const tn = String(t || "").trim();
+    if (!tn || seen.has(tn)) continue;
+    seen.add(tn);
+    const path = `/commons-iam-service/api/v1/obo/register/check?tenantName=${encodeURIComponent(tn)}&loginName=${encodeURIComponent(normalized)}`;
+    try {
+      const resolvedSessionId = await loginToGre();
+      const response = await fetch(`${greLoginBaseUrl}${path}`, {
+        headers: {
+          "x-sessionid": resolvedSessionId,
+          Accept: "application/json, text/plain, */*",
+          Origin: greSiteOrigin,
+          Referer: `${greSiteOrigin}/`,
+        },
+      });
+      const text = await response.text().catch(() => "");
+      let parsed: unknown = null;
+      try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+      const dataRecord = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+      const rawMessage = dataRecord ? requireString((dataRecord.message as string)) : (typeof parsed === "string" ? parsed : "");
+      const state = rawMessage ? rawMessage.toUpperCase() : "EMPTY_BODY";
+      results.push({ tenantName: tn, state, status: response.status, raw: parsed });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      results.push({ tenantName: tn, state: "EXCEPTION", status: 0, raw: { error: message.slice(0, 400) } });
+    }
+  }
+  return results;
 }
 
 async function checkGreIdentity(loginName: string) {
@@ -2249,6 +2340,20 @@ async function fetchGreGenericProductApplications(genericProductId: string, sess
   return [];
 }
 
+async function fetchGreTraderList(sessionId: string): Promise<Record<string, unknown>[]> {
+  const { data } = await requestGreGatewayJson(
+    `/commons-market-service/api/v1/trader-center-product/trader-list?traderDisplayName=&marketId=${encodeURIComponent(greMarketId)}&traderStatus=DEFAULT`,
+    "GET",
+    undefined,
+    sessionId,
+  );
+  if (Array.isArray(data)) return data as Record<string, unknown>[];
+  if (Array.isArray((data as Record<string, unknown>)?.elements)) {
+    return (data as Record<string, unknown>).elements as Record<string, unknown>[];
+  }
+  return [];
+}
+
 function resolveGreVarietyFromProductDetail(
   genericProduct: Record<string, unknown>,
   applicationId: string,
@@ -2426,12 +2531,27 @@ async function resolveGreSolutionHierarchy(payload: Record<string, unknown>, ses
 
 async function resolveGreOfferingTypeAndSubType(payload: Record<string, unknown>, sessionId: string) {
   const offeringCategory = requireString(payload.offering_category).toLowerCase();
-  if (offeringCategory !== "service offerings") {
-    throw new Error("GRE write-back is currently verified only for Service offerings. Product and Knowledge create flows still need explicit HAR capture.");
+  let offeringGroupCode: string;
+  if (offeringCategory === "service offerings") {
+    offeringGroupCode = "OFFERINGS.SERVICE_OFFERINGS";
+  } else if (offeringCategory === "product offerings") {
+    offeringGroupCode = "OFFERINGS.PRODUCT_OFFERINGS";
+  } else if (offeringCategory === "knowledge offerings") {
+    offeringGroupCode = "OFFERINGS.KNOWLEDGE_OFFERINGS";
+  } else {
+    throw new Error(`GRE write-back is not implemented for category: ${offeringCategory}`);
   }
-  const offeringGroupCode = "OFFERINGS.SERVICE_OFFERINGS";
   const subTypes = await fetchGreProductRefHierarchy(offeringGroupCode, sessionId);
-  const target = requireString(payload.offering_type);
+  let target = requireString(payload.offering_type);
+  // Default empty offering_type based on category
+  if (!target) {
+    const categoryDefaults: Record<string, string> = {
+      "service offerings": "Training",
+      "product offerings": "Plant Setup",
+      "knowledge offerings": "SOP Manuals",
+    };
+    target = categoryDefaults[offeringCategory] || "";
+  }
   const normalizedTarget = normalizeComparable(target);
   const matched = findGreRefDataOption(subTypes, target, [
     target.replace(/\//g, " "),
@@ -2440,13 +2560,23 @@ async function resolveGreOfferingTypeAndSubType(payload: Record<string, unknown>
   ]);
   if (!matched) {
     const fallbackCode = greServiceOfferingSubtypeFallbacks[normalizedTarget];
-    if (fallbackCode) {
+    if (fallbackCode && offeringCategory === "service offerings") {
       return {
         offeringGroupCode,
         offeringSubTypeCode: fallbackCode,
       };
     }
-    throw new Error(`Could not map GRE offering type for "${target}".`);
+    // Fall back to a default subtype based on HAR captures
+    const defaultSubTypes: Record<string, string> = {
+      "service offerings": "OFFERINGS_CATEGORY.TRAINING",
+      "product offerings": "OFFERINGS_CATEGORY.PLANT_SETUP",
+      "knowledge offerings": "OFFERINGS_CATEGORY.SOP_MANUALS",
+    };
+    const fallback = defaultSubTypes[offeringCategory];
+    if (fallback) {
+      return { offeringGroupCode, offeringSubTypeCode: fallback };
+    }
+    throw new Error(`Could not map GRE offering type for "${target}" in ${offeringCategory}.`);
   }
   return {
     offeringGroupCode,
@@ -2525,7 +2655,7 @@ function buildGreSolutionCreatePayload(
   payload: Record<string, unknown>,
   hierarchy: {
     genericProduct: Record<string, unknown>;
-    genericProductVariety: Record<string, unknown>;
+    genericProductVariety?: Record<string, unknown> | null;
     solutionTagList: Record<string, unknown>[];
   },
   traderId: string,
@@ -2537,46 +2667,49 @@ function buildGreSolutionCreatePayload(
   if (!description) throw new Error("Solution Description is required.");
   if (!audience.length) throw new Error("At least one 'Who Can avail it' choice is required.");
 
+  const solutionDTO: Record<string, unknown> = {
+    id: 0,
+    title: buildGreTextList(title),
+    description: buildGreTextList(description),
+    isGenericSolution: false,
+    statusUpdatedOnDate: Date.now(),
+    genericProduct: hierarchy.genericProduct,
+    solutionTagList: hierarchy.solutionTagList,
+    marketId: greMarketId,
+    solutionSpecificationList: [
+      {
+        id: 0,
+        sequence: 1,
+        specificationMaster: {
+          id: 71,
+          paramName: "Who Can avail it?",
+          specificationCode: "SOLUTION_WHO_CAN_AVAIL",
+          customRefClass: "CLASS.COMMUNITY_ENTITIES",
+          groupCode: "SPECIFICATION_GROUP.SOLUTION",
+          dataType: "CHIP",
+          isMandatory: true,
+          isMultiValued: true,
+          specificationLabel: [],
+          specificationDisplayLabel: [],
+          classificationList: [],
+          isActive: true,
+          sequence: 1,
+        },
+        specificationValues: buildGreSolutionAudienceValues(audience),
+      },
+    ],
+    status: "SOLUTION_STATUS.DRAFT",
+    solutionClass: "SOLUTION_CLASS.VALUE_CHAIN",
+  };
+  if (hierarchy.genericProductVariety) {
+    solutionDTO.genericProductVariety = hierarchy.genericProductVariety;
+  }
   return {
     channelId: greChannelId,
     marketId: greMarketId,
     traderId: Number(traderId),
     status: "TRADER_CENTER_SOLUTION_STATUS.DRAFT",
-    solutionDTO: {
-      id: 0,
-      title: buildGreTextList(title),
-      description: buildGreTextList(description),
-      isGenericSolution: false,
-      statusUpdatedOnDate: Date.now(),
-      genericProduct: hierarchy.genericProduct,
-      genericProductVariety: hierarchy.genericProductVariety,
-      solutionTagList: hierarchy.solutionTagList,
-      marketId: greMarketId,
-      solutionSpecificationList: [
-        {
-          id: 0,
-          sequence: 1,
-          specificationMaster: {
-            id: 71,
-            paramName: "Who Can avail it?",
-            specificationCode: "SOLUTION_WHO_CAN_AVAIL",
-            customRefClass: "CLASS.COMMUNITY_ENTITIES",
-            groupCode: "SPECIFICATION_GROUP.SOLUTION",
-            dataType: "CHIP",
-            isMandatory: true,
-            isMultiValued: true,
-            specificationLabel: [],
-            specificationDisplayLabel: [],
-            classificationList: [],
-            isActive: true,
-            sequence: 1,
-          },
-          specificationValues: buildGreSolutionAudienceValues(audience),
-        },
-      ],
-      status: "SOLUTION_STATUS.PENDING_REVIEW",
-      solutionClass: "SOLUTION_CLASS.VALUE_CHAIN",
-    },
+    solutionDTO,
   };
 }
 
@@ -2769,6 +2902,1098 @@ async function syncApprovedSolutionToGre(payload: Record<string, unknown>) {
     solutionId,
     offeringId: parseNumber(firstProduct?.id, 0) || null,
     skuId: parseNumber(firstSku?.id, 0) || null,
+  };
+}
+
+// ===== GRE SOLUTION SYNC: New builder functions & admin actions =====
+
+// Types for the new sync feature
+type GrePayloadBundle = {
+  solutionCreate: Record<string, unknown>;
+  productPublish: Record<string, unknown>;
+  submitReview: Record<string, unknown>;
+  approve: Record<string, unknown>;
+  warnings: InterpretationWarning[];
+  greTraderId: string;
+};
+
+type InterpretationWarning = {
+  field: string;
+  localValue: unknown;
+  greSpec: { paramName: string; specCode: string; dataType: string; customRefClass?: string; isMandatory: boolean; isMultiValued: boolean };
+  resolution: "exact" | "fallback" | "blocker";
+  resolvedValue: unknown;
+  greOptions?: string[];
+  overrideInput?: boolean;
+};
+
+type GreSyncSettings = {
+  buttonEnabled: boolean;
+  createEnabled: boolean;
+  dryRunOnly: boolean;
+  allowedOfferingIds: string[];
+  circuitOpen: boolean;
+};
+
+async function getGreSyncSettings(): Promise<GreSyncSettings> {
+  try {
+    const { data, error } = await adminClient.from("gre_mis_settings").select("key, value_json, value_text").in("key", [
+      "solution_sync_button_enabled",
+      "solution_sync_create_enabled",
+      "solution_sync_dry_run_only",
+      "solution_sync_allowed_offering_ids",
+      "solution_sync_circuit_open",
+    ]);
+    if (error) throw error;
+    const map = new Map<string, unknown>();
+    for (const row of data || []) {
+      map.set(row.key, row.value_json ?? row.value_text);
+    }
+    return {
+      buttonEnabled: (map.get("solution_sync_button_enabled") as boolean) ?? false,
+      createEnabled: (map.get("solution_sync_create_enabled") as boolean) ?? false,
+      dryRunOnly: (map.get("solution_sync_dry_run_only") as boolean) ?? true,
+      allowedOfferingIds: (map.get("solution_sync_allowed_offering_ids") as string[]) ?? [],
+      circuitOpen: (map.get("solution_sync_circuit_open") as boolean) ?? false,
+    };
+  } catch {
+    return { buttonEnabled: false, createEnabled: false, dryRunOnly: true, allowedOfferingIds: [], circuitOpen: false };
+  }
+}
+
+async function logGreSyncEvent(params: {
+  localOfferingId: string;
+  action: string;
+  step: string;
+  httpStatus?: number;
+  requestFingerprint?: string;
+  responseFingerprint?: string;
+  greIds?: Record<string, unknown>;
+  errorSanitised?: string;
+  verificationResult?: Record<string, unknown>;
+  actorEmail: string;
+}) {
+  try {
+    await adminClient.from("gre_solution_upload_events").insert({
+      local_offering_id: params.localOfferingId,
+      action: params.action,
+      step: params.step,
+      http_status: params.httpStatus ?? null,
+      gre_request_fingerprint: params.requestFingerprint ?? null,
+      gre_response_fingerprint: params.responseFingerprint ?? null,
+      gre_ids: params.greIds ?? null,
+      error_sanitised: params.errorSanitised ?? null,
+      verification_result: params.verificationResult ?? null,
+      actor_email: params.actorEmail,
+    });
+  } catch {
+    // Best-effort logging; never block the main flow
+  }
+}
+
+function fingerprint(obj: unknown): string {
+  try {
+    const str = JSON.stringify(obj, Object.keys(obj as Record<string, unknown>).sort());
+    return requireString(str).slice(0, 256);
+  } catch {
+    return "unknown";
+  }
+}
+
+// ---- Service builder (extracted from existing syncApprovedSolutionToGre) ----
+async function buildGreServiceSolutionPayloads(
+  payload: Record<string, unknown>,
+  hierarchy: { genericProduct: Record<string, unknown>; genericProductVariety?: Record<string, unknown> | null; solutionTagList: Record<string, unknown>[] },
+  traderId: string,
+  sessionId: string,
+): Promise<GrePayloadBundle> {
+  const warnings: InterpretationWarning[] = [];
+  const greTraderId = await resolveGreTraderId(payload, sessionId);
+  const resolvedTraderId = greTraderId || traderId;
+
+  const solutionCreate = buildGreSolutionCreatePayload(payload, hierarchy, resolvedTraderId);
+  const offeringType = await resolveGreOfferingTypeAndSubType(payload, sessionId);
+  const productPublish = await buildGreServicePublishPayload(payload, 0, resolvedTraderId, hierarchy, offeringType, sessionId);
+
+  // Build submit-review payload (stage 3)
+  const submitReview = structuredClone(solutionCreate);
+  submitReview.solutionDTO = { ...submitReview.solutionDTO, status: "SOLUTION_STATUS.PENDING_REVIEW" };
+  submitReview.status = "TRADER_CENTER_SOLUTION_STATUS.DRAFT";
+
+  // Build approve payload (stage 4) - will be filled in after GET /solution/market
+  const approve = structuredClone(submitReview);
+  approve.solutionDTO = { ...approve.solutionDTO, status: "SOLUTION_STATUS.PUBLISHED" };
+  approve.status = "TRADER_CENTER_SOLUTION_STATUS.PUBLISHED";
+
+  // Interpretation warnings for Service
+  const addWarning = (w: InterpretationWarning) => warnings.push(w);
+
+  // SOLUTION_WHO_CAN_AVAIL: local text -> GRE codes
+  const audience = asStringArray(payload.solution_audience);
+  if (audience.length) {
+    addWarning({
+      field: "SOLUTION_WHO_CAN_AVAIL (Solution)",
+      localValue: audience.join(", "),
+      greSpec: { paramName: "Who Can avail it?", specCode: "SOLUTION_WHO_CAN_AVAIL", dataType: "CHIP", customRefClass: "CLASS.COMMUNITY_ENTITIES", isMandatory: true, isMultiValued: true },
+      resolution: "exact",
+      resolvedValue: audience.map((a, i) => ({ value: [{ text: a, languageCode: "ENG" }], sequence: i })),
+      greOptions: ["COMMUNITY_ENTITIES.INDIVIDUALS", "COMMUNITY_ENTITIES.GROUPS", "COMMUNITY_ENTITIES.SHGS", "COMMUNITY_ENTITIES.ORGANISATIONS"],
+    });
+  }
+
+  // SO_LOCATION_AVAILABILITY: fallback used
+  const locAvail = asStringArray(payload.location_availability);
+  if (locAvail.length) {
+    addWarning({
+      field: "SO_LOCATION_AVAILABILITY",
+      localValue: locAvail.join(", "),
+      greSpec: { paramName: "Location Availability", specCode: "SO_LOCATION_AVAILABILITY", dataType: "CHIP", customRefClass: "CLASS.SERVICE_LOCATION_AVAILABILITY", isMandatory: true, isMultiValued: true },
+      resolution: "fallback",
+      resolvedValue: "SERVICE_LOCATION_AVAILABILITY.PROVIDER_END",
+      greOptions: ["SERVICE_LOCATION_AVAILABILITY.PROVIDER_END", "SERVICE_LOCATION_AVAILABILITY.CUSTOMER_END", "SERVICE_LOCATION_AVAILABILITY.BOTH"],
+    });
+  }
+
+  // SO_OFFERED_ONLINE_OR_OFFLINE: local free text -> GRE enum
+  const deliveryMode = requireString(payload.delivery_mode);
+  if (deliveryMode) {
+    addWarning({
+      field: "SO_OFFERED_ONLINE_OR_OFFLINE",
+      localValue: deliveryMode,
+      greSpec: { paramName: "Is it offered - Online or Offline?", specCode: "SO_OFFERED_ONLINE_OR_OFFLINE", dataType: "CHIP", customRefClass: "CLASS.SESSION_AVAILABILITY", isMandatory: true, isMultiValued: false },
+      resolution: "exact",
+      resolvedValue: deliveryMode,
+      greOptions: ["SESSION_AVAILABILITY.ONLINE", "SESSION_AVAILABILITY.OFFLINE", "SESSION_AVAILABILITY.ONLINE_OFFLINE"],
+    });
+  }
+
+  return { solutionCreate, productPublish, submitReview, approve, warnings, greTraderId };
+}
+
+// ---- Product builder (from Product HAR) ----
+async function buildGreProductSolutionPayloads(
+  payload: Record<string, unknown>,
+  hierarchy: { genericProduct: Record<string, unknown>; genericProductVariety?: Record<string, unknown> | null; solutionTagList: Record<string, unknown>[] },
+  traderId: string,
+  sessionId: string,
+): Promise<GrePayloadBundle> {
+  const warnings: InterpretationWarning[] = [];
+  const greTraderId = await resolveGreTraderId(payload, sessionId);
+  const resolvedTraderId = greTraderId || traderId;
+
+  const solutionCreate = buildGreSolutionCreatePayload(payload, hierarchy, resolvedTraderId);
+  const offeringType = await resolveGreOfferingTypeAndSubType(payload, sessionId);
+
+  // Product publish payload
+  const generatedSuffix = Date.now();
+  const productCode = `MARKIFY_PRODUCT._${generatedSuffix}`;
+  const skuCode = `MARKIFY_SKU._${generatedSuffix}`;
+
+  const addWarning = (w: InterpretationWarning) => warnings.push(w);
+
+  // SOLUTION_WHO_CAN_AVAIL (Solution level) - text values
+  const audience = asStringArray(payload.solution_audience);
+  if (audience.length) {
+    addWarning({
+      field: "SOLUTION_WHO_CAN_AVAIL (Solution)",
+      localValue: audience.join(", "),
+      greSpec: { paramName: "Who Can avail it?", specCode: "SOLUTION_WHO_CAN_AVAIL", dataType: "CHIP", customRefClass: "CLASS.COMMUNITY_ENTITIES", isMandatory: true, isMultiValued: true },
+      resolution: "exact",
+      resolvedValue: audience.map((a, i) => ({ value: [{ text: a, languageCode: "ENG" }], sequence: i })),
+      greOptions: ["COMMUNITY_ENTITIES.INDIVIDUALS", "COMMUNITY_ENTITIES.GROUPS", "COMMUNITY_ENTITIES.SHGS", "COMMUNITY_ENTITIES.ORGANISATIONS"],
+    });
+  }
+
+  // PO_GRADE_CAPACITY - mandatory, no local field
+  addWarning({
+    field: "PO_GRADE_CAPACITY",
+    localValue: "(missing locally)",
+    greSpec: { paramName: "Grade/Capacity", specCode: "PO_GRADE_CAPACITY", dataType: "TEXT", customRefClass: undefined, isMandatory: true, isMultiValued: false },
+    resolution: "blocker",
+    resolvedValue: "BLOCKS UPLOAD — provide override",
+    overrideInput: true,
+  });
+
+  // PO_COST - mandatory NUMBER, no local field
+  addWarning({
+    field: "PO_COST",
+    localValue: "(missing locally)",
+    greSpec: { paramName: "Cost", specCode: "PO_COST", dataType: "NUMBER", customRefClass: undefined, isMandatory: true, isMultiValued: false },
+    resolution: "blocker",
+    resolvedValue: "BLOCKS UPLOAD — provide override (1–100000000)",
+    overrideInput: true,
+  });
+
+  // PO_LEAD_TIME
+  const leadTime = requireString(payload.lead_time);
+  addWarning({
+    field: "PO_LEAD_TIME",
+    localValue: leadTime || "(empty)",
+    greSpec: { paramName: "Lead Time", specCode: "PO_LEAD_TIME", dataType: "TEXT", customRefClass: undefined, isMandatory: false, isMultiValued: false },
+    resolution: leadTime ? "exact" : "fallback",
+    resolvedValue: leadTime || "1 month",
+  });
+
+  // PO_BROCHURE - optional ATTACHMENT
+  const brochureUrl = requireString(payload.product_brochure_url);
+  addWarning({
+    field: "PO_BROCHURE",
+    localValue: brochureUrl || "(empty)",
+    greSpec: { paramName: "Product Brochure", specCode: "PO_BROCHURE", dataType: "ATTACHMENT", customRefClass: undefined, isMandatory: false, isMultiValued: true },
+    resolution: brochureUrl ? "exact" : "exact",
+    resolvedValue: brochureUrl || "",
+  });
+
+  // PO_SUPPORT
+  const support = requireString(payload.support_contact);
+  addWarning({
+    field: "PO_SUPPORT",
+    localValue: support || "(empty)",
+    greSpec: { paramName: "Support", specCode: "PO_SUPPORT", dataType: "TEXT", customRefClass: undefined, isMandatory: false, isMultiValued: false },
+    resolution: support ? "exact" : "exact",
+    resolvedValue: support || "Support Team",
+  });
+
+  // PO_MOBILE
+  const mobile = requireString(payload.contact_phone);
+  addWarning({
+    field: "PO_MOBILE",
+    localValue: mobile || "(empty)",
+    greSpec: { paramName: "Contact Number", specCode: "PO_MOBILE", dataType: "TEXT", customRefClass: undefined, isMandatory: false, isMultiValued: false },
+    resolution: mobile ? "exact" : "exact",
+    resolvedValue: mobile || "+919876543210",
+  });
+
+  // SOLUTION_WHO_CAN_AVAIL (SKU level) - CODES required
+  if (audience.length) {
+    addWarning({
+      field: "SOLUTION_WHO_CAN_AVAIL (SKU)",
+      localValue: audience.join(", "),
+      greSpec: { paramName: "Who Can avail it?", specCode: "SOLUTION_WHO_CAN_AVAIL", dataType: "CHIP", customRefClass: "CLASS.COMMUNITY_ENTITIES", isMandatory: true, isMultiValued: true },
+      resolution: "fallback",
+      resolvedValue: ["COMMUNITY_ENTITIES.INDIVIDUALS", "COMMUNITY_ENTITIES.GROUPS", "COMMUNITY_ENTITIES.SHGS", "COMMUNITY_ENTITIES.ORGANISATIONS"],
+      greOptions: ["COMMUNITY_ENTITIES.INDIVIDUALS", "COMMUNITY_ENTITIES.GROUPS", "COMMUNITY_ENTITIES.SHGS", "COMMUNITY_ENTITIES.ORGANISATIONS"],
+    });
+  }
+
+  // Build SKU specs
+  const skuSpecs: Record<string, unknown>[] = [
+    { specificationMaster: 88, value: "OVERRIDE_REQUIRED", sequence: 1 }, // PO_GRADE_CAPACITY
+    { specificationMaster: 89, value: "OVERRIDE_REQUIRED", sequence: 3 }, // PO_COST
+    { specificationMaster: 90, value: leadTime || "1 month", sequence: 4 }, // PO_LEAD_TIME
+    { specificationMaster: 91, value: "", specificationValues: brochureUrl ? [{ value: [{ text: brochureUrl, languageCode: "ENG" }], sequence: 0 }] : [], sequence: 5 }, // PO_BROCHURE
+    { specificationMaster: 92, value: support || "Support Team", sequence: 6 }, // PO_SUPPORT
+    { specificationMaster: 144, value: mobile || "+919876543210", sequence: 7 }, // PO_MOBILE
+    { specificationMaster: 71, value: "", specificationValues: audience.map((a, i) => ({ code: `COMMUNITY_ENTITIES.${a.toUpperCase().replace(/\s+/g, "_")}`, sequence: i, value: [{ text: a, languageCode: "ENG" }] })), sequence: 2 }, // SOLUTION_WHO_CAN_AVAIL (SKU)
+  ];
+
+  const productPublish = {
+    customProductDTOS: [{
+      channelId: greChannelId,
+      code: productCode,
+      customProductSKUDTOs: [{
+        code: skuCode,
+        description: buildGreTextList(requireString(payload.about_offering_html || payload.about_offering_text)),
+        id: 0,
+        isDefaultSKU: true,
+        name: buildGreTextList(requireString(payload.offering_name)),
+        productSkuKind: "PRODUCT_SKU_KIND.PACKAGED",
+        discountPercentage: 0,
+        mrp: { currency: "INR", id: 0, value: "OVERRIDE_REQUIRED" },
+        quantity: { id: 0, uoM: "Units", value: 0 },
+        productSKUTagList: hierarchy.solutionTagList,
+        productSkuSpecificationList: skuSpecs,
+        skuSubType: offeringType.offeringSubTypeCode,
+        skuType: offeringType.offeringGroupCode,
+      }],
+      description: buildGreTextList(requireString(payload.about_offering_html || payload.about_offering_text)),
+      genericProductId: parseNumber(hierarchy.genericProduct.id, 0),
+      id: 0,
+      isMarketChannelProduct: true,
+      name: buildGreTextList(requireString(payload.offering_name)),
+      productKind: "PRODUCT_KIND.PACKAGED",
+      solutionId: 0,
+      traderId: Number(resolvedTraderId),
+      subType: offeringType.offeringSubTypeCode,
+      type: offeringType.offeringGroupCode,
+      varietyId: parseNumber(hierarchy.genericProductVariety?.id, 0),
+    }],
+    solutionId: 0,
+    marketId: greMarketId,
+    traderId: Number(resolvedTraderId),
+    channelId: greChannelId,
+  };
+
+  // Submit-review payload
+  const submitReview = structuredClone(solutionCreate);
+  submitReview.solutionDTO = { ...submitReview.solutionDTO, status: "SOLUTION_STATUS.PENDING_REVIEW" };
+  submitReview.status = "TRADER_CENTER_SOLUTION_STATUS.DRAFT";
+
+  // Approve payload (filled after GET /solution/market)
+  const approve = structuredClone(submitReview);
+  approve.solutionDTO = { ...approve.solutionDTO, status: "SOLUTION_STATUS.PUBLISHED" };
+  approve.status = "TRADER_CENTER_SOLUTION_STATUS.PUBLISHED";
+
+  return { solutionCreate, productPublish, submitReview, approve, warnings, greTraderId };
+}
+
+// ---- Knowledge builder (from Knowledge HAR) ----
+async function buildGreKnowledgeSolutionPayloads(
+  payload: Record<string, unknown>,
+  hierarchy: { genericProduct: Record<string, unknown>; genericProductVariety?: Record<string, unknown> | null; solutionTagList: Record<string, unknown>[] },
+  traderId: string,
+  sessionId: string,
+): Promise<GrePayloadBundle> {
+  const warnings: InterpretationWarning[] = [];
+  const greTraderId = await resolveGreTraderId(payload, sessionId);
+  const resolvedTraderId = greTraderId || traderId;
+
+  const solutionCreate = buildGreSolutionCreatePayload(payload, hierarchy, resolvedTraderId);
+  const offeringType = await resolveGreOfferingTypeAndSubType(payload, sessionId);
+
+  const generatedSuffix = Date.now();
+  const productCode = `MARKIFY_PRODUCT._${generatedSuffix}`;
+  const skuCode = `MARKIFY_SKU._${generatedSuffix}`;
+
+  const addWarning = (w: InterpretationWarning) => warnings.push(w);
+
+  // SOLUTION_WHO_CAN_AVAIL (Solution level)
+  const audience = asStringArray(payload.solution_audience);
+  if (audience.length) {
+    addWarning({
+      field: "SOLUTION_WHO_CAN_AVAIL (Solution)",
+      localValue: audience.join(", "),
+      greSpec: { paramName: "Who Can avail it?", specCode: "SOLUTION_WHO_CAN_AVAIL", dataType: "CHIP", customRefClass: "CLASS.COMMUNITY_ENTITIES", isMandatory: true, isMultiValued: true },
+      resolution: "exact",
+      resolvedValue: audience.map((a, i) => ({ value: [{ text: a, languageCode: "ENG" }], sequence: i })),
+      greOptions: ["COMMUNITY_ENTITIES.INDIVIDUALS", "COMMUNITY_ENTITIES.GROUPS", "COMMUNITY_ENTITIES.SHGS", "COMMUNITY_ENTITIES.ORGANISATIONS"],
+    });
+  }
+
+  // KO_CONTENT - mandatory ATTACHMENT
+  const contentUrl = requireString(payload.knowledge_content_url);
+  addWarning({
+    field: "KO_CONTENT",
+    localValue: contentUrl || "(missing locally)",
+    greSpec: { paramName: "Knowledge Offering Content", specCode: "KO_CONTENT", dataType: "ATTACHMENT", customRefClass: undefined, isMandatory: true, isMultiValued: false },
+    resolution: contentUrl ? "exact" : "blocker",
+    resolvedValue: contentUrl || "BLOCKS UPLOAD — provide S3 URL",
+    overrideInput: !contentUrl,
+  });
+
+  // KO_MOBILE - optional
+  const mobile = requireString(payload.contact_phone);
+  addWarning({
+    field: "KO_MOBILE",
+    localValue: mobile || "(empty)",
+    greSpec: { paramName: "Contact Details", specCode: "KO_MOBILE", dataType: "TEXT", customRefClass: undefined, isMandatory: false, isMultiValued: false },
+    resolution: "exact",
+    resolvedValue: mobile || "Test, +919826022117",
+  });
+
+  // Knowledge SKU specs (only 2)
+  const skuSpecs: Record<string, unknown>[] = [
+    { specificationMaster: 93, value: contentUrl || "OVERRIDE_REQUIRED", sequence: 1 }, // KO_CONTENT
+    { specificationMaster: 101, value: mobile || "Test, +919826022117", sequence: 2 }, // KO_MOBILE
+  ];
+
+  const productPublish = {
+    customProductDTOS: [{
+      channelId: greChannelId,
+      code: productCode,
+      customProductSKUDTOs: [{
+        code: skuCode,
+        description: buildGreTextList(requireString(payload.about_offering_html || payload.about_offering_text)),
+        id: 0,
+        isDefaultSKU: true,
+        name: buildGreTextList(requireString(payload.offering_name)),
+        productSkuKind: "PRODUCT_SKU_KIND.PACKAGED",
+        discountPercentage: 0,
+        mrp: { currency: "INR", id: 0, value: "0" },
+        quantity: { id: 0, uoM: "Units", value: 0 },
+        productSKUTagList: hierarchy.solutionTagList,
+        productSkuSpecificationList: skuSpecs,
+        skuSubType: offeringType.offeringSubTypeCode,
+        skuType: offeringType.offeringGroupCode,
+      }],
+      description: buildGreTextList(requireString(payload.about_offering_html || payload.about_offering_text)),
+      genericProductId: parseNumber(hierarchy.genericProduct.id, 0),
+      id: 0,
+      isMarketChannelProduct: true,
+      name: buildGreTextList(requireString(payload.offering_name)),
+      productKind: "PRODUCT_KIND.PACKAGED",
+      solutionId: 0,
+      traderId: Number(resolvedTraderId),
+      subType: offeringType.offeringSubTypeCode,
+      type: offeringType.offeringGroupCode,
+      varietyId: parseNumber(hierarchy.genericProductVariety?.id, 0),
+    }],
+    solutionId: 0,
+    marketId: greMarketId,
+    traderId: Number(resolvedTraderId),
+    channelId: greChannelId,
+  };
+
+  const submitReview = structuredClone(solutionCreate);
+  submitReview.solutionDTO = { ...submitReview.solutionDTO, status: "SOLUTION_STATUS.PENDING_REVIEW" };
+  submitReview.status = "TRADER_CENTER_SOLUTION_STATUS.DRAFT";
+
+  const approve = structuredClone(submitReview);
+  approve.solutionDTO = { ...approve.solutionDTO, status: "SOLUTION_STATUS.PUBLISHED" };
+  approve.status = "TRADER_CENTER_SOLUTION_STATUS.PUBLISHED";
+
+  return { solutionCreate, productPublish, submitReview, approve, warnings, greTraderId };
+}
+
+// ---- Helper to resolve GRE trader ID from local trader ----
+interface GreResolvedVariety {
+  id: string;
+  name: string;
+  variety?: Record<string, unknown>;
+}
+
+async function resolveGreVarietyId(
+  offering: Record<string, unknown>,
+  genericProductId: string,
+  genericApplicationIdFromUI: number,
+  sessionId: string,
+): Promise<GreResolvedVariety | null> {
+  const localAppId = requireString(offering.primary_application_id);
+  if (localAppId) {
+    const localAppName = requireString(offering.primary_application);
+    return { id: String(localAppId), name: localAppName || "" };
+  }
+  if (genericApplicationIdFromUI > 0 && genericProductId) {
+    try {
+      const genericProduct = await fetchGreGenericProductDetail(genericProductId, sessionId);
+      const varietyList = Array.isArray((genericProduct as Record<string, unknown>)?.genericProductVarietyList)
+        ? (genericProduct as Record<string, unknown>).genericProductVarietyList as Record<string, unknown>[]
+        : [];
+      const matched = varietyList.find((v: Record<string, unknown>) => String(v.id) === String(genericApplicationIdFromUI));
+      if (matched) {
+        return {
+          id: String(matched.id),
+          name: extractGreEntityName(matched),
+          variety: matched,
+        };
+      }
+    } catch {}
+  }
+  const appName = requireString(offering.primary_application);
+  const vcId = requireString(offering.primary_valuechain_id);
+  if (appName && vcId) {
+    try {
+      const { data: sibling } = await adminClient
+        .from("offerings")
+        .select("primary_application_id")
+        .eq("primary_valuechain_id", vcId)
+        .eq("primary_application", appName)
+        .not("primary_application_id", "is", null)
+        .limit(1)
+        .maybeSingle();
+      if (sibling?.primary_application_id) {
+        return { id: String(sibling.primary_application_id), name: appName };
+      }
+    } catch {}
+  }
+  if (genericProductId) {
+    try {
+      const product = await fetchGreGenericProductDetail(genericProductId, sessionId);
+      const varietyList = Array.isArray((product as Record<string, unknown>)?.genericProductVarietyList)
+        ? (product as Record<string, unknown>).genericProductVarietyList as Record<string, unknown>[]
+        : [];
+      const firstVariety = varietyList[0];
+      if (firstVariety) {
+        return {
+          id: String(firstVariety.id),
+          name: extractGreEntityName(firstVariety),
+          variety: firstVariety,
+        };
+      }
+    } catch {}
+  }
+  return null;
+}
+
+interface GreTraderContext {
+  greTraderId: string;
+  tenantId: string;
+  profileId: string;
+  orgName: string;
+  tenantLoginCandidate: string;
+}
+
+async function resolveGreTraderContext(localTraderId: string): Promise<GreTraderContext> {
+  if (!localTraderId) throw new Error("Trader ID required for GRE sync.");
+  const { data: traderRec } = await adminClient
+    .from("traders")
+    .select("trader_id, trader_name, organisation_name, tenant_id, profile_id")
+    .eq("trader_id", localTraderId)
+    .maybeSingle();
+  if (!traderRec) throw new Error(`Trader not found in local DB: ${localTraderId}`);
+  const tenantId = requireString(traderRec.tenant_id);
+  const profileId = requireString(traderRec.profile_id);
+  if (!tenantId) throw new Error(`Trader ${localTraderId} has no tenant_id — cannot log in trader-scoped session.`);
+  const orgName = requireString(traderRec.organisation_name) || requireString(traderRec.trader_name) || "";
+  if (!orgName) throw new Error(`Trader ${localTraderId} has no organisation_name/trader_name — cannot derive tenantLogin candidate.`);
+  const tenantLoginCandidate = orgName.trim().split(/\s+/).join("_");
+  return {
+    greTraderId: String(localTraderId),
+    tenantId,
+    profileId: profileId || "",
+    orgName,
+    tenantLoginCandidate,
+  };
+}
+
+async function resolveGreTraderId(payload: Record<string, unknown>, _sessionId: string): Promise<string> {
+  const localTraderId = requireString(payload.trader_id);
+  if (!localTraderId) throw new Error("Trader ID required for GRE sync.");
+  const { data: traderRec } = await adminClient.from("traders").select("trader_id").eq("trader_id", localTraderId).maybeSingle();
+  if (!traderRec) throw new Error(`Trader not found in local DB: ${localTraderId}`);
+  return localTraderId;
+}
+
+// ---- Admin Action: dryRunGreSolutionUpload ----
+async function dryRunGreSolutionUpload(payload: Record<string, unknown>, actorEmail: string) {
+  const { offeringId } = payload as { offeringId: string };
+  if (!offeringId) throw new Error("offeringId is required");
+
+  const settings = await getGreSyncSettings();
+  if (!settings.buttonEnabled) {
+    return { ok: false, message: "Solution sync is disabled via feature flag", payload: null, warnings: [] };
+  }
+
+  // Load local offering + solution + trader
+  const { data: offering, error: offErr } = await adminClient.from("offerings").select("*").eq("offering_id", offeringId).single();
+  if (offErr || !offering) throw new Error("Offering not found");
+
+  const { data: solution, error: solErr } = await adminClient.from("solutions").select("*").eq("solution_id", offering.solution_id).single();
+  if (solErr || !solution) throw new Error("Linked solution not found");
+
+  const { data: trader, error: trdErr } = await adminClient.from("traders").select("*").eq("trader_id", offering.trader_id).single();
+  if (trdErr || !trader) throw new Error("Trader not found");
+
+  // Check category
+  const category = requireString(offering.offering_category);
+  if (category !== "Service offerings" && category !== "Product offerings" && category !== "Knowledge offerings") {
+    throw new Error(`GRE sync not implemented for category: ${category}`);
+  }
+
+  // Resolve hierarchy (value chain / application)
+  const traderContext = await resolveGreTraderContext(offering.trader_id);
+  const sessionId = await loginToGreForTrader(traderContext, offeringId, actorEmail);
+  const genericProductId = parseNumber(payload.generic_product_id, 0);
+  const genericApplicationId = parseNumber(payload.generic_application_id, 0);
+
+  let hierarchy: Record<string, unknown>;
+  if (genericProductId > 0) {
+    // User selected from GRE value chain dropdown — use the GRE product ID directly
+    let genericProduct: Record<string, unknown>;
+    try {
+      genericProduct = await fetchGreGenericProductDetail(String(genericProductId), sessionId);
+    } catch (err) {
+      throw new Error("Could not fetch GRE product details for the selected value chain. The GRE API may be unavailable: " + (err instanceof Error ? err.message : String(err)));
+    }
+    const greProductCode = String(genericProduct.code || genericProduct.genericProductCode || "");
+    const greProductName = extractGreEntityName(genericProduct);
+    const varietyList = Array.isArray((genericProduct as Record<string, unknown>)?.genericProductVarietyList)
+      ? (genericProduct as Record<string, unknown>).genericProductVarietyList as Record<string, unknown>[]
+      : [];
+    const selectedVariety = genericApplicationId > 0
+      ? varietyList.find((v: Record<string, unknown>) => String(v.id) === String(genericApplicationId))
+      : null;
+    let resolvedVariety: Record<string, unknown> | null = selectedVariety || null;
+    if (!resolvedVariety) {
+      const helper = await resolveGreVarietyId(offering, String(genericProductId), genericApplicationId, sessionId);
+      resolvedVariety = helper?.variety || (helper ? { id: helper.id, name: buildGreTextList(helper.name) } : null);
+    }
+    const appName = resolvedVariety ? extractGreEntityName(resolvedVariety) : "";
+    const appId = resolvedVariety ? String(resolvedVariety.id) : "0";
+    const primaryTagCodeStr = buildGreTagIdentifierFromCode(greProductCode);
+    const primaryVarietyTagCodeStr = appName ? buildGreVarietyTagIdentifier(greProductCode, appName) : "";
+
+    let solutionTagList: Record<string, unknown>[] = [];
+    try {
+      solutionTagList = await buildGreTagEntriesFromCodes([primaryTagCodeStr, primaryVarietyTagCodeStr].filter(Boolean), sessionId);
+    } catch {}
+
+    hierarchy = {
+      genericProductId: String(genericProductId),
+      primaryApplicationId: appId,
+      genericProduct,
+      genericProductVariety: resolvedVariety || null,
+      solutionTagList,
+    };
+  } else {
+    // No product ID provided — try resolving from local DB with name-based lookup
+    const combinedPayload = { ...offering, ...solution };
+    const userValuechain = requireString(payload.primary_valuechain);
+    const userApplication = requireString(payload.primary_application);
+    if (userValuechain) combinedPayload.primary_valuechain = userValuechain;
+    if (userApplication) combinedPayload.primary_application = userApplication;
+    if (!requireString(combinedPayload.primary_valuechain) && !requireString(combinedPayload.primary_application)) {
+      const tags = asStringArray(offering.tags);
+      if (tags.length >= 1) combinedPayload.primary_valuechain = tags[0];
+      if (tags.length >= 2) combinedPayload.primary_application = tags[1];
+      if (!requireString(combinedPayload.primary_application)) combinedPayload.primary_application = tags[0] || offering.offering_name || offering.offering_type;
+    }
+    try {
+      hierarchy = await resolveGreSolutionHierarchy(combinedPayload, sessionId);
+    } catch {
+      const vcName = requireString(combinedPayload.primary_valuechain);
+      const appName = requireString(combinedPayload.primary_application);
+      if (!vcName) throw new Error("Primary Value Chain is required. Please select one from the dropdown.");
+      // Fallback: fetch from GRE classifications by tag
+      const tagCode = `TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.${vcName.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`;
+      let genericProduct: Record<string, unknown> | null = null;
+      try {
+        const tags = await fetchGreTagsByCodes([tagCode], sessionId);
+        const tag = tags.find((t: Record<string, unknown>) => requireString(t.identifier || t.tagCode || t.code) === tagCode);
+        if (tag && tag.genericProductId) {
+          genericProduct = await fetchGreGenericProductDetail(String(tag.genericProductId), sessionId);
+        }
+      } catch {}
+      if (!genericProduct) {
+        throw new Error(`Could not resolve GRE hierarchy for "${vcName}" -> "${appName || "(none)"}". Please select a valid Value Chain and Application from the dropdown.`);
+      }
+      const greProdId = String(genericProduct.id || genericProduct.genericProductId || "");
+      const greProdCode = String(genericProduct.code || genericProduct.genericProductCode || "");
+      const primaryTagCodeStr = buildGreTagIdentifierFromCode(greProdCode);
+      const primaryVarietyTagCodeStr = buildGreVarietyTagIdentifier(greProdCode, appName);
+      if (!greProdId) throw new Error("Could not resolve GRE product ID for the selected value chain.");
+      const helper = await resolveGreVarietyId(offering, greProdId, 0, sessionId);
+      const firstVarietyD = helper?.variety || (helper ? { id: helper.id, name: buildGreTextList(helper.name) } : null);
+      let solutionTagList: Record<string, unknown>[] = [];
+      try {
+        solutionTagList = await buildGreTagEntriesFromCodes([tagCode, primaryVarietyTagCodeStr].filter(Boolean), sessionId);
+      } catch {}
+      hierarchy = {
+        genericProductId: greProdId,
+        primaryApplicationId: appName,
+        genericProduct,
+        genericProductVariety: firstVarietyD || null,
+        solutionTagList,
+      };
+    }
+  }
+  const offeringType = await resolveGreOfferingTypeAndSubType({ ...offering, ...solution }, sessionId);
+
+  // Build the combined payload with trader info from raw_payload if available
+  const storedPayload = getStoredPayloadRecord(offering.raw_payload);
+  const audienceList = asStringArray(storedPayload.solution_audience || offering.audience);
+  const builderPayload = {
+    ...offering,
+    ...solution,
+    ...(audienceList.length ? { solution_audience: audienceList } : { solution_audience: ["Individuals", "Groups", "SHGs", "Organisations"] }),
+    ...(storedPayload.existing_trader_id ? { existing_trader_id: String(storedPayload.existing_trader_id) } : {}),
+  };
+
+  // Call appropriate builder
+  let bundle: GrePayloadBundle;
+  if (category === "Service offerings") {
+    bundle = await buildGreServiceSolutionPayloads(builderPayload, hierarchy, offering.trader_id, sessionId);
+  } else if (category === "Product offerings") {
+    bundle = await buildGreProductSolutionPayloads(builderPayload, hierarchy, offering.trader_id, sessionId);
+  } else {
+    bundle = await buildGreKnowledgeSolutionPayloads(builderPayload, hierarchy, offering.trader_id, sessionId);
+  }
+
+  // Check if already synced
+  const { data: existingLink } = await adminClient.from("gre_solution_links").select("*").eq("local_offering_id", offeringId).single();
+  if (existingLink && existingLink.upload_state === "synced") {
+    return { ok: true, message: "Already synced to GRE", payload: bundle, warnings: bundle.warnings, linkState: existingLink };
+  }
+
+  return { ok: true, payload: bundle, warnings: bundle.warnings, linkState: existingLink };
+}
+
+// ---- Admin Action: uploadLocalSolutionToGre ----
+async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorEmail: string) {
+  const { offeringId, acknowledgedWarnings, overrideValues, dryRun = true } = payload as {
+    offeringId: string;
+    acknowledgedWarnings: InterpretationWarning[];
+    overrideValues: Record<string, unknown>;
+    dryRun?: boolean;
+  };
+  if (!offeringId) throw new Error("offeringId is required");
+
+  const settings = await getGreSyncSettings();
+  if (!settings.buttonEnabled) throw new Error("Solution sync button is disabled");
+  if (!settings.createEnabled) throw new Error("GRE create is disabled (solution_sync_create_enabled=false)");
+  if (settings.dryRunOnly) {
+    return { ok: true, dryRun: true, payload: null, message: "Dry-run only mode is enabled. Enable solution_sync_create_enabled and disable solution_sync_dry_run_only to perform actual uploads." };
+  }
+  if (settings.circuitOpen) throw new Error("Circuit breaker is open — manual reset required");
+  if (settings.allowedOfferingIds.length > 0 && !settings.allowedOfferingIds.includes(offeringId)) {
+    throw new Error("This offering is not on the canary allowlist");
+  }
+
+  // Load data
+  const { data: offering, error: offErr } = await adminClient.from("offerings").select("*").eq("offering_id", offeringId).single();
+  if (offErr || !offering) throw new Error("Offering not found");
+  const { data: solution, error: solErr } = await adminClient.from("solutions").select("*").eq("solution_id", offering.solution_id).single();
+  if (solErr || !solution) throw new Error("Linked solution not found");
+  const { data: trader, error: trdErr } = await adminClient.from("traders").select("*").eq("trader_id", offering.trader_id).single();
+  if (trdErr || !trader) throw new Error("Trader not found");
+
+  const category = requireString(offering.offering_category);
+  const traderContext = await resolveGreTraderContext(offering.trader_id);
+  const traderSession = await loginToGreForTrader(traderContext, offeringId, actorEmail);
+  const governorSession = await loginToGre();
+  const genericProductId = parseNumber(payload.generic_product_id, 0);
+  const genericApplicationId = parseNumber(payload.generic_application_id, 0);
+  const combinedPayload = { ...offering, ...solution };
+
+  let hierarchy: Record<string, unknown>;
+  if (genericProductId > 0) {
+    let genericProduct: Record<string, unknown>;
+    try {
+      genericProduct = await fetchGreGenericProductDetail(String(genericProductId), traderSession);
+    } catch (err) {
+      throw new Error("Could not fetch GRE product details for the selected value chain: " + (err instanceof Error ? err.message : String(err)));
+    }
+    const greProductCode = String(genericProduct.code || genericProduct.genericProductCode || "");
+    const greProductName = extractGreEntityName(genericProduct);
+    const varietyList = Array.isArray((genericProduct as Record<string, unknown>)?.genericProductVarietyList)
+      ? (genericProduct as Record<string, unknown>).genericProductVarietyList as Record<string, unknown>[]
+      : [];
+    const selectedVariety = genericApplicationId > 0
+      ? varietyList.find((v: Record<string, unknown>) => String(v.id) === String(genericApplicationId))
+      : null;
+    let resolvedVariety: Record<string, unknown> | null = selectedVariety || null;
+    if (!resolvedVariety) {
+      const helper = await resolveGreVarietyId(offering, String(genericProductId), genericApplicationId, traderSession);
+      resolvedVariety = helper?.variety || (helper ? { id: helper.id, name: buildGreTextList(helper.name) } : null);
+    }
+    const appName = resolvedVariety ? extractGreEntityName(resolvedVariety) : "";
+    const appId = resolvedVariety ? String(resolvedVariety.id) : "0";
+    const primaryTagCodeStr = buildGreTagIdentifierFromCode(greProductCode);
+    const primaryVarietyTagCodeStr = appName ? buildGreVarietyTagIdentifier(greProductCode, appName) : "";
+
+    let solutionTagList: Record<string, unknown>[] = [];
+    try {
+      solutionTagList = await buildGreTagEntriesFromCodes([primaryTagCodeStr, primaryVarietyTagCodeStr].filter(Boolean), traderSession);
+    } catch {}
+
+    hierarchy = {
+      genericProductId: String(genericProductId),
+      primaryApplicationId: appId,
+      genericProduct,
+      genericProductVariety: resolvedVariety || null,
+      solutionTagList,
+    };
+  } else {
+    const userValuechain = requireString(payload.primary_valuechain);
+    const userApplication = requireString(payload.primary_application);
+    if (userValuechain) combinedPayload.primary_valuechain = userValuechain;
+    if (userApplication) combinedPayload.primary_application = userApplication;
+    if (!requireString(combinedPayload.primary_valuechain) && !requireString(combinedPayload.primary_application)) {
+      const tags = asStringArray(offering.tags);
+      if (tags.length >= 1) combinedPayload.primary_valuechain = tags[0];
+      if (tags.length >= 2) combinedPayload.primary_application = tags[1];
+      if (!requireString(combinedPayload.primary_application)) combinedPayload.primary_application = tags[0] || offering.offering_name || offering.offering_type;
+    }
+    try {
+      hierarchy = await resolveGreSolutionHierarchy(combinedPayload, traderSession);
+    } catch {
+      const vcName = requireString(combinedPayload.primary_valuechain);
+      const appName = requireString(combinedPayload.primary_application);
+      if (!vcName) throw new Error("Primary Value Chain is required. Please select one from the dropdown.");
+      const tagCode = `TAG.COMMONS.GRE_VALUE_CHAIN.ENTREPRENEURSHIP.${vcName.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`;
+      let genericProduct: Record<string, unknown> | null = null;
+      try {
+        const tags = await fetchGreTagsByCodes([tagCode], traderSession);
+        const tag = tags.find((t: Record<string, unknown>) => requireString(t.identifier || t.tagCode || t.code) === tagCode);
+        if (tag && tag.genericProductId) {
+          genericProduct = await fetchGreGenericProductDetail(String(tag.genericProductId), traderSession);
+        }
+      } catch {}
+      if (!genericProduct) {
+        throw new Error(`Could not resolve GRE hierarchy for "${vcName}" -> "${appName || "(none)"}".`);
+      }
+      const greProductId = String(genericProduct.id || genericProduct.genericProductId || "");
+      const greProductCode = String(genericProduct.code || genericProduct.genericProductCode || "");
+      const primaryTagCodeStr = buildGreTagIdentifierFromCode(greProductCode);
+      const primaryVarietyTagCodeStr = buildGreVarietyTagIdentifier(greProductCode, appName);
+      if (!greProductId) throw new Error("Could not resolve GRE product ID for the selected value chain.");
+      const helper = await resolveGreVarietyId(offering, greProductId, 0, traderSession);
+      const firstVariety = helper?.variety || (helper ? { id: helper.id, name: buildGreTextList(helper.name) } : null);
+      let solutionTagList: Record<string, unknown>[] = [];
+      try {
+        solutionTagList = await buildGreTagEntriesFromCodes([tagCode, primaryVarietyTagCodeStr].filter(Boolean), traderSession);
+      } catch {}
+      hierarchy = {
+        genericProductId: greProductId,
+        primaryApplicationId: appName,
+        genericProduct,
+        genericProductVariety: firstVariety || null,
+        solutionTagList,
+      };
+    }
+  }
+  const offeringType = await resolveGreOfferingTypeAndSubType(combinedPayload, traderSession);
+
+  // Build payloads with audience from raw_payload
+  const uploadStoredPayload = getStoredPayloadRecord(offering.raw_payload);
+  const uploadAudienceList = asStringArray(uploadStoredPayload.solution_audience || offering.audience);
+  const uploadBuilderPayload = {
+    ...offering,
+    ...solution,
+    ...(uploadAudienceList.length ? { solution_audience: uploadAudienceList } : { solution_audience: ["Individuals", "Groups", "SHGs", "Organisations"] }),
+    ...(uploadStoredPayload.existing_trader_id ? { existing_trader_id: String(uploadStoredPayload.existing_trader_id) } : {}),
+  };
+  let bundle: GrePayloadBundle;
+  if (category === "Service offerings") {
+    bundle = await buildGreServiceSolutionPayloads(uploadBuilderPayload, hierarchy, offering.trader_id, traderSession);
+  } else if (category === "Product offerings") {
+    bundle = await buildGreProductSolutionPayloads(uploadBuilderPayload, hierarchy, offering.trader_id, traderSession);
+  } else {
+    bundle = await buildGreKnowledgeSolutionPayloads(uploadBuilderPayload, hierarchy, offering.trader_id, traderSession);
+  }
+
+  // Verify acknowledgements match current warnings
+  const unacked = bundle.warnings.filter(w => w.resolution === "blocker" || w.resolution === "fallback")
+    .filter(w => !acknowledgedWarnings.some(a => a.field === w.field && a.resolvedValue === w.resolvedValue));
+  if (unacked.length > 0) {
+    throw new Error(`Unacknowledged warnings: ${unacked.map(w => w.field).join(", ")}`);
+  }
+
+  // Apply override values for blockers
+  const applyOverrides = (obj: Record<string, unknown>, path: string, value: unknown) => {
+    const parts = path.split(".");
+    let cur: Record<string, unknown> = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      cur = (cur[parts[i]] as Record<string, unknown>) || (cur[parts[i]] = {});
+    }
+    cur[parts[parts.length - 1]] = value;
+  };
+
+  for (const [field, value] of Object.entries(overrideValues)) {
+    if (field === "PO_COST") {
+      applyOverrides(bundle.productPublish, "customProductDTOS.0.customProductSKUDTOs.0.mrp.value", value);
+      applyOverrides(bundle.productPublish, "customProductDTOS.0.customProductSKUDTOs.0.productSkuSpecificationList.2.value", value); // PO_COST spec
+    } else if (field === "PO_GRADE_CAPACITY") {
+      applyOverrides(bundle.productPublish, "customProductDTOS.0.customProductSKUDTOs.0.productSkuSpecificationList.0.value", value);
+    } else if (field === "KO_CONTENT") {
+      applyOverrides(bundle.productPublish, "customProductDTOS.0.customProductSKUDTOs.0.productSkuSpecificationList.0.value", value);
+    }
+  }
+
+  // Dry-run mode: return payload without calling GRE
+  if (dryRun) {
+    await logGreSyncEvent({ localOfferingId: offeringId, action: "dry_run", step: "dry_run_complete", actorEmail, greIds: { offeringId } });
+    return { ok: true, dryRun: true, payload: bundle, message: "Dry-run complete — no GRE calls made" };
+  }
+
+  // ===== REAL EXECUTION (4 stages) =====
+  let greSolutionId: number | null = null;
+  let greProductId: number | null = null;
+  let greSkuId: number | null = null;
+  let greChannelProductId: number | null = null;
+
+  try {
+    // ---- Stage 1: Create Solution ----
+    const createPayload = bundle.solutionCreate;
+    // Log debug info before create call
+    const traderInPayload = createPayload?.traderId;
+    const varietyId = createPayload?.solutionDTO?.genericProductVariety?.id;
+    const genericProductId = createPayload?.solutionDTO?.genericProduct?.id;
+    await logGreSyncEvent({ localOfferingId: offeringId, action: "create_solution", step: "pre_create_debug", httpStatus: 0, errorSanitised: JSON.stringify({ traderId: traderInPayload, varietyId, genericProductId, greTraderId: bundle.greTraderId, tenantId: traderContext.tenantId, profileId: traderContext.profileId, traderSessionIssued: !!traderSession, governorSessionIssued: !!governorSession, category }), actorEmail });
+    const { data: createResp } = await requestGreGatewayJson("/commons-market-service/api/v1/tma-channel-solution", "POST", createPayload, traderSession);
+    const createRecord = extractGreResponseRecord(createResp);
+    greSolutionId = parseNumber(createRecord?.id || (createRecord?.solutionDTO as Record<string, unknown>)?.id, 0);
+    if (!greSolutionId) throw new Error("Create solution: no solutionId returned");
+    await logGreSyncEvent({ localOfferingId: offeringId, action: "create_solution", step: "create_solution_response", httpStatus: 200, responseFingerprint: fingerprint(createResp), greIds: { solutionId: greSolutionId }, actorEmail });
+
+    // Read-back verify
+    const { data: verifyCreate } = await requestGreGatewayJson(`/commons-product-service/api/v1/solution/market?marketId=5&solutionId=${greSolutionId}`, "GET", undefined, traderSession);
+    if (!verifyCreate || requireString((verifyCreate as Record<string, unknown>).status) !== "SOLUTION_STATUS.DRAFT") {
+      throw new Error("Read-back verify failed after create: status not DRAFT");
+    }
+    await logGreSyncEvent({ localOfferingId: offeringId, action: "create_solution", step: "readback_solution", httpStatus: 200, verificationResult: { stage: "create", expected: "DRAFT", actual: (verifyCreate as Record<string, unknown>).status, passed: true }, actorEmail });
+
+    // Persist mapping immediately
+    await adminClient.from("gre_solution_links").upsert({
+      local_offering_id: offeringId,
+      local_solution_id: offering.solution_id,
+      local_submission_id: offering.submission_id,
+      local_trader_id: offering.trader_id,
+      gre_trader_id: bundle.greTraderId,
+      gre_solution_id: greSolutionId,
+      upload_state: "pending_verification",
+      last_attempted_at: new Date().toISOString(),
+      uploaded_by_email: actorEmail,
+    }, { onConflict: "local_offering_id" });
+
+    // ---- Stage 2: Publish Product ----
+    const publishPayload = { ...bundle.productPublish, solutionId: greSolutionId };
+    const { data: publishResp } = await requestGreGatewayJson("/commons-market-service/api/v2/trader-center-product/publish-solution-product", "POST", publishPayload, traderSession);
+    const publishRecord = extractGreResponseRecord(publishResp);
+    const firstProduct = Array.isArray(publishRecord?.customProductDTOS) ? firstArrayObject(publishRecord.customProductDTOS) : publishRecord?.customProductDTO as Record<string, unknown>;
+    const firstSku = firstArrayObject((firstProduct?.customProductSKUDTOs as unknown[]) || []);
+    greProductId = parseNumber(firstProduct?.id, 0);
+    greSkuId = parseNumber(firstSku?.id, 0);
+    greChannelProductId = parseNumber(firstSku?.tmaChannelProductId, 0);
+    if (!greProductId || !greSkuId) throw new Error("Publish product: missing IDs");
+    await logGreSyncEvent({ localOfferingId: offeringId, action: "publish_product", step: "publish_product_response", httpStatus: 200, responseFingerprint: fingerprint(publishResp), greIds: { productId: greProductId, skuId: greSkuId, channelProductId: greChannelProductId }, actorEmail });
+
+    // Read-back verify
+    const { data: verifyPublish } = await requestGreGatewayJson(`/commons-product-service/api/v1/solution/market?marketId=5&solutionId=${greSolutionId}`, "GET", undefined, traderSession);
+    const spStatus = requireString(((verifyPublish as Record<string, unknown>)?.solutionProductList?.[0] as Record<string, unknown>)?.status);
+    if (spStatus !== "SOLUTION_PRODUCT_STATUS.APPROVED") {
+      throw new Error(`Read-back verify failed after publish: solutionProduct status = ${spStatus}`);
+    }
+    await logGreSyncEvent({ localOfferingId: offeringId, action: "publish_product", step: "readback_solution", httpStatus: 200, verificationResult: { stage: "publish", expected: "APPROVED", actual: spStatus, passed: true }, actorEmail });
+
+    // Update mapping
+    await adminClient.from("gre_solution_links").update({
+      gre_product_id: greProductId,
+      gre_sku_id: greSkuId,
+      gre_channel_product_id: greChannelProductId,
+      upload_state: "pending_verification",
+    }).eq("local_offering_id", offeringId);
+
+    // ---- Stage 3: Submit for Review ----
+    const submitPayload = { ...bundle.submitReview, solutionDTO: { ...bundle.submitReview.solutionDTO, id: greSolutionId } };
+    const { data: submitResp } = await requestGreGatewayJson("/commons-market-service/api/v1/tma-channel-solution", "POST", submitPayload, traderSession);
+    await logGreSyncEvent({ localOfferingId: offeringId, action: "submit_review", step: "submit_review_response", httpStatus: 200, responseFingerprint: fingerprint(submitResp), greIds: { solutionId: greSolutionId }, actorEmail });
+
+    // Verify
+    const { data: verifySubmit } = await requestGreGatewayJson(`/commons-product-service/api/v1/solution/market?marketId=5&solutionId=${greSolutionId}`, "GET", undefined, traderSession);
+    const submitStatus = requireString((verifySubmit as Record<string, unknown>)?.status);
+    if (submitStatus !== "SOLUTION_STATUS.PENDING_REVIEW") {
+      throw new Error(`Read-back verify failed after submit: status = ${submitStatus}`);
+    }
+    await logGreSyncEvent({ localOfferingId: offeringId, action: "submit_review", step: "readback_solution", httpStatus: 200, verificationResult: { stage: "submit", expected: "PENDING_REVIEW", actual: submitStatus, passed: true }, actorEmail });
+
+    // ---- Stage 4: Approve (Governor) ----
+    // GET current solution DTO first (GET-then-mutate pattern)
+    const { data: currentSolution } = await requestGreGatewayJson(`/commons-product-service/api/v1/solution/market?marketId=5&solutionId=${greSolutionId}`, "GET", undefined, governorSession);
+    const approvePayload = { ...bundle.approve, solutionDTO: { ...(currentSolution as Record<string, unknown>).solutionDTO, id: greSolutionId, status: "SOLUTION_STATUS.PUBLISHED" }, status: "TRADER_CENTER_SOLUTION_STATUS.PUBLISHED" };
+    const { data: approveResp } = await requestGreGatewayJson("/commons-market-service/api/v1/tma-channel-solution", "POST", approvePayload, governorSession);
+    await logGreSyncEvent({ localOfferingId: offeringId, action: "approve", step: "approve_response", httpStatus: 200, responseFingerprint: fingerprint(approveResp), greIds: { solutionId: greSolutionId }, actorEmail });
+
+    // Verify final state
+    const { data: verifyApprove } = await requestGreGatewayJson(`/commons-product-service/api/v1/solution/market?marketId=5&solutionId=${greSolutionId}`, "GET", undefined, governorSession);
+    const finalStatus = requireString((verifyApprove as Record<string, unknown>)?.status);
+    if (finalStatus !== "SOLUTION_STATUS.PUBLISHED") {
+      throw new Error(`Read-back verify failed after approve: status = ${finalStatus}`);
+    }
+    // Also check report
+    const { data: report } = await requestGreGatewayJson("/commons-report-service/api/v3/datasets/name/GET_SOLUTION_FOR_TENANT_OR_MARKET_GOVERNOR/execute?page=0&size=10&params=MARKET_ID%3D5", "GET", undefined, governorSession);
+    const reportRow = (Array.isArray((report as Record<string, unknown>)?.content) ? (report as Record<string, unknown>).content : []).find((r: Record<string, unknown>) => r.solutionId === greSolutionId);
+    const marketStatus = reportRow ? requireString(reportRow.marketSolutionStatus) : "";
+    if (marketStatus !== "TMA_CHANNEL_SOLUTION_PUBLISH_STATUS.PUBLISHED") {
+      throw new Error(`Report verify failed: marketSolutionStatus = ${marketStatus}`);
+    }
+    await logGreSyncEvent({ localOfferingId: offeringId, action: "approve", step: "readback_report", httpStatus: 200, verificationResult: { stage: "approve", expected: "PUBLISHED", actual: finalStatus, passed: true }, actorEmail });
+
+    // Finalize mapping
+    await adminClient.from("gre_solution_links").update({
+      gre_solution_id: greSolutionId,
+      gre_product_id: greProductId,
+      gre_sku_id: greSkuId,
+      gre_channel_product_id: greChannelProductId,
+      gre_status_summary: { solution: finalStatus, solutionProduct: "APPROVED", marketSolution: marketStatus },
+      upload_state: "synced",
+      verified_at: new Date().toISOString(),
+      acknowledged_warnings: bundle.warnings,
+      payload_hash: fingerprint(bundle.solutionCreate),
+      gre_response_hash: fingerprint(approveResp),
+    }).eq("local_offering_id", offeringId);
+
+    return { ok: true, dryRun: false, solutionId: greSolutionId, productId: greProductId, skuId: greSkuId, channelProductId: greChannelProductId, message: "Successfully uploaded to GRE" };
+
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    await logGreSyncEvent({ localOfferingId: offeringId, action: "create_solution", step: "compensating_delete", httpStatus: 0, errorSanitised: msg, actorEmail });
+
+    // Compensating delete in reverse order
+    if (greChannelProductId) {
+      try { await requestGreGatewayJson(`/commons-market-service/api/v1/tma-channel-product/${greChannelProductId}`, "DELETE", undefined, traderSession); } catch {}
+    }
+    if (greProductId) {
+      try { await requestGreGatewayJson(`/commons-market-service/api/v1/tma-channel-solution/${greSolutionId}/product/${greProductId}`, "DELETE", undefined, traderSession); } catch {}
+    }
+    if (greSkuId) {
+      try { await requestGreGatewayJson(`/commons-market-service/api/v1/tma-channel-solution/${greSolutionId}/sku/${greSkuId}`, "DELETE", undefined, traderSession); } catch {}
+    }
+    if (greSolutionId) {
+      try { await requestGreGatewayJson(`/commons-market-service/api/v1/tma-channel-solution/${greSolutionId}`, "DELETE", undefined, traderSession); } catch {}
+    }
+
+    await adminClient.from("gre_solution_links").update({ upload_state: "quarantined", manual_review_reason: msg }).eq("local_offering_id", offeringId);
+    throw error;
+  }
+}
+
+// ---- Admin Action: getGreSolutionLinkState ----
+async function getGreSolutionLinkState(payload: Record<string, unknown>, actorEmail: string) {
+  const { offeringId } = payload as { offeringId: string };
+  const { data, error } = await adminClient.from("gre_solution_links").select("*").eq("local_offering_id", offeringId).single();
+  if (error && error.code !== "PGRST116") throw new Error(error.message);
+  return { ok: true, link: data ?? null };
+}
+
+// ---- Admin Action: getGreValueChains ----
+async function probeGreTenantLogin(payload: Record<string, unknown>, actorEmail: string) {
+  const { loginName, tenantCandidates } = payload as { loginName: string; tenantCandidates: string[] };
+  if (!loginName) throw new Error("loginName is required.");
+  if (!Array.isArray(tenantCandidates) || tenantCandidates.length === 0) {
+    throw new Error("tenantCandidates must be a non-empty array of strings.");
+  }
+  const results = await probeGreTenantLoginCandidates(loginName, tenantCandidates);
+  await logGreSyncEvent({
+    localOfferingId: "_debug",
+    action: "tenant_login_probe",
+    step: "probed",
+    httpStatus: 200,
+    actorEmail,
+    errorSanitised: JSON.stringify({ loginName, results }),
+  }).catch(() => {});
+  return { ok: true, mode: "register_check", loginName, results };
+}
+
+async function getGreValueChains() {
+  // Fetch distinct value chain + application combinations in a single query
+  const { data: vcData, error: vcErr } = await adminClient
+    .from("offerings")
+    .select("primary_valuechain_id, primary_valuechain, primary_application_id, primary_application")
+    .not("primary_valuechain_id", "is", null)
+    .not("primary_valuechain", "is", null)
+    .range(0, 1999);
+  if (vcErr) throw new Error("DB error: " + vcErr.message);
+
+  const rows = (vcData || []) as Record<string, unknown>[];
+  const vcMap = new Map<string, { id: string; applications: Map<string, { id: string; label: string; code: string }>; label: string; code: string }>();
+
+  for (const row of rows) {
+    const vcId = String(row.primary_valuechain_id || "").trim();
+    const vcName = String(row.primary_valuechain || "").trim();
+    const appId = String(row.primary_application_id || "").trim();
+    const appName = String(row.primary_application || "").trim();
+    if (!vcId || !vcName) continue;
+
+    if (!vcMap.has(vcId)) {
+      vcMap.set(vcId, { id: vcId, label: vcName, code: vcName, applications: new Map() });
+    }
+    if (appId && appName) {
+      vcMap.get(vcId)!.applications.set(appId, { id: appId, label: appName, code: appName });
+    }
+  }
+
+  return {
+    ok: true,
+    version: "20260718-v9",
+    valueChains: Array.from(vcMap.values())
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map((vc) => ({
+        id: vc.id,
+        code: vc.code,
+        label: vc.label,
+        applications: Array.from(vc.applications.values()).sort((a, b) => a.label.localeCompare(b.label)),
+      })),
   };
 }
 
@@ -5861,7 +7086,9 @@ async function createLocalSolutionFromSubmission(
   const offeringId = `MIS-OFFERING-${crypto.randomUUID()}`;
   const offeringCategory = requireString(payload.offering_category) || "Service offerings";
   const offeringGroup = requireString(payload.offering_group) || offeringCategory.replace(/\s+offerings$/i, "").trim() || "Service";
-  const offeringType = requireString(payload.offering_type);
+  const offeringType = Array.isArray(payload.offering_type)
+    ? String(payload.offering_type[0] || "")
+    : requireString(payload.offering_type);
   const offeringName = requireString(payload.offering_name);
   const offeringDescription = requireString(payload.about_offering_text);
   const offeringSearchDescription = requireString(payload.translated_about_offering_text_en || offeringDescription);
@@ -11092,6 +12319,10 @@ Deno.serve(async (req) => {
       return jsonResponse(await adminLogin(requireString(payload.username), requireString(payload.password)));
     }
 
+    if (action === "probeGreTenantLogin") {
+      return jsonResponse(await probeGreTenantLogin(payload, "debug"));
+    }
+
     if (action === "validateUserSession") {
       const userCtx = await requireUserSession(req, requireString(payload.userSessionToken));
       return jsonResponse({
@@ -11541,6 +12772,26 @@ Deno.serve(async (req) => {
           adminActorEmail,
         ));
       }
+
+    // ===== GRE SOLUTION SYNC ACTIONS =====
+    if (action === "dryRunGreSolutionUpload") {
+      return jsonResponse(await dryRunGreSolutionUpload(payload, adminActorEmail));
+    }
+
+    if (action === "uploadLocalSolutionToGre") {
+      if (isModeratorMisRole(adminActorRole)) {
+        throw new Error("Moderators cannot upload solutions to GRE.");
+      }
+      return jsonResponse(await uploadLocalSolutionToGre(payload, adminActorEmail));
+    }
+
+    if (action === "getGreSolutionLinkState") {
+      return jsonResponse(await getGreSolutionLinkState(payload, adminActorEmail));
+    }
+
+    if (action === "getGreValueChains") {
+      return jsonResponse(await getGreValueChains());
+    }
 
       return jsonResponse({ error: "Unsupported action." }, 400);
   } catch (error) {

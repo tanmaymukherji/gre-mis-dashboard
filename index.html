@@ -1291,6 +1291,86 @@
     </form>
   </dialog>
 
+  <dialog id="greSyncDryRunDialog" class="modal">
+    <form id="greSyncDryRunForm" class="modal-card modal-card-wide">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Upload to GRE — Dry-Run Preview</p>
+          <h3 id="greSyncDryRunTitle">Review Payload Before Sync</h3>
+        </div>
+        <button type="button" id="closeGreSyncDryRunDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <div id="greSyncDryRunMeta" class="detail-list review-meta-list"></div>
+      <div class="modal-body">
+        <section class="panel panel-soft">
+          <div class="panel-head panel-head-tight">
+            <div>
+              <p class="eyebrow">Interpretation Warnings</p>
+              <h4>Fields Requiring Acknowledgement</h4>
+            </div>
+          </div>
+          <ul id="greSyncWarningsList" class="warnings-list"></ul>
+          <div id="greSyncOverrideInputs" class="override-inputs"></div>
+        </section>
+        <section class="panel panel-soft">
+          <div class="panel-head panel-head-tight">
+            <div>
+              <p class="eyebrow">Field Mapping Diff</p>
+              <h4>Local Value → GRE Spec → Resolved Value</h4>
+            </div>
+          </div>
+          <div id="greSyncDiff" class="diff-table-container"></div>
+        </section>
+        <section class="panel panel-soft">
+          <div class="panel-head panel-head-tight">
+            <div>
+              <p class="eyebrow">Raw Payload Preview</p>
+              <h4>Stages 1–4 JSON</h4>
+            </div>
+          </div>
+          <div id="greSyncPayload" class="payload-preview"></div>
+        </section>
+      </div>
+      <p id="greSyncDryRunStatus" class="helper-text"></p>
+      <div class="modal-actions">
+        <button type="button" id="greSyncCancelBtn" class="btn btn-secondary">Cancel</button>
+        <button type="button" id="greSyncConfirmBtn" class="btn btn-primary" disabled>Confirm Upload (Dry-Run)</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="greValueChainSelectorDialog" class="modal">
+    <form id="greValueChainSelectorForm" class="modal-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Upload to GRE</p>
+          <h3>Select Value Chain and Application</h3>
+        </div>
+        <button type="button" id="closeGreValueChainSelector" class="btn btn-secondary">Close</button>
+      </div>
+      <p class="helper-text" style="margin-bottom:16px;">Choose the GRE value chain that best matches this offering. This determines how your solution is categorized on the GRE platform.</p>
+      <div class="form-grid">
+        <label class="wide">
+          <span>Value Chain</span>
+          <select id="greValueChainSelect" required>
+            <option value="">Loading value chains...</option>
+          </select>
+        </label>
+        <label class="wide">
+          <span>Application (optional)</span>
+          <select id="greApplicationSelect">
+            <option value="">— None —</option>
+          </select>
+        </label>
+        <div id="greVcSelectorStatus" class="helper-text wide"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="cancelGreVcBtn" class="btn btn-secondary">Cancel</button>
+        <button type="button" id="confirmGreVcBtn" class="btn btn-primary" disabled>Continue to Review</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="localNeedReviewDialog" class="modal">
     <form id="localNeedReviewForm" class="modal-card modal-card-wide">
       <div class="modal-head">
@@ -1360,6 +1440,6 @@
     </form>
   </dialog>
 
-  <script src="./app.js?v=20260617gre01"></script>
+  <script src="./app.js?v=202607191336"></script>
 </body>
 </html>

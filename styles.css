@@ -465,7 +465,7 @@ h2 { font-size: 1.35rem; }
 .need-header,
 .card-actions,
 .match-head,
-.tab-row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.tab-row { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
 .access-form,
 .filters-grid,
 .taxonomy-grid,
@@ -1774,7 +1774,11 @@ body.public-solution-form-mode #shareSolutionFormBtn {
   border-radius: 14px;
   padding: 11px 15px;
   font: inherit;
-  font-weight: 700;
+}
+.btn-sm {
+  font-size: 0.75rem;
+  padding: 6px 10px;
+  border-radius: 10px;
 }
 .btn-primary {
   background: var(--green);
@@ -1860,7 +1864,7 @@ body.public-solution-form-mode #shareSolutionFormBtn {
 .local-solutions-grid {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
 }
 .user-management-card,
 .local-solution-card {
@@ -2138,4 +2142,213 @@ body.public-solution-form-mode #shareSolutionFormBtn {
   .offering-choice-btn {
     width: 100%;
   }
+}
+
+/* GRE Sync Dry-Run Dialog Styles */
+#greSyncDryRunDialog .modal-card {
+  max-width: 1100px;
+}
+#greSyncDryRunDialog .modal-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+#greSyncDryRunDialog .modal-body > section {
+  max-height: 50vh;
+  overflow: auto;
+}
+#greSyncDryRunDialog .warnings-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+#greSyncDryRunDialog .warning-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: #f8faf8;
+  border: 1px solid #e5e7eb;
+}
+#greSyncDryRunDialog .warning-item.blocker {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+#greSyncDryRunDialog .warning-item.fallback {
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+#greSyncDryRunDialog .warning-item.exact {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+#greSyncDryRunDialog .warning-item input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+#greSyncDryRunDialog .warning-content {
+  flex: 1;
+  min-width: 0;
+}
+#greSyncDryRunDialog .warning-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #1f2937;
+  margin-bottom: 4px;
+}
+#greSyncDryRunDialog .warning-desc {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+#greSyncDryRunDialog .warning-code {
+  font-family: monospace;
+  font-size: 0.65rem;
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #4b5563;
+}
+#greSyncDryRunDialog .override-inputs {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+#greSyncDryRunDialog .override-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+#greSyncDryRunDialog .override-field label {
+  min-width: 180px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #374151;
+}
+#greSyncDryRunDialog .override-field input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+#greSyncDryRunDialog .diff-table-container {
+  max-height: 40vh;
+  overflow: auto;
+}
+#greSyncDryRunDialog .diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+#greSyncDryRunDialog .diff-table th,
+#greSyncDryRunDialog .diff-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: top;
+}
+#greSyncDryRunDialog .diff-table th {
+  background: #f8faf8;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+  position: sticky;
+  top: 0;
+}
+#greSyncDryRunDialog .diff-table .col-local { width: 30%; }
+#greSyncDryRunDialog .diff-table .col-spec { width: 35%; }
+#greSyncDryRunDialog .diff-table .col-resolved { width: 35%; }
+#greSyncDryRunDialog .diff-table .field-name { font-weight: 600; color: #1f2937; }
+#greSyncDryRunDialog .diff-table .field-value { font-family: monospace; font-size: 0.7rem; color: #6b7280; }
+#greSyncDryRunDialog .diff-table .spec-detail { font-size: 0.65rem; color: #6b7280; }
+#greSyncDryRunDialog .diff-table .spec-row { display: flex; gap: 6px; margin: 2px 0; }
+#greSyncDryRunDialog .diff-table .spec-label { font-weight: 600; color: #6b7280; min-width: 100px; }
+#greSyncDryRunDialog .resolved-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-weight: 600;
+  font-size: 0.7rem;
+  font-family: monospace;
+}
+#greSyncDryRunDialog .resolved-value.exact { background: #f0fdf4; color: #16a34a; }
+#greSyncDryRunDialog .resolved-value.fallback { background: #fffbeb; color: #d97706; }
+#greSyncDryRunDialog .resolved-value.blocker { background: #fef2f2; color: #dc2626; }
+#greSyncDryRunDialog .payload-preview {
+  max-height: 35vh;
+  overflow: auto;
+}
+#greSyncDryRunDialog .payload-preview details {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+#greSyncDryRunDialog .payload-preview summary {
+  padding: 10px 12px;
+  background: #f8faf8;
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  list-style: none;
+}
+#greSyncDryRunDialog .payload-preview summary::-webkit-details-marker { display: none; }
+#greSyncDryRunDialog .payload-preview summary::before { content: "▶"; font-size: 0.6rem; margin-right: 8px; color: #6b7280; transition: transform 0.15s; }
+#greSyncDryRunDialog .payload-preview details[open] summary::before { transform: rotate(90deg); }
+#greSyncDryRunDialog .payload-preview pre {
+  margin: 0;
+  padding: 12px;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.65rem;
+  line-height: 1.5;
+  overflow: auto;
+  max-height: 300px;
+}
+#greSyncDryRunDialog .override-fields {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+#greSyncDryRunDialog .override-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+#greSyncDryRunDialog .override-field label {
+  min-width: 200px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #374151;
+}
+#greSyncDryRunDialog .override-field input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+#greSyncDryRunDialog .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  margin-top: 16px;
+}
+
+/* GRE Value Chain Selector Dialog */
+#greValueChainSelectorDialog .modal-card {
+  max-width: 640px;
+}
+#greValueChainSelectorDialog select {
+  width: 100%;
+  min-height: 46px;
 }
