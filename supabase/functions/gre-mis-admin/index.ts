@@ -3147,9 +3147,9 @@ async function buildGreServicePublishPayload(
   const locationAvailability = asStringArray(payload.location_availability);
   const serviceCost = requireString(payload.service_cost || "0");
   const serviceCostUnit = requireString(payload.service_cost_unit || "Can be quoted after finalising scope");
-  const supportPostService = requireString(payload.support_post_service);
-  const supportPostServiceCost = requireString(payload.support_post_service_cost);
-  const deliveryMode = requireString(payload.delivery_mode);
+  const supportPostService = requireString(payload.support_post_service) || "Not Provided";
+  const supportPostServiceCost = requireString(payload.support_post_service_cost) || "Not Applicable";
+  const deliveryMode = requireString(payload.delivery_mode) || "Offline";
   const certificationOffered = requireString(payload.certification_offered || "Not Provided");
   const costRemarks = requireString(payload.cost_remarks);
 
@@ -3160,10 +3160,6 @@ async function buildGreServicePublishPayload(
   if (!duration) throw new Error("Duration is required.");
   if (!prerequisites) throw new Error("Prerequisites are required.");
   if (!locationAvailability.length) throw new Error("At least one location availability choice is required.");
-  if (!supportPostService || !supportPostServiceCost || !deliveryMode) {
-    throw new Error("Support post service, support post service cost, and delivery mode are required.");
-  }
-
   const languageValues = await resolveGreChipValues("CLASS.TRAINING_LANGUAGE", languages, sessionId);
   const locationValues = await resolveGreChipValues(
     "CLASS.SERVICE_LOCATION_AVAILABILITY",
@@ -3176,18 +3172,16 @@ async function buildGreServicePublishPayload(
     },
   );
   const geographyValues = await resolveGreLocationValues(geographies, sessionId);
-  const supportPostServiceOption = findGreRefDataOption(
-    await fetchGreProductRefData("CLASS.POST_SERVICE", sessionId),
-    supportPostService,
-  );
-  const supportPostServiceCostOption = findGreRefDataOption(
-    await fetchGreProductRefData("CLASS.POST_SERVICE_COST", sessionId),
-    supportPostServiceCost,
-  );
-  const deliveryModeOption = findGreRefDataOption(
-    await fetchGreProductRefData("CLASS.SESSION_AVAILABILITY", sessionId),
-    deliveryMode,
-  );
+  const supportPostServiceOptions = await fetchGreProductRefData("CLASS.POST_SERVICE", sessionId);
+  const supportPostServiceCostOptions = await fetchGreProductRefData("CLASS.POST_SERVICE_COST", sessionId);
+  const deliveryModeOptions = await fetchGreProductRefData("CLASS.SESSION_AVAILABILITY", sessionId);
+  const supportPostServiceOption = findGreRefDataOption(supportPostServiceOptions, supportPostService)
+    || supportPostServiceOptions[0];
+  const supportPostServiceCostOption = findGreRefDataOption(supportPostServiceCostOptions, supportPostServiceCost)
+    || supportPostServiceCostOptions[0];
+  const deliveryModeOption = findGreRefDataOption(deliveryModeOptions, deliveryMode)
+    || deliveryModeOptions.find((option) => normalizeComparable(option.value || option.name || option.code).includes("offline"))
+    || deliveryModeOptions[0];
   const certificationOption = findGreRefDataOption(
     await fetchGreProductRefData("CLASS.CERTIFICATION", sessionId),
     certificationOffered,
@@ -3496,18 +3490,36 @@ async function buildGreServiceSolutionPayloads(
     });
   }
 
+  const supportPostService = requireString(payload.support_post_service);
+  addWarning({
+    field: "SO_SUPPORT_POST_SERVICE",
+    localValue: supportPostService || "(empty)",
+    greSpec: { paramName: "Support Post Service", specCode: "SO_SUPPORT_POST_SERVICE", dataType: "CHIP", customRefClass: "CLASS.POST_SERVICE", isMandatory: true, isMultiValued: false },
+    resolution: supportPostService ? "exact" : "fallback",
+    resolvedValue: supportPostService || "Not Provided",
+    greOptions: ["Provided", "Not Provided"],
+  });
+
+  const supportPostServiceCost = requireString(payload.support_post_service_cost);
+  addWarning({
+    field: "SO_SUPPORT_POST_SERVICE_COST",
+    localValue: supportPostServiceCost || "(empty)",
+    greSpec: { paramName: "Support Post Service Cost", specCode: "SO_SUPPORT_POST_SERVICE_COST", dataType: "CHIP", customRefClass: "CLASS.POST_SERVICE_COST", isMandatory: true, isMultiValued: false },
+    resolution: supportPostServiceCost ? "exact" : "fallback",
+    resolvedValue: supportPostServiceCost || "Not Applicable",
+    greOptions: ["Additional Cost Applies", "No Additional Cost", "Not Applicable"],
+  });
+
   // SO_OFFERED_ONLINE_OR_OFFLINE: local free text -> GRE enum
   const deliveryMode = requireString(payload.delivery_mode);
-  if (deliveryMode) {
-    addWarning({
-      field: "SO_OFFERED_ONLINE_OR_OFFLINE",
-      localValue: deliveryMode,
-      greSpec: { paramName: "Is it offered - Online or Offline?", specCode: "SO_OFFERED_ONLINE_OR_OFFLINE", dataType: "CHIP", customRefClass: "CLASS.SESSION_AVAILABILITY", isMandatory: true, isMultiValued: false },
-      resolution: "exact",
-      resolvedValue: deliveryMode,
-      greOptions: ["SESSION_AVAILABILITY.ONLINE", "SESSION_AVAILABILITY.OFFLINE", "SESSION_AVAILABILITY.ONLINE_OFFLINE"],
-    });
-  }
+  addWarning({
+    field: "SO_OFFERED_ONLINE_OR_OFFLINE",
+    localValue: deliveryMode || "(empty)",
+    greSpec: { paramName: "Is it offered - Online or Offline?", specCode: "SO_OFFERED_ONLINE_OR_OFFLINE", dataType: "CHIP", customRefClass: "CLASS.SESSION_AVAILABILITY", isMandatory: true, isMultiValued: false },
+    resolution: deliveryMode ? "exact" : "fallback",
+    resolvedValue: deliveryMode || "Offline",
+    greOptions: ["SESSION_AVAILABILITY.ONLINE", "SESSION_AVAILABILITY.OFFLINE", "SESSION_AVAILABILITY.ONLINE_OFFLINE"],
+  });
 
   return { solutionCreate, productPublish, submitReview, approve, warnings, greTraderId };
 }
