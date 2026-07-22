@@ -2984,7 +2984,19 @@ class GreMisStore {
       this.fallbackMode = true;
       return null;
     }
-    this.client = window.supabase.createClient(this.config.SUPABASE_URL, this.config.SUPABASE_ANON_KEY);
+    // Base dashboard reads are public/RLS-scoped and must not inherit a stale
+    // Supabase Auth session left by another GramEEE surface in localStorage.
+    this.client = window.supabase.createClient(
+      this.config.SUPABASE_URL,
+      this.config.SUPABASE_ANON_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+          detectSessionInUrl: false,
+        },
+      },
+    );
     return this.client;
   }
 
@@ -3016,12 +3028,25 @@ class GreMisStore {
       client.from("gre_mis_need_updates").select("*").order("created_at", { ascending: false }),
     ]);
 
-      const curatorsResult = curators.status === "fulfilled" && !curators.value.error ? ensureList(curators.value.data) : [];
-      const tradersResult = traders.status === "fulfilled" && !traders.value.error ? ensureList(traders.value.data) : [];
-      const offeringsResult = offerings.status === "fulfilled" && !offerings.value.error ? ensureList(offerings.value.data) : [];
-      const optionsResult = options.status === "fulfilled" && !options.value.error ? ensureList(options.value.data) : [];
-      const needsResult = needs.status === "fulfilled" && !needs.value.error ? ensureList(needs.value.data) : [];
-      const updatesResult = updates.status === "fulfilled" && !updates.value.error ? ensureList(updates.value.data) : [];
+      const queryResults = { curators, traders, offerings, options, needs, updates };
+      const queryErrors = Object.entries(queryResults)
+        .map(([name, result]) => {
+          if (result.status === "rejected") return { name, error: result.reason };
+          if (result.value.error) return { name, error: result.value.error };
+          return null;
+        })
+        .filter(Boolean);
+      if (queryErrors.length) {
+        queryErrors.forEach(({ name, error }) => console.error(`GRE MIS ${name} query failed`, error));
+        throw new Error(`GRE MIS data could not load (${queryErrors.map(({ name }) => name).join(", ")}). Please retry.`);
+      }
+
+      const curatorsResult = ensureList(curators.value.data);
+      const tradersResult = ensureList(traders.value.data);
+      const offeringsResult = ensureList(offerings.value.data);
+      const optionsResult = ensureList(options.value.data);
+      const needsResult = ensureList(needs.value.data);
+      const updatesResult = ensureList(updates.value.data);
 
       state.data.curators = curatorsResult.length ? curatorsResult : FALLBACK_CURATORS;
       state.data.traders = tradersResult;
@@ -3037,36 +3062,49 @@ class GreMisStore {
 
   async callAdmin(action, body = {}, requireAdmin = false) {
     const performRequest = async () => {
-      const grameeeAccessToken = await getGrameeeAccessToken().catch(() => "");
-      const grameeeUserSummary = readGrameeeSummary();
-      const headers = {
-        "Content-Type": "application/json",
-        apikey: String(this.config.SUPABASE_ANON_KEY || ""),
-        Authorization: `Bearer ${String(this.config.SUPABASE_ANON_KEY || "")}`,
-      };
-      if (state.userToken) headers["x-gre-user-session"] = state.userToken;
-      if (state.adminToken) headers["x-gre-admin-session"] = state.adminToken;
-      const response = await fetch(`${this.config.SUPABASE_URL}/functions/v1/${this.config.ADMIN_FUNCTION || "gre-mis-admin"}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          action,
-          ...body,
-          userSessionToken: state.userToken || undefined,
-          adminSessionToken: state.adminToken || undefined,
-          grameeeAccessToken: grameeeAccessToken || undefined,
-          grameeeUserSummary: grameeeUserSummary || undefined,
-        }),
-      });
-      const rawText = await response.text().catch(() => "");
-      let data = {};
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
       try {
-        data = rawText ? JSON.parse(rawText) : {};
-      } catch {}
-      if (!response.ok) throw new Error(data.error || rawText || `Request failed (${response.status}).`);
-      return data;
-    };
+        const grameeeAccessToken = await getGrameeeAccessToken().catch(() => "");
+        const grameeeUserSummary = readGrameeeSummary();
+        const headers = {
+          "Content-Type": "application/json",
+          apikey: String(this.config.SUPABASE_ANON_KEY || ""),
+          Authorization: `Bearer ${String(this.config.SUPABASE_ANON_KEY || "")}`,
+        };
+        if (state.userToken) headers["x-gre-user-session"] = state.userToken;
+        if (state.adminToken) headers["x-gre-admin-session"] = state.adminToken;
+        const response = await fetch(`${this.config.SUPABASE_URL}/functions/v1/${this.config.ADMIN_FUNCTION || "gre-mis-admin"}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            action,
+            ...body,
+            userSessionToken: state.userToken || undefined,
+            adminSessionToken: state.adminToken || undefined,
+            grameeeAccessToken: grameeeAccessToken || undefined,
+            grameeeUserSummary: grameeeUserSummary || undefined,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const rawText = await response.text().catch(() => "");
+        let data = {};
+        try {
+          data = rawText ? JSON.parse(rawText) : {};
+        } catch {}
+        if (!response.ok) throw new Error(data.error || rawText || `Request failed (${response.status}).`);
+        return data;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (err && err.name === "AbortError") {
+          throw new Error("Request timed out after 30 seconds. The server may be unavailable.");
+        }
+        throw err;
+      }
+    }
     const isRetryableAuthError = (error) => {
+      if (error && error.name === "AbortError") return false;
       const message = normalizeText(error instanceof Error ? error.message : error).toLowerCase();
       return [
         "login required",
@@ -3342,6 +3380,14 @@ class GreMisStore {
 
   async getLocalSolutionDetail(offeringId) {
     return this.callAdmin("getLocalSolutionDetail", { offeringId }, true);
+  }
+
+  async dryRunGreSolutionUpload(offeringId, options = {}) {
+    return this.callAdmin("dryRunGreSolutionUpload", { offeringId, ...options }, true);
+  }
+
+  async getGreValueChains() {
+    return this.callAdmin("getGreValueChains", {}, true);
   }
 
   async deleteLocalSolution(offeringId) {
@@ -3838,6 +3884,10 @@ class GreMisStore {
       })
       .sort((left, right) => parseNumber(right.matchScore, 0) - parseNumber(left.matchScore, 0))
       .slice(0, 36);
+  }
+
+  async uploadLocalSolutionToGre(offeringId, options = {}) {
+    return this.callAdmin("uploadLocalSolutionToGre", { offeringId, ...options }, true);
   }
 }
 
@@ -7374,6 +7424,163 @@ async function openLocalSolutionReviewDialog(offeringId) {
   dialog.showModal();
 }
 
+async function openGreValueChainSelector(offeringId) {
+  const dialog = byId("greValueChainSelectorDialog");
+  if (!dialog) {
+    toast("Value chain selector dialog not found.");
+    return;
+  }
+  state.greSyncReviewId = offeringId;
+  const vcStatus = byId("greVcSelectorStatus");
+  if (vcStatus) vcStatus.textContent = "Loading value chains from GRE...";
+  dialog.showModal();
+
+  try {
+    // Add a timeout warning
+    const timeoutId = setTimeout(() => {
+      if (vcStatus) vcStatus.textContent = "Still loading value chains... This may take a moment.";
+    }, 8000);
+    const result = await store.getGreValueChains();
+    clearTimeout(timeoutId);
+    if (!result.ok || !result.valueChains) {
+      if (vcStatus) vcStatus.textContent = "Failed to load value chains. GRE API may be unavailable.";
+      toast("Could not load GRE value chains.");
+      return;
+    }
+    const vcSelect = byId("greValueChainSelect");
+    const appSelect = byId("greApplicationSelect");
+    if (!vcSelect || !appSelect) return;
+
+    // Store value chains for later use
+    state.greValueChains = result.valueChains;
+
+    // Populate value chain dropdown
+    vcSelect.innerHTML = `<option value="">Select a value chain...</option>`
+      + result.valueChains.map((vc) => `<option value="${esc(vc.code || vc.id)}">${esc(vc.label)}</option>`).join("");
+
+    if (vcStatus) vcStatus.textContent = `Loaded ${result.valueChains.length} value chains (v${result.version || "?"}). Choose one.`;
+  } catch (err) {
+    if (vcStatus) vcStatus.textContent = "Failed to load value chains: " + (err.message || "Unknown error");
+    toast("Could not load GRE value chains.");
+    return;
+  }
+}
+
+async function openGreSyncDryRunDialog(offeringId, primaryValuechain, primaryApplication, vcId, appId) {
+  const summary = getLocalSolutionByOfferingId(offeringId);
+  if (!summary) {
+    toast("This local solution is no longer available.");
+    return;
+  }
+  const detailResponse = await store.getLocalSolutionDetail(offeringId);
+  const solution = detailResponse?.offering;
+  if (!solution) {
+    toast("This local solution is no longer available.");
+    return;
+  }
+  state.greSyncReviewId = offeringId;
+  state.greSyncVCId = vcId || 0;
+  state.greSyncAppId = appId || 0;
+  const dialog = byId("greSyncDryRunDialog");
+  if (!dialog) {
+    toast("Dry-run dialog not found in HTML.");
+    return;
+  }
+  const provider = solution.trader || {};
+  const linkedSolution = solution.solution || {};
+  const offeringPayload = getStoredPayloadRecord(solution.raw_payload);
+  const solutionPayload = getStoredPayloadRecord(linkedSolution.raw_payload);
+  const storedPayload = Object.keys(offeringPayload).length ? offeringPayload : solutionPayload;
+
+  const meta = byId("greSyncDryRunMeta");
+  if (meta) {
+    meta.innerHTML = `
+      <div><strong>Offering ID:</strong> ${esc(solution.offering_id)}</div>
+      <div><strong>Solution ID:</strong> ${esc(solution.solution_id)}</div>
+      <div><strong>Provider:</strong> ${esc(provider.organisation_name || provider.trader_name || "Not set")}</div>
+      <div><strong>Category:</strong> ${esc(solution.offering_category || "Not set")}</div>
+      <div><strong>Type:</strong> ${esc(solution.offering_type || "Not set")}</div>
+      <div><strong>Status:</strong> ${esc(solution.publish_status || "Not set")}</div>
+    `;
+  }
+
+  try {
+    // Call Edge Function for dry-run
+    const options = {};
+    if (primaryValuechain) options.primary_valuechain = primaryValuechain;
+    if (primaryApplication) options.primary_application = primaryApplication;
+    if (vcId) options.generic_product_id = vcId;
+    if (appId) options.generic_application_id = appId;
+    const res = await store.dryRunGreSolutionUpload(offeringId, options);
+    if (!res.ok) throw new Error(res.message || "Dry-run failed");
+    const { payload, warnings = [], linkState, grePresence } = res;
+    if (!payload) {
+      toast("Dry-run payload is empty. The GRE sync feature may not support this offering yet.");
+      return;
+    }
+    state.greSyncDryRunPayload = payload;
+    state.greSyncDryRunWarnings = warnings;
+    state.greSyncDryRunLinkState = linkState;
+    const requiresGreDeletion = linkState?.upload_state === "update_pending" && grePresence?.exists;
+    const dryRunStatus = byId("greSyncDryRunStatus");
+    if (dryRunStatus) {
+      dryRunStatus.textContent = requiresGreDeletion
+        ? `GRE solution ${linkState.gre_solution_id || ""} still exists. Delete it manually on GRE, then reopen this resync. No duplicate will be created.`
+        : (res.message || "Review the generated GRE payload before confirming.");
+    }
+
+    // Render warnings
+    const warningsList = byId("greSyncWarningsList");
+    if (warningsList) {
+      warningsList.innerHTML = warnings.map((w, i) => `
+        <li class="warning-item ${w.resolution === 'blocker' ? 'blocker' : w.resolution === 'fallback' ? 'fallback' : ''}">
+          <input type="checkbox" id="greWarn${i}" ${w.resolution === 'blocker' ? 'disabled' : ''} ${w.resolution === 'exact' ? 'checked disabled' : ''}>
+          <div class="warning-content">
+            <div class="warning-title">${esc(w.field)}</div>
+            <div class="warning-desc">${esc(w.warningDesc || "")}</div>
+            <span class="warning-code">${esc(w.greSpec?.paramName || "")} | ${esc(w.greSpec?.specCode || "")} | ${esc(w.greSpec?.dataType || "")}</span>
+          </div>
+        </li>
+      `).join("");
+    }
+
+    // Render diff table
+    // (simplified for now - full diff would be similar to wireframe)
+
+    // Update confirm button state
+    const confirmBtn = byId("greSyncConfirmBtn");
+    if (confirmBtn) {
+      confirmBtn.textContent = linkState?.upload_state === "update_pending"
+        ? (requiresGreDeletion ? "Waiting for GRE deletion" : "Confirm Edited Solution Resync")
+        : "Confirm Upload to GRE";
+    }
+    const checkboxes = warningsList?.querySelectorAll('input[type="checkbox"]') || [];
+    const updateConfirm = () => {
+      const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+      if (confirmBtn) confirmBtn.disabled = requiresGreDeletion || !allChecked;
+    };
+    checkboxes.forEach(cb => cb.addEventListener('change', updateConfirm));
+    updateConfirm();
+
+    // Override inputs for blockers
+    const overrideInputs = byId("greSyncOverrideInputs");
+    if (overrideInputs) {
+      overrideInputs.innerHTML = warnings
+        .filter(w => w.resolution === 'blocker' && w.overrideInput)
+        .map(w => `
+          <div class="override-field">
+            <label>${esc(w.field)}:</label>
+            <input type="${w.greSpec?.dataType === 'NUMBER' ? 'number' : 'text'}" data-field="${esc(w.field)}" placeholder="Enter value for ${esc(w.field)}">
+          </div>
+        `).join("");
+    }
+  } catch (err) {
+    toast(err.message || "Dry-run failed.");
+    return;
+  }
+  dialog.showModal();
+}
+
 function renderLocalSolutionManagement() {
   const list = byId("localSolutionsList");
   const providerSelect = byId("localSolutionProviderFilter");
@@ -7393,11 +7600,19 @@ function renderLocalSolutionManagement() {
   list.innerHTML = rows.length
     ? `<div class="local-solutions-grid">${rows.map((item) => {
         const providerName = item?.trader?.organisation_name || item?.trader?.trader_name || "Unmapped provider";
+        const greSyncState = item?.gre_sync?.upload_state || "";
+        const isSyncedOnGre = greSyncState === "synced";
+        const isGreUpdatePending = greSyncState === "update_pending";
+        const canUploadToGre = !isSyncedOnGre && hasAdminLikeAccess() && canDeleteRecords()
+          && (item.offering_category === "Service offerings" || item.offering_category === "Product offerings" || item.offering_category === "Knowledge offerings")
+          && item.offering_id?.startsWith("MIS-");
         return `
           <article class="approval-card local-solution-card">
             <div class="status-row">
               <span class="status-pill info">${esc(item.offering_category || "Offering")}</span>
               <span class="status-pill good">${esc(item.publish_status || "MIS Published")}</span>
+              ${isSyncedOnGre ? `<span class="status-pill good">Synced on GRE</span>` : ""}
+              ${isGreUpdatePending ? `<span class="status-pill warn">GRE Update Pending</span>` : ""}
             </div>
             <h4>${esc(item.offering_name || item?.solution?.solution_name || "Untitled offering")}</h4>
             <div class="detail-list">
@@ -7410,6 +7625,7 @@ function renderLocalSolutionManagement() {
             <div class="card-actions">
               <button class="btn btn-secondary" type="button" data-action="edit-local-solution" data-offering-id="${esc(item.offering_id)}">Edit</button>
               ${canDeleteRecords() ? `<button class="btn btn-danger" type="button" data-action="delete-local-solution" data-offering-id="${esc(item.offering_id)}">Delete</button>` : ""}
+              ${canUploadToGre ? `<button class="btn btn-primary btn-sm" type="button" data-action="upload-local-solution-to-gre" data-offering-id="${esc(item.offering_id)}">${isGreUpdatePending ? "Resync Edited Solution to GRE" : "Upload to GRE"}</button>` : ""}
             </div>
           </article>
         `;
@@ -7741,7 +7957,14 @@ async function refreshAll() {
   const failed = baseResults.filter((result) => result.status === "rejected");
   if (failed.length) {
     failed.forEach((result) => console.error("Dashboard refresh segment failed", result.reason));
-    toast("Some dashboard sections could not refresh fully. Loaded sections remain available.");
+    toast("Dashboard data could not refresh. Please use Refresh & Reset to retry.");
+  } else {
+    const displayNeeds = getDisplayNeeds();
+    if (!displayNeeds.find((need) => need.id === state.selectedNeedId)) {
+      state.selectedNeedId = displayNeeds[0]?.id || null;
+    }
+    // Do not hold the operational dashboard behind slower admin-only snapshots.
+    await rerender({ includeMatches: false });
   }
   if (hasAdminLikeAccess()) {
     const adminResults = await Promise.allSettled([
@@ -8170,6 +8393,48 @@ function bindStaticEvents() {
   byId("closeSubmissionReviewDialog")?.addEventListener("click", () => submissionReviewDialog?.close());
   byId("closeLocalSolutionReviewDialog")?.addEventListener("click", () => localSolutionReviewDialog?.close());
   byId("closeLocalNeedReviewDialog")?.addEventListener("click", () => localNeedReviewDialog?.close());
+  byId("closeGreSyncDryRunDialog")?.addEventListener("click", () => greSyncDryRunDialog?.close());
+  byId("greSyncCancelBtn")?.addEventListener("click", () => greSyncDryRunDialog?.close());
+  byId("closeGreValueChainSelector")?.addEventListener("click", () => byId("greValueChainSelectorDialog")?.close());
+  byId("cancelGreVcBtn")?.addEventListener("click", () => byId("greValueChainSelectorDialog")?.close());
+  byId("greValueChainSelect")?.addEventListener("change", (event) => {
+    const selectedCode = event.target.value;
+    const appSelect = byId("greApplicationSelect");
+    const confirmBtn = byId("confirmGreVcBtn");
+    if (!appSelect) return;
+    appSelect.innerHTML = `<option value="">— None —</option>`;
+    if (selectedCode) {
+      const vc = state.greValueChains?.find(v => String(v.code || v.id) === selectedCode);
+      if (vc && vc.applications?.length) {
+        appSelect.innerHTML += vc.applications.map(a => `<option value="${esc(a.code || a.id)}">${esc(a.label)}</option>`).join("");
+      }
+      confirmBtn.disabled = false;
+    } else {
+      confirmBtn.disabled = true;
+    }
+  });
+  byId("confirmGreVcBtn")?.addEventListener("click", safeAsync(async (event) => {
+    event?.preventDefault();
+    const vcSelect = byId("greValueChainSelect");
+    const appSelect = byId("greApplicationSelect");
+    const vcCode = vcSelect?.value;
+    if (!vcCode) {
+      toast("Please select a value chain.");
+      return;
+    }
+    const vc = state.greValueChains?.find(v => String(v.code || v.id) === vcCode);
+    const appCode = appSelect?.value || "";
+    const app = appCode ? vc?.applications?.find(a => String(a.code || a.id) === appCode) : null;
+    byId("greValueChainSelectorDialog")?.close();
+    toast("Loading dry-run preview...");
+    await openGreSyncDryRunDialog(
+      state.greSyncReviewId,
+      vc?.label || "",
+      app?.label || "",
+      vc?.id || 0,
+      app?.id || 0,
+    );
+  }));
   ["solution", "need"].forEach((kind) => {
     const selectId = kind === "solution" ? "solutionTraderSelect" : "needTraderSelect";
     const orgInputId = kind === "solution" ? "solutionOrgName" : "needOrgName";
@@ -9390,6 +9655,43 @@ function bindStaticEvents() {
     toast(result.message || (result.targetNeedId ? `Submission approved as Need ${result.targetNeedId}.` : "Form submission approved."));
   }));
 
+  byId("greSyncConfirmBtn")?.addEventListener("click", safeAsync(async () => {
+    const status = byId("greSyncDryRunStatus");
+    if (status) status.textContent = "Uploading to GRE...";
+    const offeringId = state.greSyncReviewId;
+    if (!offeringId) {
+      if (status) status.textContent = "No offering selected.";
+      toast("No offering selected for sync.");
+      return;
+    }
+    const overrideInputs = {};
+    document.querySelectorAll("#greSyncOverrideInputs input").forEach(input => {
+      overrideInputs[input.dataset.field] = input.value;
+    });
+    try {
+      const result = await store.uploadLocalSolutionToGre(offeringId, {
+        acknowledgedWarnings: state.greSyncDryRunWarnings?.filter(w => w.resolution !== 'exact').map(w => ({ field: w.field, resolvedValue: w.resolvedValue })) || [],
+        overrideValues: overrideInputs,
+        dryRun: false,
+        generic_product_id: state.greSyncVCId || undefined,
+        generic_application_id: state.greSyncAppId || undefined,
+      });
+      if (result.ok) {
+        greSyncDryRunDialog?.close();
+        await refreshAll();
+        toast(result.message || "Successfully uploaded to GRE!");
+      } else {
+        if (status) status.textContent = result.message || "Upload failed.";
+      }
+    } catch (err) {
+      const msg = err.message || "Unknown error";
+      if (status) status.textContent = "Error: " + msg;
+      // Close dialog to let the user see the toast
+      greSyncDryRunDialog?.close();
+      toast(msg);
+    }
+  }));
+
   byId("rejectSubmissionReviewBtn")?.addEventListener("click", safeAsync(async () => {
     if (!canRejectRecords()) {
       toast("Only admins can reject form submissions.");
@@ -9525,6 +9827,10 @@ function bindStaticEvents() {
     }
     if (button.dataset.action === "edit-local-solution") {
       await openLocalSolutionReviewDialog(button.dataset.offeringId);
+      return;
+    }
+    if (button.dataset.action === "upload-local-solution-to-gre") {
+      await openGreValueChainSelector(button.dataset.offeringId);
       return;
     }
     if (button.dataset.action === "delete-local-solution") {
