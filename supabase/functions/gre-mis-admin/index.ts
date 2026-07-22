@@ -6998,9 +6998,10 @@ async function getAdminApprovalsSnapshot() {
 }
 
 async function getAdminLocalSolutionsSnapshot() {
-  const { data, error } = await adminClient
-    .from("offerings")
-    .select(`
+  const [{ data, error }, { data: syncLinks, error: syncLinksError }] = await Promise.all([
+    adminClient
+      .from("offerings")
+      .select(`
       offering_id,
       solution_id,
       trader_id,
@@ -7030,12 +7031,25 @@ async function getAdminLocalSolutionsSnapshot() {
         association_status
       )
     `)
-    .eq("publish_status", "MIS Published")
-    .like("offering_id", "MIS-OFFERING-%")
-    .order("updated_at", { ascending: false })
-    .limit(500);
+      .eq("publish_status", "MIS Published")
+      .like("offering_id", "MIS-OFFERING-%")
+      .order("updated_at", { ascending: false })
+      .limit(500),
+    adminClient
+      .from("gre_solution_links")
+      .select("local_offering_id, upload_state, gre_solution_id, verified_at")
+      .eq("upload_state", "synced"),
+  ]);
   if (error) throw new Error(error.message);
-  return { ok: true, localSolutions: data || [] };
+  if (syncLinksError) throw new Error(syncLinksError.message);
+  const syncByOffering = new Map(
+    (syncLinks || []).map((link) => [requireString(link.local_offering_id), link]),
+  );
+  const localSolutions = (data || []).map((offering) => ({
+    ...offering,
+    gre_sync: syncByOffering.get(requireString(offering.offering_id)) || null,
+  }));
+  return { ok: true, localSolutions };
 }
 
 async function getAdminLocalNeedsSnapshot() {
@@ -9712,6 +9726,107 @@ function buildChatbotImportBundle(solutionBuffer: ArrayBuffer, traderBuffer: Arr
   };
 }
 
+async function reconcileMappedGreSolutionsForImport(bundle: {
+  traders: Record<string, unknown>[];
+  solutions: Record<string, unknown>[];
+  offerings: Record<string, unknown>[];
+  stats: { solutionRows: number; traderRows: number };
+}) {
+  const incomingGreSolutionIds = uniqueStrings([
+    ...bundle.solutions.map((row) => requireString(row.solution_id)),
+    ...bundle.offerings.map((row) => requireString(row.solution_id)),
+  ]).filter((id) => /^\d+$/.test(id));
+  if (!incomingGreSolutionIds.length) return bundle;
+
+  const { data: syncedLinks, error: syncedLinksError } = await adminClient
+    .from("gre_solution_links")
+    .select("local_offering_id, local_solution_id, gre_solution_id, upload_state")
+    .eq("upload_state", "synced");
+  if (syncedLinksError) throw new Error(`Could not reconcile GRE solution mappings: ${syncedLinksError.message}`);
+  const incomingGreSolutionIdSet = new Set(incomingGreSolutionIds);
+  const links = (syncedLinks || []).filter((link) => incomingGreSolutionIdSet.has(String(link.gre_solution_id ?? "").trim()));
+  if (!links.length) return bundle;
+
+  const linkByGreSolutionId = new Map(
+    links.map((link) => [String(link.gre_solution_id ?? "").trim(), link]),
+  );
+  const localSolutionIds = uniqueStrings(links.map((link) => requireString(link.local_solution_id)));
+  const localOfferingIds = uniqueStrings(links.map((link) => requireString(link.local_offering_id)));
+  const [localSolutionsResult, localOfferingsResult] = await Promise.all([
+    localSolutionIds.length
+      ? adminClient.from("solutions").select("solution_id, solution_image_url, raw_payload").in("solution_id", localSolutionIds)
+      : Promise.resolve({ data: [], error: null }),
+    localOfferingIds.length
+      ? adminClient.from("offerings").select("offering_id, service_brochure_url, product_brochure_url, knowledge_content_url, raw_payload").in("offering_id", localOfferingIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (localSolutionsResult.error) throw new Error(localSolutionsResult.error.message);
+  if (localOfferingsResult.error) throw new Error(localOfferingsResult.error.message);
+  const localSolutionById = new Map(
+    (localSolutionsResult.data || []).map((row) => [requireString(row.solution_id), row]),
+  );
+  const localOfferingById = new Map(
+    (localOfferingsResult.data || []).map((row) => [requireString(row.offering_id), row]),
+  );
+  const importedAt = new Date().toISOString();
+
+  const solutions = bundle.solutions.map((row) => {
+    const greSolutionId = requireString(row.solution_id);
+    const link = linkByGreSolutionId.get(greSolutionId);
+    if (!link) return row;
+    const localSolutionId = requireString(link.local_solution_id);
+    const localSolution = localSolutionById.get(localSolutionId) as Record<string, unknown> | undefined;
+    const localRawPayload = localSolution?.raw_payload;
+    return {
+      ...row,
+      solution_id: localSolutionId,
+      solution_status: "Approved in MIS",
+      publish_status: "MIS Published",
+      solution_image_url: requireString(row.solution_image_url) || requireString(localSolution?.solution_image_url) || null,
+      raw_payload: {
+        ...((row.raw_payload && typeof row.raw_payload === "object") ? row.raw_payload : {}),
+        ...((localRawPayload && typeof localRawPayload === "object") ? localRawPayload : {}),
+        gre_import_snapshot: row.raw_payload || null,
+        gre_imported_at: importedAt,
+        gre_solution_id: greSolutionId,
+      },
+    };
+  });
+
+  const offerings = bundle.offerings.map((row) => {
+    const greSolutionId = requireString(row.solution_id);
+    const link = linkByGreSolutionId.get(greSolutionId);
+    if (!link) return row;
+    const localSolutionId = requireString(link.local_solution_id);
+    const localOfferingId = requireString(link.local_offering_id);
+    const localOffering = localOfferingById.get(localOfferingId) as Record<string, unknown> | undefined;
+    const localRawPayload = localOffering?.raw_payload;
+    return {
+      ...row,
+      offering_id: localOfferingId,
+      solution_id: localSolutionId,
+      publish_status: "MIS Published",
+      service_brochure_url: requireString(row.service_brochure_url) || requireString(localOffering?.service_brochure_url) || null,
+      product_brochure_url: requireString(row.product_brochure_url) || requireString(localOffering?.product_brochure_url) || null,
+      knowledge_content_url: requireString(row.knowledge_content_url) || requireString(localOffering?.knowledge_content_url) || null,
+      raw_payload: {
+        ...((row.raw_payload && typeof row.raw_payload === "object") ? row.raw_payload : {}),
+        ...((localRawPayload && typeof localRawPayload === "object") ? localRawPayload : {}),
+        gre_import_snapshot: row.raw_payload || null,
+        gre_imported_at: importedAt,
+        gre_solution_id: greSolutionId,
+        gre_offering_id: requireString(row.offering_id),
+      },
+    };
+  });
+
+  return {
+    ...bundle,
+    solutions: dedupeRowsById(solutions, "solution_id"),
+    offerings: dedupeRowsById(offerings, "offering_id"),
+  };
+}
+
 async function applyChatbotImportBundle(
   bundle: {
     traders: Record<string, unknown>[];
@@ -9723,6 +9838,7 @@ async function applyChatbotImportBundle(
   provider: string,
   skipEnrichment = false,
 ) {
+  bundle = await reconcileMappedGreSolutionsForImport(bundle);
   const { data: importRow, error: importError } = await adminClient
     .from("data_imports")
     .insert({
@@ -9738,14 +9854,14 @@ async function applyChatbotImportBundle(
 
   const importId = importRow.id;
   const offeringIds = bundle.offerings.map((row) => requireString(row.offering_id)).filter(Boolean);
-  const { data: existingOfferings, error: existingOfferingsError } = offeringIds.length
-    ? await adminClient
-      .from("offerings")
-      .select("offering_id, source_row_signature, ai_enriched_at, raw_payload")
-      .in("offering_id", offeringIds)
-    : { data: [], error: null };
-  if (existingOfferingsError) throw new Error(existingOfferingsError.message);
-  const existingOfferingMap = new Map((existingOfferings || []).map((row) => [requireString(row.offering_id), row]));
+  const offeringIdSet = new Set(offeringIds);
+  const { data: offeringIdentityRows, error: offeringIdentityError } = await adminClient
+    .from("offerings")
+    .select("offering_id, source_row_signature, ai_enriched_at")
+    .limit(10000);
+  if (offeringIdentityError) throw new Error(offeringIdentityError.message);
+  const existingOfferings = (offeringIdentityRows || []).filter((row) => offeringIdSet.has(requireString(row.offering_id)));
+  const existingOfferingMap = new Map(existingOfferings.map((row) => [requireString(row.offering_id), row]));
   const changedOfferingIds = bundle.offerings
     .filter((row) => {
       const existing = existingOfferingMap.get(requireString(row.offering_id)) as Record<string, unknown> | undefined;
@@ -9753,6 +9869,12 @@ async function applyChatbotImportBundle(
       return requireString(existing.source_row_signature) !== requireString(row.source_row_signature) || !existing.ai_enriched_at;
     })
     .map((row) => requireString(row.offering_id));
+  const changedExistingOfferingIds = changedOfferingIds.filter((id) => existingOfferingMap.has(id));
+  for (const ids of chunkArray(changedExistingOfferingIds, 200)) {
+    const { data, error } = await adminClient.from("offerings").select("*").in("offering_id", ids);
+    if (error) throw new Error(error.message);
+    (data || []).forEach((row) => existingOfferingMap.set(requireString(row.offering_id), row));
+  }
 
   try {
     for (const rows of chunkArray(bundle.traders)) {
@@ -9803,7 +9925,11 @@ async function applyChatbotImportBundle(
             const manualFields = (existingRawPayload?.last_manual_edit as Record<string, unknown> | undefined)?.manual_fields as string[] | undefined;
             if (manualFields?.length) {
               for (const field of manualFields) {
-                delete cleanRow[field];
+                if (Object.prototype.hasOwnProperty.call(existing, field)) {
+                  cleanRow[field] = existing[field];
+                } else {
+                  delete cleanRow[field];
+                }
               }
             }
           }

@@ -7588,11 +7588,13 @@ function renderLocalSolutionManagement() {
   list.innerHTML = rows.length
     ? `<div class="local-solutions-grid">${rows.map((item) => {
         const providerName = item?.trader?.organisation_name || item?.trader?.trader_name || "Unmapped provider";
+        const isSyncedOnGre = item?.gre_sync?.upload_state === "synced";
         return `
           <article class="approval-card local-solution-card">
             <div class="status-row">
               <span class="status-pill info">${esc(item.offering_category || "Offering")}</span>
               <span class="status-pill good">${esc(item.publish_status || "MIS Published")}</span>
+              ${isSyncedOnGre ? `<span class="status-pill good">Synced on GRE</span>` : ""}
             </div>
             <h4>${esc(item.offering_name || item?.solution?.solution_name || "Untitled offering")}</h4>
             <div class="detail-list">
@@ -7605,7 +7607,7 @@ function renderLocalSolutionManagement() {
             <div class="card-actions">
               <button class="btn btn-secondary" type="button" data-action="edit-local-solution" data-offering-id="${esc(item.offering_id)}">Edit</button>
               ${canDeleteRecords() ? `<button class="btn btn-danger" type="button" data-action="delete-local-solution" data-offering-id="${esc(item.offering_id)}">Delete</button>` : ""}
-              ${hasAdminLikeAccess() && canDeleteRecords() && (item.offering_category === "Service offerings" || item.offering_category === "Product offerings" || item.offering_category === "Knowledge offerings") && item.offering_id?.startsWith("MIS-") ? `<button class="btn btn-primary btn-sm" type="button" data-action="upload-local-solution-to-gre" data-offering-id="${esc(item.offering_id)}">Upload to GRE</button>` : ""}
+              ${!isSyncedOnGre && hasAdminLikeAccess() && canDeleteRecords() && (item.offering_category === "Service offerings" || item.offering_category === "Product offerings" || item.offering_category === "Knowledge offerings") && item.offering_id?.startsWith("MIS-") ? `<button class="btn btn-primary btn-sm" type="button" data-action="upload-local-solution-to-gre" data-offering-id="${esc(item.offering_id)}">Upload to GRE</button>` : ""}
             </div>
           </article>
         `;
