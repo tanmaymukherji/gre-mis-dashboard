@@ -7513,7 +7513,7 @@ async function openGreSyncDryRunDialog(offeringId, primaryValuechain, primaryApp
     if (appId) options.generic_application_id = appId;
     const res = await store.dryRunGreSolutionUpload(offeringId, options);
     if (!res.ok) throw new Error(res.message || "Dry-run failed");
-    const { payload, warnings, linkState } = res;
+    const { payload, warnings = [], linkState, grePresence } = res;
     if (!payload) {
       toast("Dry-run payload is empty. The GRE sync feature may not support this offering yet.");
       return;
@@ -7521,6 +7521,13 @@ async function openGreSyncDryRunDialog(offeringId, primaryValuechain, primaryApp
     state.greSyncDryRunPayload = payload;
     state.greSyncDryRunWarnings = warnings;
     state.greSyncDryRunLinkState = linkState;
+    const requiresGreDeletion = linkState?.upload_state === "update_pending" && grePresence?.exists;
+    const dryRunStatus = byId("greSyncDryRunStatus");
+    if (dryRunStatus) {
+      dryRunStatus.textContent = requiresGreDeletion
+        ? `GRE solution ${linkState.gre_solution_id || ""} still exists. Delete it manually on GRE, then reopen this resync. No duplicate will be created.`
+        : (res.message || "Review the generated GRE payload before confirming.");
+    }
 
     // Render warnings
     const warningsList = byId("greSyncWarningsList");
@@ -7542,10 +7549,15 @@ async function openGreSyncDryRunDialog(offeringId, primaryValuechain, primaryApp
 
     // Update confirm button state
     const confirmBtn = byId("greSyncConfirmBtn");
+    if (confirmBtn) {
+      confirmBtn.textContent = linkState?.upload_state === "update_pending"
+        ? (requiresGreDeletion ? "Waiting for GRE deletion" : "Confirm Edited Solution Resync")
+        : "Confirm Upload to GRE";
+    }
     const checkboxes = warningsList?.querySelectorAll('input[type="checkbox"]') || [];
     const updateConfirm = () => {
       const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-      if (confirmBtn) confirmBtn.disabled = !allChecked;
+      if (confirmBtn) confirmBtn.disabled = requiresGreDeletion || !allChecked;
     };
     checkboxes.forEach(cb => cb.addEventListener('change', updateConfirm));
     updateConfirm();
@@ -7588,13 +7600,19 @@ function renderLocalSolutionManagement() {
   list.innerHTML = rows.length
     ? `<div class="local-solutions-grid">${rows.map((item) => {
         const providerName = item?.trader?.organisation_name || item?.trader?.trader_name || "Unmapped provider";
-        const isSyncedOnGre = item?.gre_sync?.upload_state === "synced";
+        const greSyncState = item?.gre_sync?.upload_state || "";
+        const isSyncedOnGre = greSyncState === "synced";
+        const isGreUpdatePending = greSyncState === "update_pending";
+        const canUploadToGre = !isSyncedOnGre && hasAdminLikeAccess() && canDeleteRecords()
+          && (item.offering_category === "Service offerings" || item.offering_category === "Product offerings" || item.offering_category === "Knowledge offerings")
+          && item.offering_id?.startsWith("MIS-");
         return `
           <article class="approval-card local-solution-card">
             <div class="status-row">
               <span class="status-pill info">${esc(item.offering_category || "Offering")}</span>
               <span class="status-pill good">${esc(item.publish_status || "MIS Published")}</span>
               ${isSyncedOnGre ? `<span class="status-pill good">Synced on GRE</span>` : ""}
+              ${isGreUpdatePending ? `<span class="status-pill warn">GRE Update Pending</span>` : ""}
             </div>
             <h4>${esc(item.offering_name || item?.solution?.solution_name || "Untitled offering")}</h4>
             <div class="detail-list">
@@ -7607,7 +7625,7 @@ function renderLocalSolutionManagement() {
             <div class="card-actions">
               <button class="btn btn-secondary" type="button" data-action="edit-local-solution" data-offering-id="${esc(item.offering_id)}">Edit</button>
               ${canDeleteRecords() ? `<button class="btn btn-danger" type="button" data-action="delete-local-solution" data-offering-id="${esc(item.offering_id)}">Delete</button>` : ""}
-              ${!isSyncedOnGre && hasAdminLikeAccess() && canDeleteRecords() && (item.offering_category === "Service offerings" || item.offering_category === "Product offerings" || item.offering_category === "Knowledge offerings") && item.offering_id?.startsWith("MIS-") ? `<button class="btn btn-primary btn-sm" type="button" data-action="upload-local-solution-to-gre" data-offering-id="${esc(item.offering_id)}">Upload to GRE</button>` : ""}
+              ${canUploadToGre ? `<button class="btn btn-primary btn-sm" type="button" data-action="upload-local-solution-to-gre" data-offering-id="${esc(item.offering_id)}">${isGreUpdatePending ? "Resync Edited Solution to GRE" : "Upload to GRE"}</button>` : ""}
             </div>
           </article>
         `;

@@ -4256,13 +4256,23 @@ async function dryRunGreSolutionUpload(payload: Record<string, unknown>, actorEm
   }
   validateGreSolutionCreateReferences(bundle.solutionCreate, genericApplicationId > 0);
 
-  // Check if already synced
+  // Check whether this local record already has a GRE identity.
   const { data: existingLink } = await adminClient.from("gre_solution_links").select("*").eq("local_offering_id", offeringId).single();
-  if (existingLink && existingLink.upload_state === "synced") {
+  if (existingLink && (existingLink.upload_state === "synced" || existingLink.upload_state === "update_pending")) {
     const governorSession = await loginToGre();
     const grePresence = await verifySyncedGreLinkOnGre(existingLink, governorSession);
-    if (grePresence.exists) {
+    if (existingLink.upload_state === "synced" && grePresence.exists) {
       return { ok: true, message: "Already synced to GRE", payload: bundle, warnings: bundle.warnings, linkState: existingLink, grePresence };
+    }
+    if (existingLink.upload_state === "update_pending" && grePresence.exists) {
+      return {
+        ok: true,
+        message: "The edited local solution is pending a GRE update. Delete the previous solution on GRE before confirming the resync.",
+        payload: bundle,
+        warnings: bundle.warnings,
+        linkState: existingLink,
+        grePresence,
+      };
     }
     return {
       ok: true,
@@ -4475,7 +4485,11 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
     return { ok: true, dryRun: true, payload: bundle, message: "Dry-run complete — no GRE calls made" };
   }
 
-  const payloadHash = fingerprint(bundle.solutionCreate);
+  const payloadHash = fingerprint({
+    solutionCreate: bundle.solutionCreate,
+    productPublish: bundle.productPublish,
+    submitReview: bundle.submitReview,
+  });
   const { data: existingLink, error: existingLinkError } = await adminClient
     .from("gre_solution_links")
     .select("*")
@@ -4489,11 +4503,30 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
     !parseNumber(existingLink.gre_product_id, 0)
       ? parseNumber(existingLink.gre_solution_id, 0)
       : 0;
-  if (existingLink?.upload_state === "synced") {
+  if (existingLink?.upload_state === "synced" || existingLink?.upload_state === "update_pending") {
     const grePresence = await verifySyncedGreLinkOnGre(existingLink, governorSession);
     if (grePresence.exists) {
+      if (existingLink.upload_state === "update_pending") {
+        throw new Error(
+          `The previous GRE solution ${requireString(existingLink.gre_solution_id)} still exists. Delete it manually on GRE, then click Resync Edited Solution to GRE again. No duplicate was created.`,
+        );
+      }
       return { ok: true, dryRun: false, message: "This offering is already synced to GRE.", link: existingLink, grePresence };
     }
+    await logGreSyncEvent({
+      localOfferingId: offeringId,
+      action: "resync_after_edit",
+      step: "previous_gre_record_confirmed_absent",
+      httpStatus: 200,
+      greIds: {
+        solutionId: parseNumber(existingLink.gre_solution_id, 0) || null,
+        productId: parseNumber(existingLink.gre_product_id, 0) || null,
+        skuId: parseNumber(existingLink.gre_sku_id, 0) || null,
+        channelProductId: parseNumber(existingLink.gre_channel_product_id, 0) || null,
+      },
+      verificationResult: grePresence,
+      actorEmail,
+    });
     await adminClient.from("gre_solution_links").update({
       upload_state: "rolled_back",
       manual_review_reason: `Previous synced GRE record is missing or unpublished on GRE: ${grePresence.reason}`,
@@ -4645,7 +4678,7 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
       upload_state: "synced",
       verified_at: new Date().toISOString(),
       acknowledged_warnings: bundle.warnings,
-      payload_hash: fingerprint(bundle.solutionCreate),
+      payload_hash: payloadHash,
       gre_response_hash: fingerprint(approveResp),
     }).eq("local_offering_id", offeringId);
 
@@ -7037,8 +7070,8 @@ async function getAdminLocalSolutionsSnapshot() {
       .limit(500),
     adminClient
       .from("gre_solution_links")
-      .select("local_offering_id, upload_state, gre_solution_id, verified_at")
-      .eq("upload_state", "synced"),
+      .select("local_offering_id, upload_state, gre_solution_id, verified_at, manual_review_reason")
+      .in("upload_state", ["synced", "update_pending", "quarantined", "pending_create", "pending_publish", "pending_verification", "rolled_back"]),
   ]);
   if (error) throw new Error(error.message);
   if (syncLinksError) throw new Error(syncLinksError.message);
@@ -8629,7 +8662,11 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
   try {
     const localParentOfferingId = requireString(payload.local_parent_offering_id);
     if (localParentOfferingId) {
-      await updateLocalSolution(localParentOfferingId, payload, actorEmail);
+      const localUpdate = await updateLocalSolution(localParentOfferingId, payload, actorEmail);
+      const greSyncStatus = localUpdate.greUpdatePending ? "gre_update_pending" : "synced_local_only";
+      const greSyncMessage = localUpdate.greUpdatePending
+        ? `Approved edit was applied to local offering ${localParentOfferingId}. The previous GRE version must be deleted before this edited version is resynced.`
+        : `Approved edit was applied to local offering ${localParentOfferingId}.`;
       const { error: approveLocalEditError } = await adminClient
         .from("gre_mis_form_submissions")
         .update({
@@ -8639,15 +8676,15 @@ async function approveFormSubmission(submissionId: string, decision: string, rev
           reviewed_at: new Date().toISOString(),
           target_solution_id: requireString(payload.local_parent_solution_id) || null,
           synced_to_gre: false,
-          gre_sync_status: "synced_local_only",
-          gre_sync_message: `Approved edit was applied to local offering ${localParentOfferingId}.`,
+          gre_sync_status: greSyncStatus,
+          gre_sync_message: greSyncMessage,
         })
         .eq("id", submissionId);
       if (approveLocalEditError) throw new Error(approveLocalEditError.message);
       return {
         ok: true,
-        greSyncStatus: "synced_local_only",
-        message: `Approved edit was applied to local offering ${localParentOfferingId}.`,
+        greSyncStatus,
+        message: greSyncMessage,
         offeringId: localParentOfferingId,
       };
     }
@@ -9108,6 +9145,59 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
     .eq("offering_id", normalizedOfferingId);
   if (offeringUpdateError) throw new Error(offeringUpdateError.message);
 
+  const solutionFieldsChanged = Object.entries(solutionPatch).some(([key, value]) => {
+    if (key === "raw_payload") return false;
+    return JSON.stringify(value ?? null) !== JSON.stringify(solutionRow?.[key] ?? null);
+  });
+  const traderFieldsChanged = Object.entries(traderPatch).some(([key, value]) =>
+    JSON.stringify(value ?? null) !== JSON.stringify(traderRow?.[key] ?? null)
+  );
+  const hasGreRelevantChanges = manualFields.length > 0 || solutionFieldsChanged || traderFieldsChanged;
+  let greUpdatePending = false;
+  if (hasGreRelevantChanges) {
+    const { data: syncLink, error: syncLinkError } = await adminClient
+      .from("gre_solution_links")
+      .select("local_offering_id, upload_state, gre_solution_id, gre_product_id, gre_sku_id, gre_channel_product_id, gre_status_summary, verified_at")
+      .eq("local_offering_id", normalizedOfferingId)
+      .maybeSingle();
+    if (syncLinkError) throw new Error(`Local edit was saved, but the GRE sync state could not be checked: ${syncLinkError.message}`);
+    if (syncLink && (syncLink.upload_state === "synced" || syncLink.upload_state === "update_pending")) {
+      const previousSummary = syncLink.gre_status_summary && typeof syncLink.gre_status_summary === "object"
+        ? syncLink.gre_status_summary as Record<string, unknown>
+        : {};
+      const { error: markPendingError } = await adminClient
+        .from("gre_solution_links")
+        .update({
+          upload_state: "update_pending",
+          manual_review_reason: "The GramEEE solution was edited after its last verified GRE sync. Delete the previous GRE record before recreating it.",
+          gre_status_summary: {
+            ...previousSummary,
+            localEditPending: true,
+            localEditedAt: nowIso,
+            previousVerifiedAt: syncLink.verified_at || null,
+          },
+          uploaded_by_email: actorEmail,
+        })
+        .eq("local_offering_id", normalizedOfferingId);
+      if (markPendingError) throw new Error(`Local edit was saved, but GRE update-pending status could not be recorded: ${markPendingError.message}`);
+      await logGreSyncEvent({
+        localOfferingId: normalizedOfferingId,
+        action: "local_edit",
+        step: "marked_update_pending",
+        httpStatus: 200,
+        greIds: {
+          solutionId: parseNumber(syncLink.gre_solution_id, 0) || null,
+          productId: parseNumber(syncLink.gre_product_id, 0) || null,
+          skuId: parseNumber(syncLink.gre_sku_id, 0) || null,
+          channelProductId: parseNumber(syncLink.gre_channel_product_id, 0) || null,
+        },
+        verificationResult: { changedFields: manualFields, solutionFieldsChanged, traderFieldsChanged },
+        actorEmail,
+      });
+      greUpdatePending = true;
+    }
+  }
+
   const refreshedOffering = {
     ...offering,
     ...offeringPatch,
@@ -9131,7 +9221,10 @@ async function updateLocalSolution(offeringId: string, payload: Record<string, u
 
   return {
     ok: true,
-    message: "Local solution updated in Supabase.",
+    greUpdatePending,
+    message: greUpdatePending
+      ? "Local solution updated. GRE Update Pending until the previous GRE record is deleted and the edited solution is resynced."
+      : "Local solution updated in Supabase.",
   };
 }
 
@@ -9741,7 +9834,7 @@ async function reconcileMappedGreSolutionsForImport(bundle: {
   const { data: syncedLinks, error: syncedLinksError } = await adminClient
     .from("gre_solution_links")
     .select("local_offering_id, local_solution_id, gre_solution_id, upload_state")
-    .eq("upload_state", "synced");
+    .in("upload_state", ["synced", "update_pending"]);
   if (syncedLinksError) throw new Error(`Could not reconcile GRE solution mappings: ${syncedLinksError.message}`);
   const incomingGreSolutionIdSet = new Set(incomingGreSolutionIds);
   const links = (syncedLinks || []).filter((link) => incomingGreSolutionIdSet.has(String(link.gre_solution_id ?? "").trim()));
@@ -9754,10 +9847,10 @@ async function reconcileMappedGreSolutionsForImport(bundle: {
   const localOfferingIds = uniqueStrings(links.map((link) => requireString(link.local_offering_id)));
   const [localSolutionsResult, localOfferingsResult] = await Promise.all([
     localSolutionIds.length
-      ? adminClient.from("solutions").select("solution_id, solution_image_url, raw_payload").in("solution_id", localSolutionIds)
+      ? adminClient.from("solutions").select("*").in("solution_id", localSolutionIds)
       : Promise.resolve({ data: [], error: null }),
     localOfferingIds.length
-      ? adminClient.from("offerings").select("offering_id, service_brochure_url, product_brochure_url, knowledge_content_url, raw_payload").in("offering_id", localOfferingIds)
+      ? adminClient.from("offerings").select("*").in("offering_id", localOfferingIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (localSolutionsResult.error) throw new Error(localSolutionsResult.error.message);
@@ -9777,6 +9870,22 @@ async function reconcileMappedGreSolutionsForImport(bundle: {
     const localSolutionId = requireString(link.local_solution_id);
     const localSolution = localSolutionById.get(localSolutionId) as Record<string, unknown> | undefined;
     const localRawPayload = localSolution?.raw_payload;
+    if (link.upload_state === "update_pending" && localSolution) {
+      return {
+        ...row,
+        ...localSolution,
+        solution_id: localSolutionId,
+        solution_status: "Approved in MIS",
+        publish_status: "MIS Published",
+        raw_payload: {
+          ...((localRawPayload && typeof localRawPayload === "object") ? localRawPayload : {}),
+          gre_import_snapshot: row.raw_payload || null,
+          gre_imported_at: importedAt,
+          gre_solution_id: greSolutionId,
+          gre_update_pending: true,
+        },
+      };
+    }
     return {
       ...row,
       solution_id: localSolutionId,
@@ -9801,6 +9910,23 @@ async function reconcileMappedGreSolutionsForImport(bundle: {
     const localOfferingId = requireString(link.local_offering_id);
     const localOffering = localOfferingById.get(localOfferingId) as Record<string, unknown> | undefined;
     const localRawPayload = localOffering?.raw_payload;
+    if (link.upload_state === "update_pending" && localOffering) {
+      return {
+        ...row,
+        ...localOffering,
+        offering_id: localOfferingId,
+        solution_id: localSolutionId,
+        publish_status: "MIS Published",
+        raw_payload: {
+          ...((localRawPayload && typeof localRawPayload === "object") ? localRawPayload : {}),
+          gre_import_snapshot: row.raw_payload || null,
+          gre_imported_at: importedAt,
+          gre_solution_id: greSolutionId,
+          gre_offering_id: requireString(row.offering_id),
+          gre_update_pending: true,
+        },
+      };
+    }
     return {
       ...row,
       offering_id: localOfferingId,
