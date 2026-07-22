@@ -7937,7 +7937,14 @@ async function refreshAll() {
   const failed = baseResults.filter((result) => result.status === "rejected");
   if (failed.length) {
     failed.forEach((result) => console.error("Dashboard refresh segment failed", result.reason));
-    toast("Some dashboard sections could not refresh fully. Loaded sections remain available.");
+    toast("Dashboard data could not refresh. Please use Refresh & Reset to retry.");
+  } else {
+    const displayNeeds = getDisplayNeeds();
+    if (!displayNeeds.find((need) => need.id === state.selectedNeedId)) {
+      state.selectedNeedId = displayNeeds[0]?.id || null;
+    }
+    // Do not hold the operational dashboard behind slower admin-only snapshots.
+    await rerender({ includeMatches: false });
   }
   if (hasAdminLikeAccess()) {
     const adminResults = await Promise.allSettled([

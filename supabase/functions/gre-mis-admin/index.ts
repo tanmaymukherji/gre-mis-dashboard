@@ -2219,6 +2219,32 @@ function extractGreResponseRecord(data: unknown) {
   return null;
 }
 
+function extractGreEntityRecord(data: unknown) {
+  if (Array.isArray(data)) return firstArrayObject(data);
+  if (!data || typeof data !== "object") return null;
+  const record = data as Record<string, unknown>;
+  for (const key of ["data", "elements", "content", "value", "result"]) {
+    const nested = record[key];
+    const nestedRecord = firstArrayObject(nested)
+      || (nested && typeof nested === "object" && !Array.isArray(nested) ? nested as Record<string, unknown> : null);
+    if (nestedRecord) return nestedRecord;
+  }
+  return record;
+}
+
+function extractGreEntityArray(data: unknown): Record<string, unknown>[] {
+  if (Array.isArray(data)) {
+    return data.filter((item) => item && typeof item === "object") as Record<string, unknown>[];
+  }
+  if (!data || typeof data !== "object") return [];
+  const record = data as Record<string, unknown>;
+  for (const key of ["elements", "data", "content", "value", "result"]) {
+    const nested = extractGreEntityArray(record[key]);
+    if (nested.length) return nested;
+  }
+  return [];
+}
+
 function normalizeGreLocationLabel(item: Record<string, unknown>) {
   const label = requireString(item.displayLabel || item.display_label || item.label || item.addressLabel || item.address_label);
   if (label) return label;
@@ -2250,6 +2276,148 @@ function extractGreLocationSubtype(item: Record<string, unknown>) {
   const locationType = requireString(item.locationType || item.location_type);
   if (locationType) return locationType.toUpperCase();
   return requireString(item.subType || item.sub_type || item.locationKind || item.location_kind || item.type).toUpperCase();
+}
+
+const indianStateLabels = new Set([
+  "andhra pradesh",
+  "arunachal pradesh",
+  "assam",
+  "bihar",
+  "chhattisgarh",
+  "goa",
+  "gujarat",
+  "haryana",
+  "himachal pradesh",
+  "jharkhand",
+  "karnataka",
+  "kerala",
+  "madhya pradesh",
+  "maharashtra",
+  "manipur",
+  "meghalaya",
+  "mizoram",
+  "nagaland",
+  "odisha",
+  "orissa",
+  "punjab",
+  "rajasthan",
+  "sikkim",
+  "tamil nadu",
+  "telangana",
+  "tripura",
+  "uttar pradesh",
+  "uttarakhand",
+  "west bengal",
+  "andaman and nicobar islands",
+  "chandigarh",
+  "dadra and nagar haveli and daman and diu",
+  "delhi",
+  "jammu and kashmir",
+  "ladakh",
+  "lakshadweep",
+  "puducherry",
+]);
+
+function splitLocationParts(value: unknown) {
+  return requireString(value)
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => normalizeComparable(part) !== "india");
+}
+
+function isIndiaLocationCandidate(item: Record<string, unknown>, queryParts: string[]) {
+  const label = normalizeComparable(normalizeGreLocationLabel(item));
+  const country = normalizeComparable(item.countryName || item.country_name || item.country || item.countryLabel);
+  const state = normalizeComparable(item.stateName || item.state_name || item.state || item.stateLabel);
+  if (country === "india" || label.includes(" india")) return true;
+  if (state && indianStateLabels.has(state)) return true;
+  return queryParts.some((part) => indianStateLabels.has(normalizeComparable(part)));
+}
+
+function greLocationCandidateScore(item: Record<string, unknown>, query: string) {
+  const queryParts = splitLocationParts(query);
+  const normalizedQuery = normalizeComparable(query);
+  const normalizedParts = queryParts.map((part) => normalizeComparable(part)).filter(Boolean);
+  const label = normalizeComparable(normalizeGreLocationLabel(item));
+  if (!label || !normalizedQuery) return -1;
+
+  const queryMentionsIndia = normalizedParts.some((part) => indianStateLabels.has(part)) || /\bindia\b/i.test(requireString(query));
+  const indiaCandidate = isIndiaLocationCandidate(item, queryParts);
+  if (queryMentionsIndia && !indiaCandidate) return -1;
+
+  let score = indiaCandidate ? 120 : 0;
+  if (label === normalizedQuery) score += 600;
+  if (label.startsWith(`${normalizedQuery} `) || label.startsWith(normalizedQuery)) score += 420;
+  if (normalizedParts.length && normalizedParts.every((part) => label.includes(part))) score += 300;
+  if (normalizedParts[0] && label.startsWith(normalizedParts[0])) score += 180;
+
+  const subtype = extractGreLocationSubtype(item);
+  const stateOnlyQuery = normalizedParts.length === 1 && indianStateLabels.has(normalizedParts[0]);
+  if (stateOnlyQuery) {
+    if (subtype === "STATE") score += 1200;
+    if (["CITY", "DISTRICT", "BLOCK", "SUB_DISTRICT", "SUBDISTRICT", "TEHSIL"].includes(subtype)) score -= 250;
+  }
+  if (normalizedParts.length >= 3 && ["BLOCK", "SUB_DISTRICT", "SUBDISTRICT", "TEHSIL", "CITY", "DISTRICT"].includes(subtype)) score += 90;
+  if (normalizedParts.length === 2 && ["DISTRICT", "CITY"].includes(subtype)) score += 70;
+  if (normalizedParts.length === 1 && ["STATE", "COUNTRY"].includes(subtype)) score += 60;
+
+  const state = normalizeComparable(item.stateName || item.state_name || item.state || item.stateLabel);
+  const district = normalizeComparable(item.districtName || item.district_name || item.cityName || item.city_name || item.district || item.city);
+  const block = normalizeComparable(item.blockName || item.block_name || item.subDistrictName || item.sub_district_name || item.block);
+  if (state && normalizedParts.includes(state)) score += 100;
+  if (district && normalizedParts.includes(district)) score += 120;
+  if (block && normalizedParts.includes(block)) score += 140;
+
+  return score;
+}
+
+function buildGreLocationSearchQueries(query: string) {
+  const parts = splitLocationParts(query);
+  const queries = [
+    query,
+    ...parts,
+    parts.slice(0, 2).join(", "),
+    parts.slice(-2).join(", "),
+  ];
+  return uniqueStrings(queries.map((item) => requireString(item)).filter(Boolean));
+}
+
+function toGreLocationCodeTail(value: string) {
+  return requireString(value)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function titleCaseLocation(value: string) {
+  return requireString(value)
+    .toLowerCase()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function buildDirectGreLocationValue(query: string) {
+  const parts = splitLocationParts(query);
+  if (!parts.length && normalizeComparable(query) === "india") {
+    return {
+      code: "REGION_COUNTRY.INDIA",
+      id: 0,
+      subType: "COUNTRY",
+      type: "LOCATION",
+      value: buildGreTextList("India"),
+    };
+  }
+  if (parts.length === 1 && indianStateLabels.has(normalizeComparable(parts[0]))) {
+    const label = titleCaseLocation(parts[0]);
+    return {
+      code: `REGION_STATE.${toGreLocationCodeTail(parts[0])}`,
+      id: 0,
+      subType: "STATE",
+      type: "LOCATION",
+      value: buildGreTextList(`${label}, India`),
+    };
+  }
+  return null;
 }
 
 function extractGreTagEntry(entity: Record<string, unknown> | null, sequence: number) {
@@ -2399,29 +2567,115 @@ async function resolveGreHierarchyMatch(
 }
 
 async function fetchGreGenericProductDetail(genericProductId: string, sessionId: string) {
-  const { data } = await requestGreGatewayJson(
+  const { data: detailData } = await requestGreGatewayJson(
     `/commons-product-service/api/v1/generic-product/detail?genericProductIds=${encodeURIComponent(genericProductId)}`,
     "GET",
     undefined,
     sessionId,
   );
-  const record = firstArrayObject(data) || extractGreResponseRecord(data);
+  const detailRecord = extractGreEntityRecord(detailData);
+  let record = detailRecord;
+  try {
+    const { data: typeData } = await requestGreGatewayJson(
+      `/commons-product-service/api/v1/generic-product/type?marketId=${encodeURIComponent(greMarketId)}&page=0&size=500&types=VALUE_CHAIN`,
+      "GET",
+      undefined,
+      sessionId,
+    );
+    const richRecord = extractGreEntityArray(typeData).find((item) =>
+      String(item.id || item.genericProductId) === String(genericProductId)
+    );
+    if (richRecord?.id) record = richRecord;
+  } catch {
+    // The detail endpoint remains the supported fallback for older GRE tenants.
+  }
   if (!record) throw new Error(`GRE generic product detail was not found for id ${genericProductId}.`);
   return record;
 }
 
+function normalizeGreGenericProductReference(
+  source: Record<string, unknown>,
+  genericProductId: string,
+  fallbackName = "",
+) {
+  const id = parseNumber(source.id || source.genericProductId || genericProductId, 0);
+  if (!id) throw new Error("The selected GRE value chain does not have a persisted generic product ID.");
+  const code = requireString(source.code || source.genericProductCode);
+  const sourceName = Array.isArray(source.name)
+    ? source.name
+    : Array.isArray(source.genericProductName)
+      ? source.genericProductName
+      : buildGreTextList(fallbackName || prettifyGreCodeTail(code));
+  const sourceDescription = Array.isArray(source.description)
+    ? source.description
+    : Array.isArray(source.genericProductDescription)
+      ? source.genericProductDescription
+      : [];
+  return {
+    id,
+    ...(requireString(source.uuid) ? { uuid: source.uuid } : {}),
+    code,
+    name: sourceName,
+    description: sourceDescription,
+    tagIdentifier: requireString(source.tagIdentifier) || buildGreTagIdentifierFromCode(code),
+    type: requireString(source.type) || "VALUE_CHAIN",
+    ...(requireString(source.productClass) ? { productClass: source.productClass } : {}),
+    marketId: parseNumber(source.marketId, 0) || parseNumber(greMarketId, 0),
+    isPrivate: Boolean(source.isPrivate),
+    classificationList: Array.isArray(source.classificationList) ? source.classificationList : [],
+    genericProductVarietyList: Array.isArray(source.genericProductVarietyList) ? source.genericProductVarietyList : [],
+  };
+}
+
+function normalizeGreVarietyReference(
+  source: Record<string, unknown> | null,
+  applicationId: string,
+  applicationName: string,
+  genericProductCode: string,
+) {
+  const id = parseNumber(source?.id || source?.genericProductVarietyId || applicationId, 0);
+  if (!id) return null;
+  const name = Array.isArray(source?.name)
+    ? source?.name
+    : Array.isArray(source?.genericProductVarietyName)
+      ? source?.genericProductVarietyName
+      : buildGreTextList(applicationName || "Application");
+  const tagIdentifier = requireString(source?.tagIdentifier)
+    || buildGreVarietyTagIdentifier(genericProductCode, applicationName);
+  return {
+    id,
+    ...(requireString(source?.uuid) ? { uuid: source?.uuid } : {}),
+    varietyCode: requireString(source?.varietyCode || source?.code)
+      || tagIdentifier.replace(/^TAG\./, "")
+      || `GRE_MIS.${id}`,
+    name,
+    description: Array.isArray(source?.description) ? source?.description : [],
+    tagIdentifier,
+  };
+}
+
 async function fetchGreGenericProductApplications(genericProductId: string, sessionId: string) {
   const { data } = await requestGreGatewayJson(
-    `/commons-product-service/api/v1/solution/generic-product?genericProductId=${encodeURIComponent(genericProductId)}&marketId=${encodeURIComponent(greMarketId)}&page=0&size=200`,
+    `/commons-product-service/api/v1/generic-product-variety/page?genericProductId=${encodeURIComponent(genericProductId)}&marketId=${encodeURIComponent(greMarketId)}&page=0&size=200`,
     "GET",
     undefined,
     sessionId,
   );
-  if (Array.isArray((data as Record<string, unknown>)?.elements)) {
-    return (data as Record<string, unknown>).elements as Record<string, unknown>[];
-  }
-  if (Array.isArray(data)) return data as Record<string, unknown>[];
-  return [];
+  return extractGreEntityArray(data);
+}
+
+async function resolveLocalGreHierarchyLabels(genericProductId: string, applicationId: string) {
+  if (!genericProductId) return { valueChain: "", application: "" };
+  let query = adminClient
+    .from("offerings")
+    .select("primary_valuechain,primary_application")
+    .eq("primary_valuechain_id", genericProductId);
+  if (applicationId) query = query.eq("primary_application_id", applicationId);
+  const { data } = await query.not("primary_valuechain", "is", null).limit(1).maybeSingle();
+  return {
+    valueChain: requireString(data?.primary_valuechain),
+    application: requireString(data?.primary_application),
+  };
 }
 
 async function fetchGreTraderList(sessionId: string): Promise<Record<string, unknown>[]> {
@@ -2705,20 +2959,38 @@ async function resolveGreLocationValues(geographies: string[], sessionId: string
   for (const geography of geographies) {
     const query = requireString(geography);
     if (!query) continue;
-    const { data } = await requestGreGatewayJson(
-      `/commons-search-service/api/v1/commons-location/search?keyword=${encodeURIComponent(query)}&page=0&size=10&cityData=true`,
-      "GET",
-      undefined,
-      sessionId,
-    );
-    const elements = Array.isArray((data as Record<string, unknown>)?.elements)
-      ? ((data as Record<string, unknown>).elements as Record<string, unknown>[])
-      : Array.isArray(data)
-        ? data as Record<string, unknown>[]
-        : [];
-    const match = elements.find((item) => normalizeComparable(normalizeGreLocationLabel(item)) === normalizeComparable(query))
-      || elements.find((item) => normalizeComparable(normalizeGreLocationLabel(item)).includes(normalizeComparable(query)))
-      || elements[0];
+    const directLocation = buildDirectGreLocationValue(query);
+    if (directLocation) {
+      resolved.push(directLocation);
+      continue;
+    }
+    const candidateMap = new Map<string, Record<string, unknown>>();
+    for (const searchQuery of buildGreLocationSearchQueries(query)) {
+      const { data } = await requestGreGatewayJson(
+        `/commons-search-service/api/v1/commons-location/search?keyword=${encodeURIComponent(searchQuery)}&page=0&size=25&cityData=true`,
+        "GET",
+        undefined,
+        sessionId,
+      );
+      const elements = Array.isArray((data as Record<string, unknown>)?.elements)
+        ? ((data as Record<string, unknown>).elements as Record<string, unknown>[])
+        : Array.isArray(data)
+          ? data as Record<string, unknown>[]
+          : [];
+      elements.forEach((item) => {
+        const key = [
+          extractGreLocationCode(item),
+          extractGreLocationSubtype(item),
+          normalizeGreLocationLabel(item),
+        ].map((part) => requireString(part)).join("|");
+        if (key && !candidateMap.has(key)) candidateMap.set(key, item);
+      });
+    }
+    const candidates = [...candidateMap.values()]
+      .map((item) => ({ item, score: greLocationCandidateScore(item, query) }))
+      .filter((entry) => entry.score >= 0)
+      .sort((left, right) => right.score - left.score);
+    const match = candidates[0]?.item || null;
     if (!match) throw new Error(`Could not map GRE geography for "${query}".`);
     const code = extractGreLocationCode(match);
     const subType = extractGreLocationSubtype(match) || "DISTRICT";
@@ -2793,6 +3065,55 @@ function buildGreSolutionCreatePayload(
     marketId: greMarketId,
     traderId: Number(traderId),
     status: "TRADER_CENTER_SOLUTION_STATUS.DRAFT",
+    solutionDTO,
+  };
+}
+
+function validateGreSolutionCreateReferences(payload: Record<string, unknown>, requireVariety = false) {
+  const solution = payload.solutionDTO as Record<string, unknown> | undefined;
+  const genericProduct = solution?.genericProduct as Record<string, unknown> | undefined;
+  const genericProductVariety = solution?.genericProductVariety as Record<string, unknown> | undefined;
+  const genericProductId = parseNumber(genericProduct?.id, 0);
+  const genericProductVarietyId = parseNumber(genericProductVariety?.id, 0);
+  if (!genericProductId) {
+    throw new Error("GRE preflight blocked the upload because the selected value chain has no persisted genericProduct.id.");
+  }
+  if (requireVariety && !genericProductVarietyId) {
+    throw new Error("GRE preflight blocked the upload because the selected application has no persisted genericProductVariety.id.");
+  }
+  return { genericProductId, genericProductVarietyId };
+}
+
+function buildGreApprovalPayload(
+  currentSolution: unknown,
+  traderId: string,
+  solutionId: number,
+) {
+  const currentRecord = extractGreEntityRecord(currentSolution);
+  if (!currentRecord) throw new Error("GRE approval preflight could not read the pending solution.");
+  const solutionDTO: Record<string, unknown> = {};
+  for (const key of [
+    "title",
+    "description",
+    "isGenericSolution",
+    "statusUpdatedOnDate",
+    "genericProduct",
+    "genericProductVariety",
+    "solutionTagList",
+    "marketId",
+    "solutionSpecificationList",
+    "solutionClass",
+  ]) {
+    if (currentRecord[key] !== undefined) solutionDTO[key] = currentRecord[key];
+  }
+  solutionDTO.id = solutionId;
+  solutionDTO.status = "SOLUTION_STATUS.PUBLISHED";
+  validateGreSolutionCreateReferences({ solutionDTO }, Boolean(solutionDTO.genericProductVariety));
+  return {
+    channelId: greChannelId,
+    marketId: greMarketId,
+    traderId: Number(traderId),
+    status: "TRADER_CENTER_SOLUTION_STATUS.PUBLISHED",
     solutionDTO,
   };
 }
@@ -3582,27 +3903,28 @@ async function dryRunGreSolutionUpload(payload: Record<string, unknown>, actorEm
   let hierarchy: Record<string, unknown>;
   if (genericProductId > 0) {
     // User selected from GRE value chain dropdown — use the GRE product ID directly
-    let genericProduct: Record<string, unknown>;
+    let genericProductDetail: Record<string, unknown>;
     try {
-      genericProduct = await fetchGreGenericProductDetail(String(genericProductId), sessionId);
+      genericProductDetail = await fetchGreGenericProductDetail(String(genericProductId), sessionId);
     } catch (err) {
       throw new Error("Could not fetch GRE product details for the selected value chain. The GRE API may be unavailable: " + (err instanceof Error ? err.message : String(err)));
     }
+    const hierarchyLabels = await resolveLocalGreHierarchyLabels(String(genericProductId), String(genericApplicationId || ""));
+    const genericProduct = normalizeGreGenericProductReference(genericProductDetail, String(genericProductId), hierarchyLabels.valueChain);
     const greProductCode = String(genericProduct.code || genericProduct.genericProductCode || "");
     const greProductName = extractGreEntityName(genericProduct);
-    const varietyList = Array.isArray((genericProduct as Record<string, unknown>)?.genericProductVarietyList)
-      ? (genericProduct as Record<string, unknown>).genericProductVarietyList as Record<string, unknown>[]
-      : [];
+    const varietyList = await fetchGreGenericProductApplications(String(genericProductId), sessionId);
     const selectedVariety = genericApplicationId > 0
-      ? varietyList.find((v: Record<string, unknown>) => String(v.id) === String(genericApplicationId))
+      ? varietyList.find((v: Record<string, unknown>) => String(v.id || v.genericProductVarietyId) === String(genericApplicationId))
       : null;
-    let resolvedVariety: Record<string, unknown> | null = selectedVariety || null;
-    if (!resolvedVariety) {
+    let resolvedVarietySource: Record<string, unknown> | null = selectedVariety || null;
+    if (!resolvedVarietySource) {
       const helper = await resolveGreVarietyId(offering, String(genericProductId), genericApplicationId, sessionId);
-      resolvedVariety = helper?.variety || (helper ? { id: helper.id, name: buildGreTextList(helper.name) } : null);
+      resolvedVarietySource = helper?.variety || (helper ? { id: helper.id, name: buildGreTextList(helper.name) } : null);
     }
-    const appName = resolvedVariety ? extractGreEntityName(resolvedVariety) : "";
-    const appId = resolvedVariety ? String(resolvedVariety.id) : "0";
+    const appName = (resolvedVarietySource ? extractGreEntityName(resolvedVarietySource) : "") || hierarchyLabels.application;
+    const appId = String(genericApplicationId || parseNumber(resolvedVarietySource?.id || resolvedVarietySource?.genericProductVarietyId, 0));
+    const resolvedVariety = normalizeGreVarietyReference(resolvedVarietySource, appId, appName, greProductCode);
     const primaryTagCodeStr = buildGreTagIdentifierFromCode(greProductCode);
     const primaryVarietyTagCodeStr = appName ? buildGreVarietyTagIdentifier(greProductCode, appName) : "";
 
@@ -3679,7 +4001,7 @@ async function dryRunGreSolutionUpload(payload: Record<string, unknown>, actorEm
     ...offering,
     ...solution,
     ...(audienceList.length ? { solution_audience: audienceList } : { solution_audience: ["Individuals", "Groups", "SHGs", "Organisations"] }),
-    ...(storedPayload.existing_trader_id ? { existing_trader_id: String(storedPayload.existing_trader_id) } : {}),
+    existing_trader_id: String(offering.trader_id),
   };
 
   // Call appropriate builder
@@ -3691,6 +4013,7 @@ async function dryRunGreSolutionUpload(payload: Record<string, unknown>, actorEm
   } else {
     bundle = await buildGreKnowledgeSolutionPayloads(builderPayload, hierarchy, offering.trader_id, sessionId);
   }
+  validateGreSolutionCreateReferences(bundle.solutionCreate, genericApplicationId > 0);
 
   // Check if already synced
   const { data: existingLink } = await adminClient.from("gre_solution_links").select("*").eq("local_offering_id", offeringId).single();
@@ -3749,27 +4072,28 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
 
   let hierarchy: Record<string, unknown>;
   if (genericProductId > 0) {
-    let genericProduct: Record<string, unknown>;
+    let genericProductDetail: Record<string, unknown>;
     try {
-      genericProduct = await fetchGreGenericProductDetail(String(genericProductId), traderSession);
+      genericProductDetail = await fetchGreGenericProductDetail(String(genericProductId), traderSession);
     } catch (err) {
       throw new Error("Could not fetch GRE product details for the selected value chain: " + (err instanceof Error ? err.message : String(err)));
     }
+    const hierarchyLabels = await resolveLocalGreHierarchyLabels(String(genericProductId), String(genericApplicationId || ""));
+    const genericProduct = normalizeGreGenericProductReference(genericProductDetail, String(genericProductId), hierarchyLabels.valueChain);
     const greProductCode = String(genericProduct.code || genericProduct.genericProductCode || "");
     const greProductName = extractGreEntityName(genericProduct);
-    const varietyList = Array.isArray((genericProduct as Record<string, unknown>)?.genericProductVarietyList)
-      ? (genericProduct as Record<string, unknown>).genericProductVarietyList as Record<string, unknown>[]
-      : [];
+    const varietyList = await fetchGreGenericProductApplications(String(genericProductId), traderSession);
     const selectedVariety = genericApplicationId > 0
-      ? varietyList.find((v: Record<string, unknown>) => String(v.id) === String(genericApplicationId))
+      ? varietyList.find((v: Record<string, unknown>) => String(v.id || v.genericProductVarietyId) === String(genericApplicationId))
       : null;
-    let resolvedVariety: Record<string, unknown> | null = selectedVariety || null;
-    if (!resolvedVariety) {
+    let resolvedVarietySource: Record<string, unknown> | null = selectedVariety || null;
+    if (!resolvedVarietySource) {
       const helper = await resolveGreVarietyId(offering, String(genericProductId), genericApplicationId, traderSession);
-      resolvedVariety = helper?.variety || (helper ? { id: helper.id, name: buildGreTextList(helper.name) } : null);
+      resolvedVarietySource = helper?.variety || (helper ? { id: helper.id, name: buildGreTextList(helper.name) } : null);
     }
-    const appName = resolvedVariety ? extractGreEntityName(resolvedVariety) : "";
-    const appId = resolvedVariety ? String(resolvedVariety.id) : "0";
+    const appName = (resolvedVarietySource ? extractGreEntityName(resolvedVarietySource) : "") || hierarchyLabels.application;
+    const appId = String(genericApplicationId || parseNumber(resolvedVarietySource?.id || resolvedVarietySource?.genericProductVarietyId, 0));
+    const resolvedVariety = normalizeGreVarietyReference(resolvedVarietySource, appId, appName, greProductCode);
     const primaryTagCodeStr = buildGreTagIdentifierFromCode(greProductCode);
     const primaryVarietyTagCodeStr = appName ? buildGreVarietyTagIdentifier(greProductCode, appName) : "";
 
@@ -3843,7 +4167,7 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
     ...offering,
     ...solution,
     ...(uploadAudienceList.length ? { solution_audience: uploadAudienceList } : { solution_audience: ["Individuals", "Groups", "SHGs", "Organisations"] }),
-    ...(uploadStoredPayload.existing_trader_id ? { existing_trader_id: String(uploadStoredPayload.existing_trader_id) } : {}),
+    existing_trader_id: String(offering.trader_id),
   };
   let bundle: GrePayloadBundle;
   if (category === "Service offerings") {
@@ -3853,6 +4177,7 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
   } else {
     bundle = await buildGreKnowledgeSolutionPayloads(uploadBuilderPayload, hierarchy, offering.trader_id, traderSession);
   }
+  validateGreSolutionCreateReferences(bundle.solutionCreate, genericApplicationId > 0);
 
   // Verify acknowledgements match current warnings
   const unacked = bundle.warnings.filter(w => w.resolution === "blocker" || w.resolution === "fallback")
@@ -4003,7 +4328,7 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
     // ---- Stage 4: Approve (Governor) ----
     // GET current solution DTO first (GET-then-mutate pattern)
     const { data: currentSolution } = await requestGreGatewayJson(`/commons-product-service/api/v1/solution/market?marketId=5&solutionId=${greSolutionId}`, "GET", undefined, governorSession);
-    const approvePayload = { ...bundle.approve, solutionDTO: { ...(currentSolution as Record<string, unknown>).solutionDTO, id: greSolutionId, status: "SOLUTION_STATUS.PUBLISHED" }, status: "TRADER_CENTER_SOLUTION_STATUS.PUBLISHED" };
+    const approvePayload = buildGreApprovalPayload(currentSolution, bundle.greTraderId, greSolutionId);
     const { data: approveResp } = await requestGreGatewayJson("/commons-market-service/api/v1/tma-channel-solution", "POST", approvePayload, governorSession);
     await logGreSyncEvent({ localOfferingId: offeringId, action: "approve", step: "approve_response", httpStatus: 200, responseFingerprint: fingerprint(approveResp), greIds: { solutionId: greSolutionId }, actorEmail });
 
@@ -4069,6 +4394,99 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
     }).eq("key", "solution_sync_circuit_open");
     throw error;
   }
+}
+
+async function resumeGreSolutionApproval(payload: Record<string, unknown>, actorEmail: string) {
+  const offeringId = requireString(payload.offeringId);
+  if (!offeringId) throw new Error("offeringId is required");
+  const { data: link, error: linkError } = await adminClient
+    .from("gre_solution_links")
+    .select("*")
+    .eq("local_offering_id", offeringId)
+    .single();
+  if (linkError || !link) throw new Error("GRE sync mapping was not found.");
+  const solutionId = parseNumber(link.gre_solution_id, 0);
+  if (!solutionId) throw new Error("The quarantined GRE sync has no solution ID to reconcile.");
+  if (link.upload_state !== "quarantined" && link.upload_state !== "pending_verification") {
+    throw new Error(`GRE sync cannot be resumed from state "${requireString(link.upload_state)}".`);
+  }
+
+  const governorSession = await loginToGre();
+  const { data: currentSolution } = await requestGreGatewayJson(
+    `/commons-product-service/api/v1/solution/market?marketId=5&solutionId=${solutionId}`,
+    "GET",
+    undefined,
+    governorSession,
+  );
+  const currentRecord = extractGreEntityRecord(currentSolution);
+  const currentStatus = requireString(currentRecord?.status);
+  if (currentStatus !== "SOLUTION_STATUS.PENDING_REVIEW" && currentStatus !== "SOLUTION_STATUS.PUBLISHED") {
+    throw new Error(`GRE reconciliation expected PENDING_REVIEW or PUBLISHED, found "${currentStatus || "unknown"}".`);
+  }
+
+  if (currentStatus !== "SOLUTION_STATUS.PUBLISHED") {
+    const approvePayload = buildGreApprovalPayload(currentSolution, requireString(link.gre_trader_id || link.local_trader_id), solutionId);
+    const { data: approveResp } = await requestGreGatewayJson(
+      "/commons-market-service/api/v1/tma-channel-solution",
+      "POST",
+      approvePayload,
+      governorSession,
+    );
+    await logGreSyncEvent({
+      localOfferingId: offeringId,
+      action: "approve",
+      step: "reconcile_approve_response",
+      httpStatus: 200,
+      responseFingerprint: fingerprint(approveResp),
+      greIds: { solutionId },
+      actorEmail,
+    });
+  }
+
+  const { data: verifiedSolution } = await requestGreGatewayJson(
+    `/commons-product-service/api/v1/solution/market?marketId=5&solutionId=${solutionId}`,
+    "GET",
+    undefined,
+    governorSession,
+  );
+  const verifiedRecord = extractGreEntityRecord(verifiedSolution);
+  const finalStatus = requireString(verifiedRecord?.status);
+  if (finalStatus !== "SOLUTION_STATUS.PUBLISHED") {
+    throw new Error(`GRE approval reconciliation failed read-back: status = ${finalStatus || "unknown"}`);
+  }
+  const reportRow = await findGreSolutionInGovernorReport(governorSession, solutionId);
+  const marketStatus = reportRow ? requireString(reportRow.marketSolutionStatus) : "";
+  if (marketStatus !== "TMA_CHANNEL_SOLUTION_PUBLISH_STATUS.PUBLISHED") {
+    throw new Error(`GRE approval reconciliation failed report verification: ${marketStatus || "not found"}`);
+  }
+
+  const { error: updateError } = await adminClient.from("gre_solution_links").update({
+    upload_state: "synced",
+    verified_at: new Date().toISOString(),
+    manual_review_reason: null,
+    gre_status_summary: {
+      solution: finalStatus,
+      solutionProduct: "APPROVED",
+      marketSolution: marketStatus,
+    },
+  }).eq("local_offering_id", offeringId);
+  if (updateError) throw new Error(`GRE mapping could not be finalized: ${updateError.message}`);
+  await adminClient.from("gre_mis_settings").update({
+    value_text: "false",
+    value_json: false,
+    updated_at: new Date().toISOString(),
+    updated_by_email: actorEmail,
+  }).eq("key", "solution_sync_circuit_open");
+  await logGreSyncEvent({
+    localOfferingId: offeringId,
+    action: "approve",
+    step: "reconcile_readback_report",
+    httpStatus: 200,
+    greIds: { solutionId },
+    verificationResult: { expected: "PUBLISHED", actual: finalStatus, marketStatus, passed: true },
+    actorEmail,
+  });
+  return { ok: true, solutionId, status: finalStatus, marketStatus, message: "GRE solution approval reconciled successfully." };
 }
 
 // ---- Admin Action: getGreSolutionLinkState ----
@@ -12930,6 +13348,13 @@ Deno.serve(async (req) => {
 
     if (action === "getGreSolutionLinkState") {
       return jsonResponse(await getGreSolutionLinkState(payload, adminActorEmail));
+    }
+
+    if (action === "resumeGreSolutionApproval") {
+      if (isModeratorMisRole(adminActorRole)) {
+        throw new Error("Moderators cannot reconcile GRE solution approvals.");
+      }
+      return jsonResponse(await resumeGreSolutionApproval(payload, adminActorEmail));
     }
 
     if (action === "getGreValueChains") {
