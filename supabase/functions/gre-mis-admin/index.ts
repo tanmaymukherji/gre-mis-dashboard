@@ -3396,6 +3396,43 @@ async function logGreSyncEvent(params: {
   }
 }
 
+async function verifySyncedGreLinkOnGre(
+  link: Record<string, unknown> | null | undefined,
+  sessionId: string,
+) {
+  const solutionId = parseNumber(link?.gre_solution_id, 0);
+  if (!solutionId) {
+    return { exists: false, reason: "Missing GRE solution ID on local sync link." };
+  }
+  try {
+    const { data } = await requestGreGatewayJson(
+      `/commons-product-service/api/v1/solution/market?marketId=5&solutionId=${solutionId}`,
+      "GET",
+      undefined,
+      sessionId,
+    );
+    const record = extractGreEntityRecord(data);
+    const solutionStatus = requireString(record?.status);
+    const reportRow = await findGreSolutionInGovernorReport(sessionId, solutionId);
+    const marketStatus = reportRow ? requireString(reportRow.marketSolutionStatus) : "";
+    const exists = solutionStatus === "SOLUTION_STATUS.PUBLISHED" &&
+      marketStatus === "TMA_CHANNEL_SOLUTION_PUBLISH_STATUS.PUBLISHED";
+    return {
+      exists,
+      solutionId,
+      solutionStatus,
+      marketStatus,
+      reason: exists ? "" : `GRE read-back did not find a published market listing for solution ${solutionId}.`,
+    };
+  } catch (error) {
+    return {
+      exists: false,
+      solutionId,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 function fingerprint(obj: unknown): string {
   try {
     const str = JSON.stringify(obj, Object.keys(obj as Record<string, unknown>).sort());
@@ -4018,7 +4055,19 @@ async function dryRunGreSolutionUpload(payload: Record<string, unknown>, actorEm
   // Check if already synced
   const { data: existingLink } = await adminClient.from("gre_solution_links").select("*").eq("local_offering_id", offeringId).single();
   if (existingLink && existingLink.upload_state === "synced") {
-    return { ok: true, message: "Already synced to GRE", payload: bundle, warnings: bundle.warnings, linkState: existingLink };
+    const governorSession = await loginToGre();
+    const grePresence = await verifySyncedGreLinkOnGre(existingLink, governorSession);
+    if (grePresence.exists) {
+      return { ok: true, message: "Already synced to GRE", payload: bundle, warnings: bundle.warnings, linkState: existingLink, grePresence };
+    }
+    return {
+      ok: true,
+      message: "The previous GRE sync link is stale. Confirm upload to recreate it on GRE.",
+      payload: bundle,
+      warnings: bundle.warnings,
+      linkState: existingLink,
+      grePresence,
+    };
   }
 
   return { ok: true, payload: bundle, warnings: bundle.warnings, linkState: existingLink };
@@ -4220,10 +4269,27 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
     .eq("local_offering_id", offeringId)
     .maybeSingle();
   if (existingLinkError) throw new Error(`Could not check GRE sync mapping: ${existingLinkError.message}`);
+  let staleSyncedLinkRolledBack = false;
   if (existingLink?.upload_state === "synced") {
-    return { ok: true, dryRun: false, message: "This offering is already synced to GRE.", link: existingLink };
+    const grePresence = await verifySyncedGreLinkOnGre(existingLink, governorSession);
+    if (grePresence.exists) {
+      return { ok: true, dryRun: false, message: "This offering is already synced to GRE.", link: existingLink, grePresence };
+    }
+    await adminClient.from("gre_solution_links").update({
+      upload_state: "rolled_back",
+      manual_review_reason: `Previous synced GRE record is missing or unpublished on GRE: ${grePresence.reason}`,
+      gre_status_summary: {
+        stale: true,
+        solutionId: grePresence.solutionId,
+        solutionStatus: grePresence.solutionStatus || null,
+        marketStatus: grePresence.marketStatus || null,
+      },
+      last_attempted_at: new Date().toISOString(),
+      uploaded_by_email: actorEmail,
+    }).eq("local_offering_id", offeringId);
+    staleSyncedLinkRolledBack = true;
   }
-  if (existingLink && existingLink.upload_state !== "rolled_back") {
+  if (existingLink && existingLink.upload_state !== "rolled_back" && !staleSyncedLinkRolledBack) {
     throw new Error(`A prior GRE sync attempt is in state "${existingLink.upload_state}". Reconcile it before retrying.`);
   }
   const { error: pendingLinkError } = await adminClient.from("gre_solution_links").upsert({
