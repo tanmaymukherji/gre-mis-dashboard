@@ -1128,6 +1128,19 @@ const greServiceOfferingSubtypeFallbacks: Record<string, string> = {
   "technology transfer": "OFFERINGS_CATEGORY.TECHNOLOGY_TRANSFER",
 };
 
+const greOfferingTypeAliases: Record<string, string[]> = {
+  "raw material": ["Raw Material Supply", "Raw Material", "Material Supply"],
+  "raw material supply": ["Raw material", "Raw Material", "Material Supply"],
+  "product bought": ["Product/Raw Material Bought", "Product Raw Material Bought", "Raw Material Bought"],
+  "product raw material bought": ["Product/Raw Material Bought", "Product bought", "Raw Material Bought"],
+  "machinery": ["Machine", "Machinery"],
+  "plant setup": ["Plant Setup", "Plant setup"],
+  "sop manuals": ["SOP Manuals", "Sop manuals", "SOP / Manuals"],
+  "videos": ["Videos", "Video"],
+  "blogs": ["Blogs", "Blog"],
+  "market reports": ["Market Reports", "Market Report"],
+};
+
 const greTrainingLanguageFallbacks: Record<string, string> = {
   "eng": "TRAINING_LANGUAGE.ENG",
   "english": "TRAINING_LANGUAGE.ENG",
@@ -2169,10 +2182,26 @@ function normalizeGreLabel(value: unknown) {
 
 function extractGreEntityName(entity: Record<string, unknown> | null) {
   if (!entity) return "";
+  const child = entity.child && typeof entity.child === "object" ? entity.child as Record<string, unknown> : null;
+  if (child) {
+    const childDirect = requireString(child.text || child.name || child.label || child.displayLabel);
+    if (childDirect) return childDirect;
+    const childNameEntry = firstArrayObject(child.name) || firstArrayObject(child.labels);
+    const childLabel = requireString(childNameEntry?.text);
+    if (childLabel) return childLabel;
+  }
   const direct = requireString(entity.text || entity.name || entity.label || entity.displayLabel);
   if (direct) return direct;
-  const nameEntry = firstArrayObject(entity.name);
+  const nameEntry = firstArrayObject(entity.name) || firstArrayObject(entity.labels);
   return requireString(nameEntry?.text);
+}
+
+function extractGreRefDataCode(entity: Record<string, unknown> | null) {
+  if (!entity) return "";
+  const direct = requireString(entity.code);
+  if (direct) return direct;
+  const child = entity.child && typeof entity.child === "object" ? entity.child as Record<string, unknown> : null;
+  return requireString(child?.code);
 }
 
 function buildGreSolutionAudienceValues(values: string[]) {
@@ -2901,13 +2930,17 @@ async function resolveGreOfferingTypeAndSubType(payload: Record<string, unknown>
   if (!target) {
     const categoryDefaults: Record<string, string> = {
       "service offerings": "Training",
-      "product offerings": "Plant Setup",
       "knowledge offerings": "SOP Manuals",
     };
     target = categoryDefaults[offeringCategory] || "";
   }
+  if (!target && offeringCategory === "product offerings") {
+    throw new Error("Product offering type is required for GRE sync. Select Machinery, Plant Setup, Product/Raw Material Bought, or Raw Material Supply.");
+  }
   const normalizedTarget = normalizeComparable(target);
+  const aliases = greOfferingTypeAliases[normalizedTarget] || [];
   const matched = findGreRefDataOption(subTypes, target, [
+    ...aliases,
     target.replace(/\//g, " "),
     target.replace(/\s*&\s*/g, " "),
     target.replace(/\s+/g, " "),
@@ -2920,10 +2953,12 @@ async function resolveGreOfferingTypeAndSubType(payload: Record<string, unknown>
         offeringSubTypeCode: fallbackCode,
       };
     }
+    if (offeringCategory === "product offerings") {
+      throw new Error(`Could not map GRE product offering type for "${target}". Please select a valid Product type from GramEEE before upload.`);
+    }
     // Fall back to a default subtype based on HAR captures
     const defaultSubTypes: Record<string, string> = {
       "service offerings": "OFFERINGS_CATEGORY.TRAINING",
-      "product offerings": "OFFERINGS_CATEGORY.PLANT_SETUP",
       "knowledge offerings": "OFFERINGS_CATEGORY.SOP_MANUALS",
     };
     const fallback = defaultSubTypes[offeringCategory];
@@ -2934,7 +2969,7 @@ async function resolveGreOfferingTypeAndSubType(payload: Record<string, unknown>
   }
   return {
     offeringGroupCode,
-    offeringSubTypeCode: requireString(matched.code),
+    offeringSubTypeCode: extractGreRefDataCode(matched),
   };
 }
 
@@ -3553,6 +3588,7 @@ async function buildGreProductSolutionPayloads(
 
   const solutionCreate = buildGreSolutionCreatePayload(payload, hierarchy, resolvedTraderId);
   const offeringType = await resolveGreOfferingTypeAndSubType(payload, sessionId);
+  const sixMFactor = resolveProductSixMFactor(payload);
 
   // Product publish payload
   const generatedSuffix = Date.now();
@@ -3672,6 +3708,7 @@ async function buildGreProductSolutionPayloads(
         mrp: { currency: "INR", id: 0, value: "OVERRIDE_REQUIRED" },
         quantity: { id: 0, uoM: "Units", value: 0 },
         productSKUTagList: hierarchy.solutionTagList,
+        productSKUFactorList: sixMFactor ? [sixMFactor] : [],
         productSkuSpecificationList: skuSpecs,
         skuSubType: offeringType.offeringSubTypeCode,
         skuType: offeringType.offeringGroupCode,
@@ -3711,6 +3748,29 @@ function extractFirstGreNumericValue(value: string) {
   const normalized = requireString(value).replace(/,/g, "");
   const match = normalized.match(/\d+(?:\.\d+)?/);
   return match ? match[0] : "";
+}
+
+function resolveProductSixMFactor(payload: Record<string, unknown>) {
+  const signals = [
+    requireString(payload.domain_6m),
+    requireString(payload.offering_type),
+    requireString(payload.offering_name),
+    ...asStringArray(payload.tags),
+  ].join(" ").toLowerCase();
+
+  if (/\b(raw material|material supply|product bought|raw material bought|kid livestock supply|breeding stock|buck|doe|kid)\b/.test(signals)) {
+    return { code: "6M.MATERIAL", value: "Material" };
+  }
+  if (/\b(machine|machinery|plant setup|equipment)\b/.test(signals)) {
+    return { code: "6M.MACHINE", value: "Machine" };
+  }
+  if (/\b(market support|market)\b/.test(signals)) {
+    return { code: "6M.MARKET", value: "Market" };
+  }
+  if (/\b(financial support|finance|money)\b/.test(signals)) {
+    return { code: "6M.MONEY", value: "Money" };
+  }
+  return null;
 }
 
 function normalizeGreProductPayloadFromLocalFields(bundle: GrePayloadBundle, payload: Record<string, unknown>) {
@@ -4795,10 +4855,14 @@ function findGreRefDataOption(
   const normalized = normalizeComparable(value);
   const probes = [normalized, ...aliases.map((alias) => normalizeComparable(alias))].filter(Boolean);
   return options.find((option) => {
+    const child = option.child && typeof option.child === "object" ? option.child as Record<string, unknown> : null;
     const names = [
       option?.name,
       option?.code,
+      child?.name,
+      child?.code,
       ...(Array.isArray(option?.labels) ? option.labels.map((label: { text?: string }) => label?.text || "") : []),
+      ...(Array.isArray(child?.labels) ? child.labels.map((label: { text?: string }) => label?.text || "") : []),
     ].map((entry) => normalizeComparable(entry));
     return probes.some((probe) => names.includes(probe));
   }) || null;
@@ -12433,6 +12497,24 @@ async function fetchMySolutions(userCtx: { user: Record<string, unknown> }, gram
   };
 }
 
+async function getGreOfferingSubtypes(payload: Record<string, unknown>) {
+  const sessionId = await loginToGre();
+  const category = requireString(payload.category).toLowerCase();
+  const parentCode = category === "service"
+    ? "OFFERINGS.SERVICE_OFFERINGS"
+    : category === "knowledge"
+      ? "OFFERINGS.KNOWLEDGE_OFFERINGS"
+      : "OFFERINGS.PRODUCT_OFFERINGS";
+  const options = await fetchGreProductRefHierarchy(parentCode, sessionId);
+  return {
+    parentCode,
+    options: options.map((option) => ({
+      code: extractGreRefDataCode(option),
+      name: extractGreEntityName(option),
+    })),
+  };
+}
+
 async function submitSignedInEdit(
   parentSubmissionId: string,
   updatedPayload: Record<string, unknown>,
@@ -13588,6 +13670,10 @@ Deno.serve(async (req) => {
 
     if (action === "getGreValueChains") {
       return jsonResponse(await getGreValueChains());
+    }
+
+    if (action === "getGreOfferingSubtypes") {
+      return jsonResponse(await getGreOfferingSubtypes(payload));
     }
 
       return jsonResponse({ error: "Unsupported action." }, 400);
