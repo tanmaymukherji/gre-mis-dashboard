@@ -1297,13 +1297,28 @@ async function verifyGreTraderSessionScope(sessionId: string, traderId: string) 
   const path = `/commons-report-service/api/v3/datasets/name/GET_SOLUTION_FOR_TENANT_OR_MARKET_GOVERNOR/execute?page=0&size=20&params=${encodeURIComponent(`MARKET_ID=${greMarketId}`)}`;
   const { data } = await requestGreGatewayJson(path, "GET", undefined, sessionId);
   const rows = extractGreReportRows(data);
-  const unexpectedTraderIds = [...new Set(rows
+  const visibleTraderIds = [...new Set(rows
     .map((row) => row.solutionTraderId === null || row.solutionTraderId === undefined ? "" : String(row.solutionTraderId).trim())
-    .filter((value) => value && value !== traderId))];
+    .filter(Boolean))];
+  if (traderId === greGovernorTraderId) {
+    return {
+      rowCount: rows.length,
+      verifiedTraderId: traderId,
+      scopeType: "market_governor",
+      visibleTraderCount: visibleTraderIds.length,
+      expectedTraderVisible: visibleTraderIds.includes(traderId),
+    };
+  }
+  const unexpectedTraderIds = visibleTraderIds.filter((value) => value !== traderId);
   if (unexpectedTraderIds.length > 0) {
     throw new Error(`GRE trader session scope mismatch for trader ${traderId}.`);
   }
-  return { rowCount: rows.length, verifiedTraderId: traderId };
+  return {
+    rowCount: rows.length,
+    verifiedTraderId: traderId,
+    scopeType: "trader",
+    visibleTraderCount: visibleTraderIds.length,
+  };
 }
 
 async function findGreSolutionInGovernorReport(sessionId: string, solutionId: number) {
