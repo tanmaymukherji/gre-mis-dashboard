@@ -95,7 +95,31 @@ type GreLoginCredentials = {
   password: string;
 };
 
-function getGreTraderCredentials(traderId: string, tenantLoginFallback: string): GreLoginCredentials {
+class GreTraderPasswordRequiredError extends Error {
+  code = "GRE_TRADER_PASSWORD_REQUIRED";
+  traderId: string;
+  tenantLogin: string;
+
+  constructor(traderId: string, tenantLogin: string) {
+    super(`The GRE password was rejected for trader ${traderId}. Enter the alternate GRE admin password to continue.`);
+    this.name = "GreTraderPasswordRequiredError";
+    this.traderId = traderId;
+    this.tenantLogin = tenantLogin;
+  }
+}
+
+class GreAuthenticationRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GreAuthenticationRejectedError";
+  }
+}
+
+function getGreTraderCredentials(
+  traderId: string,
+  tenantLoginFallback: string,
+  passwordOverride = "",
+): GreLoginCredentials {
   let registry: Record<string, unknown> = {};
   try {
     const registryJson = greTraderCredentialsBase64
@@ -116,21 +140,20 @@ function getGreTraderCredentials(traderId: string, tenantLoginFallback: string):
     const credentials = {
       userLogin: requireString(record.userLogin) || greGovernorLogin,
       tenantLogin: requireString(record.tenantLogin) || greGovernorTenant || tenantLoginFallback,
-      password: requireString(record.password) || greGovernorPassword,
+      password: requireString(passwordOverride) || requireString(record.password) || greGovernorPassword || greTemporaryUserPassword,
     };
     if (!credentials.userLogin || !credentials.tenantLogin || !credentials.password) {
       throw new Error(`GRE governor credentials are incomplete for trader ${traderId}.`);
     }
     return credentials;
   }
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-    throw new Error(`GRE credentials are not configured for trader ${traderId}.`);
-  }
-  const record = entry as Record<string, unknown>;
+  const record = entry && typeof entry === "object" && !Array.isArray(entry)
+    ? entry as Record<string, unknown>
+    : {};
   const credentials = {
     userLogin: requireString(record.userLogin) || greGovernorLogin,
     tenantLogin: requireString(record.tenantLogin) || tenantLoginFallback,
-    password: requireString(record.password),
+    password: requireString(passwordOverride) || requireString(record.password) || greTemporaryUserPassword,
   };
   if (!credentials.userLogin || !credentials.tenantLogin || !credentials.password) {
     throw new Error(`GRE credentials are incomplete for trader ${traderId}.`);
@@ -1028,7 +1051,7 @@ async function loginToGreWithCredentials(credentials: GreLoginCredentials): Prom
     const data = await response.json().catch(() => null);
     const sessionId = requireString(data?.sessionId);
     if (!response.ok || !sessionId) {
-      throw new Error(data?.error?.message || data?.message || "GRE login failed.");
+      throw new GreAuthenticationRejectedError(data?.error?.message || data?.message || "GRE login failed.");
     }
     return sessionId;
   } catch (err) {
@@ -1052,8 +1075,9 @@ async function loginToGreForTrader(
   ctx: { greTraderId: string; tenantLoginCandidate: string },
   localOfferingId: string,
   actorEmail: string,
+  passwordOverride = "",
 ): Promise<string> {
-  const credentials = getGreTraderCredentials(ctx.greTraderId, ctx.tenantLoginCandidate);
+  const credentials = getGreTraderCredentials(ctx.greTraderId, ctx.tenantLoginCandidate, passwordOverride);
   try {
     const sid = await loginToGreWithCredentials(credentials);
     await logGreSyncEvent({
@@ -1075,6 +1099,9 @@ async function loginToGreForTrader(
       actorEmail,
       errorSanitised: JSON.stringify({ traderId: ctx.greTraderId, tenantLogin: credentials.tenantLogin, error: message.slice(0, 300) }),
     }).catch(() => {});
+    if (err instanceof GreAuthenticationRejectedError) {
+      throw new GreTraderPasswordRequiredError(ctx.greTraderId, credentials.tenantLogin);
+    }
     throw err;
   }
 }
@@ -4134,7 +4161,12 @@ async function dryRunGreSolutionUpload(payload: Record<string, unknown>, actorEm
 
   // Resolve hierarchy (value chain / application)
   const traderContext = await resolveGreTraderContext(offering.trader_id);
-  const sessionId = await loginToGreForTrader(traderContext, offeringId, actorEmail);
+  const sessionId = await loginToGreForTrader(
+    traderContext,
+    offeringId,
+    actorEmail,
+    requireString(payload.greTraderPassword),
+  );
   const traderSessionScope = await verifyGreTraderSessionScope(sessionId, traderContext.greTraderId);
   await logGreSyncEvent({
     localOfferingId: offeringId,
@@ -4333,7 +4365,12 @@ async function uploadLocalSolutionToGre(payload: Record<string, unknown>, actorE
 
   const category = requireString(offering.offering_category);
   const traderContext = await resolveGreTraderContext(offering.trader_id);
-  const traderSession = await loginToGreForTrader(traderContext, offeringId, actorEmail);
+  const traderSession = await loginToGreForTrader(
+    traderContext,
+    offeringId,
+    actorEmail,
+    requireString(payload.greTraderPassword),
+  );
   const traderSessionScope = await verifyGreTraderSessionScope(traderSession, traderContext.greTraderId);
   await logGreSyncEvent({
     localOfferingId: offeringId,
@@ -13945,6 +13982,14 @@ Deno.serve(async (req) => {
 
       return jsonResponse({ error: "Unsupported action." }, 400);
   } catch (error) {
+    if (error instanceof GreTraderPasswordRequiredError) {
+      return jsonResponse({
+        error: error.message,
+        code: error.code,
+        traderId: error.traderId,
+        tenantLogin: error.tenantLogin,
+      }, 409);
+    }
     const message = error instanceof Error ? error.message : "Function failed.";
     return jsonResponse({ error: message }, 400);
   }

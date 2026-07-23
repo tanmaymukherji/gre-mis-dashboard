@@ -1339,6 +1339,28 @@
     </form>
   </dialog>
 
+  <dialog id="greTraderPasswordDialog" class="modal">
+    <form id="greTraderPasswordForm" class="modal-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">GRE Trader Login</p>
+          <h3>Enter Alternate Admin Password</h3>
+        </div>
+        <button type="button" id="closeGreTraderPasswordDialog" class="btn btn-secondary">Close</button>
+      </div>
+      <p id="greTraderPasswordContext" class="helper-text"></p>
+      <label class="wide">
+        <span>Alternate GRE Admin Password</span>
+        <input id="greTraderPasswordInput" type="password" autocomplete="off" required />
+      </label>
+      <p class="helper-text">This password is used only for the current GRE sync request and is not stored.</p>
+      <div class="modal-actions">
+        <button type="button" id="greTraderPasswordCancelBtn" class="btn btn-secondary">Cancel</button>
+        <button type="submit" class="btn btn-primary">Retry GRE Login</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="greValueChainSelectorDialog" class="modal">
     <form id="greValueChainSelectorForm" class="modal-card">
       <div class="modal-head">

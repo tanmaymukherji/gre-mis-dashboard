@@ -105,6 +105,7 @@ const state = {
   submissionReviewId: "",
   localSolutionReviewId: "",
   localNeedReviewId: "",
+  greSyncTraderPassword: "",
   solutionTags: [],
   solutionGeographies: [],
   solutionGeographySuggestions: ["India"],
@@ -3093,7 +3094,13 @@ class GreMisStore {
         try {
           data = rawText ? JSON.parse(rawText) : {};
         } catch {}
-        if (!response.ok) throw new Error(data.error || rawText || `Request failed (${response.status}).`);
+        if (!response.ok) {
+          const requestError = new Error(data.error || rawText || `Request failed (${response.status}).`);
+          requestError.code = data.code || "";
+          requestError.traderId = data.traderId || "";
+          requestError.tenantLogin = data.tenantLogin || "";
+          throw requestError;
+        }
         return data;
       } catch (err) {
         clearTimeout(timeoutId);
@@ -7466,6 +7473,56 @@ async function openGreValueChainSelector(offeringId) {
   }
 }
 
+function requestGreTraderPassword(error) {
+  const dialog = byId("greTraderPasswordDialog");
+  const form = byId("greTraderPasswordForm");
+  const input = byId("greTraderPasswordInput");
+  const context = byId("greTraderPasswordContext");
+  const cancelButton = byId("greTraderPasswordCancelBtn");
+  const closeButton = byId("closeGreTraderPasswordDialog");
+  if (!dialog || !form || !input) {
+    throw new Error("The alternate GRE password dialog is unavailable. Refresh the page and try again.");
+  }
+
+  if (context) {
+    const traderLabel = error?.traderId ? `trader ${error.traderId}` : "this trader";
+    const tenantLabel = error?.tenantLogin ? ` (${error.tenantLogin})` : "";
+    context.textContent = `The default GRE password was rejected for ${traderLabel}${tenantLabel}. Enter the alternate admin password for this upload. It will not be saved.`;
+  }
+  input.value = "";
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      form.onsubmit = null;
+      if (cancelButton) cancelButton.onclick = null;
+      if (closeButton) closeButton.onclick = null;
+      dialog.oncancel = null;
+      if (dialog.open) dialog.close();
+      resolve(value);
+    };
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      const password = String(input.value || "");
+      if (!password) {
+        input.focus();
+        return;
+      }
+      finish(password);
+    };
+    if (cancelButton) cancelButton.onclick = () => finish("");
+    if (closeButton) closeButton.onclick = () => finish("");
+    dialog.oncancel = (event) => {
+      event.preventDefault();
+      finish("");
+    };
+    dialog.showModal();
+    setTimeout(() => input.focus(), 0);
+  });
+}
+
 async function openGreSyncDryRunDialog(offeringId, primaryValuechain, primaryApplication, vcId, appId) {
   const summary = getLocalSolutionByOfferingId(offeringId);
   if (!summary) {
@@ -7479,6 +7536,7 @@ async function openGreSyncDryRunDialog(offeringId, primaryValuechain, primaryApp
     return;
   }
   state.greSyncReviewId = offeringId;
+  state.greSyncTraderPassword = "";
   state.greSyncVCId = vcId || 0;
   state.greSyncAppId = appId || 0;
   const dialog = byId("greSyncDryRunDialog");
@@ -7511,7 +7569,19 @@ async function openGreSyncDryRunDialog(offeringId, primaryValuechain, primaryApp
     if (primaryApplication) options.primary_application = primaryApplication;
     if (vcId) options.generic_product_id = vcId;
     if (appId) options.generic_application_id = appId;
-    const res = await store.dryRunGreSolutionUpload(offeringId, options);
+    let res;
+    try {
+      res = await store.dryRunGreSolutionUpload(offeringId, options);
+    } catch (error) {
+      if (error?.code !== "GRE_TRADER_PASSWORD_REQUIRED") throw error;
+      const alternatePassword = await requestGreTraderPassword(error);
+      if (!alternatePassword) return;
+      state.greSyncTraderPassword = alternatePassword;
+      res = await store.dryRunGreSolutionUpload(offeringId, {
+        ...options,
+        greTraderPassword: alternatePassword,
+      });
+    }
     if (!res.ok) throw new Error(res.message || "Dry-run failed");
     const { payload, warnings = [], linkState, grePresence } = res;
     if (!payload) {
@@ -7575,6 +7645,7 @@ async function openGreSyncDryRunDialog(offeringId, primaryValuechain, primaryApp
         `).join("");
     }
   } catch (err) {
+    state.greSyncTraderPassword = "";
     toast(err.message || "Dry-run failed.");
     return;
   }
@@ -8393,8 +8464,14 @@ function bindStaticEvents() {
   byId("closeSubmissionReviewDialog")?.addEventListener("click", () => submissionReviewDialog?.close());
   byId("closeLocalSolutionReviewDialog")?.addEventListener("click", () => localSolutionReviewDialog?.close());
   byId("closeLocalNeedReviewDialog")?.addEventListener("click", () => localNeedReviewDialog?.close());
-  byId("closeGreSyncDryRunDialog")?.addEventListener("click", () => greSyncDryRunDialog?.close());
-  byId("greSyncCancelBtn")?.addEventListener("click", () => greSyncDryRunDialog?.close());
+  byId("closeGreSyncDryRunDialog")?.addEventListener("click", () => {
+    state.greSyncTraderPassword = "";
+    greSyncDryRunDialog?.close();
+  });
+  byId("greSyncCancelBtn")?.addEventListener("click", () => {
+    state.greSyncTraderPassword = "";
+    greSyncDryRunDialog?.close();
+  });
   byId("closeGreValueChainSelector")?.addEventListener("click", () => byId("greValueChainSelectorDialog")?.close());
   byId("cancelGreVcBtn")?.addEventListener("click", () => byId("greValueChainSelectorDialog")?.close());
   byId("greValueChainSelect")?.addEventListener("change", (event) => {
@@ -9668,26 +9745,43 @@ function bindStaticEvents() {
     document.querySelectorAll("#greSyncOverrideInputs input").forEach(input => {
       overrideInputs[input.dataset.field] = input.value;
     });
-    try {
-      const result = await store.uploadLocalSolutionToGre(offeringId, {
+    const uploadOptions = {
         acknowledgedWarnings: state.greSyncDryRunWarnings?.filter(w => w.resolution !== 'exact').map(w => ({ field: w.field, resolvedValue: w.resolvedValue })) || [],
         overrideValues: overrideInputs,
         dryRun: false,
         generic_product_id: state.greSyncVCId || undefined,
         generic_application_id: state.greSyncAppId || undefined,
-      });
+        greTraderPassword: state.greSyncTraderPassword || undefined,
+      };
+    try {
+      let result;
+      try {
+        result = await store.uploadLocalSolutionToGre(offeringId, uploadOptions);
+      } catch (error) {
+        if (error?.code !== "GRE_TRADER_PASSWORD_REQUIRED") throw error;
+        const alternatePassword = await requestGreTraderPassword(error);
+        if (!alternatePassword) {
+          if (status) status.textContent = "Upload cancelled. No password was stored.";
+          return;
+        }
+        state.greSyncTraderPassword = alternatePassword;
+        result = await store.uploadLocalSolutionToGre(offeringId, {
+          ...uploadOptions,
+          greTraderPassword: alternatePassword,
+        });
+      }
       if (result.ok) {
         greSyncDryRunDialog?.close();
+        state.greSyncTraderPassword = "";
         await refreshAll();
         toast(result.message || "Successfully uploaded to GRE!");
       } else {
         if (status) status.textContent = result.message || "Upload failed.";
       }
     } catch (err) {
+      state.greSyncTraderPassword = "";
       const msg = err.message || "Unknown error";
       if (status) status.textContent = "Error: " + msg;
-      // Close dialog to let the user see the toast
-      greSyncDryRunDialog?.close();
       toast(msg);
     }
   }));
