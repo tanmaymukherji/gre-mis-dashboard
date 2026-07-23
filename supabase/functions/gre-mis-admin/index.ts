@@ -47,6 +47,7 @@ const greMasterPassword = Deno.env.get("GRE_MASTER_PASSWORD") ?? "";
 const greGovernorLogin = Deno.env.get("GRE_GOVERNOR_LOGIN") ?? greMasterLogin;
 const greGovernorTenant = Deno.env.get("GRE_GOVERNOR_TENANT") ?? greMasterTenant;
 const greGovernorPassword = Deno.env.get("GRE_GOVERNOR_PASSWORD") ?? greMasterPassword;
+const greGovernorTraderId = Deno.env.get("GRE_GOVERNOR_TRADER_ID") ?? "37";
 const greTraderCredentialsJson = Deno.env.get("GRE_TRADER_CREDENTIALS_JSON") ?? "{}";
 const greTraderCredentialsBase64 = Deno.env.get("GRE_TRADER_CREDENTIALS_BASE64") ?? "";
 const greTemporaryUserPassword = Deno.env.get("GRE_TEMP_USER_PASSWORD") ?? "gre@1234";
@@ -108,6 +109,20 @@ function getGreTraderCredentials(traderId: string, tenantLoginFallback: string):
     throw new Error("GRE trader credential registry is not valid JSON.");
   }
   const entry = registry[traderId];
+  if (traderId === greGovernorTraderId) {
+    const record = entry && typeof entry === "object" && !Array.isArray(entry)
+      ? entry as Record<string, unknown>
+      : {};
+    const credentials = {
+      userLogin: requireString(record.userLogin) || greGovernorLogin,
+      tenantLogin: requireString(record.tenantLogin) || greGovernorTenant || tenantLoginFallback,
+      password: requireString(record.password) || greGovernorPassword,
+    };
+    if (!credentials.userLogin || !credentials.tenantLogin || !credentials.password) {
+      throw new Error(`GRE governor credentials are incomplete for trader ${traderId}.`);
+    }
+    return credentials;
+  }
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
     throw new Error(`GRE credentials are not configured for trader ${traderId}.`);
   }
