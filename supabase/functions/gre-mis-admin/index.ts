@@ -757,6 +757,37 @@ function buildSeekerSolutionEntries(notes: unknown) {
   }).join("\n\n");
 }
 
+function getSharedSolutionSection(notes: unknown) {
+  const text = requireString(notes).replace(/\r/g, "\n");
+  if (!text) return "";
+  return text.match(/solutions\s+shared\s*:?\s*([\s\S]*?)(?:\n\s*solution\s+links\s+shared\s+with\s+seeker|\n\s*seeker\s+comments|$)/i)?.[1] || "";
+}
+
+function countSharedSolutionsFromNotes(notes: unknown) {
+  const section = getSharedSolutionSection(notes);
+  if (!section) return 0;
+  const numberedEntries = section.match(/(?:^|\n)\s*\d+\.\s+[\s\S]*?(?=(?:\n\s*\d+\.\s+)|$)/g) || [];
+  if (numberedEntries.length) return numberedEntries.length;
+  const semicolonOrLineEntries = section
+    .split(/;|\n/)
+    .map((entry) => requireString(entry).replace(/^\d+[\).\s-]*/, "").trim())
+    .filter(Boolean);
+  if (semicolonOrLineEntries.length > 1) return semicolonOrLineEntries.length;
+  return section.trim() ? 1 : 0;
+}
+
+function getSharedSolutionDeliveryCount(record: Record<string, unknown> | null | undefined) {
+  if (!record) return 0;
+  return Math.max(
+    parseNumber(record.solutions_shared_count, 0),
+    countSharedSolutionsFromNotes(record.curation_notes),
+  );
+}
+
+function extractHttpLinks(value: unknown) {
+  return uniqueStrings(requireString(value).match(/https?:\/\/[^\s,;)"']+/gi) || []);
+}
+
 function buildSeekerStatusStyle(styleId: string, fontColor: string, fillColor: string) {
   return `<Style ss:ID="${styleId}"><Alignment ss:Horizontal="Left" ss:Vertical="Top" ss:WrapText="1"/><Font ss:FontName="Calibri" ss:Size="11" ss:Color="${fontColor}"/><Interior ss:Color="${fillColor}" ss:Pattern="Solid"/><Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9D9D9"/></Borders></Style>`;
 }
@@ -10293,7 +10324,7 @@ async function importInboundWorkbook(rowsInput: unknown, fileName: string, actor
   const ids = rows.map((row) => requireString(row.request_id)).filter(Boolean);
   const { data: existingRows, error: existingError } = await adminClient
     .from("gre_mis_needs")
-    .select("id, source_row_signature, curator_id")
+    .select("id, source_row_signature, curator_id, organization_name, contact_person, seeker_email, curation_notes, solutions_shared_count")
     .in("id", ids);
   if (existingError) throw new Error(existingError.message);
 
@@ -10301,6 +10332,13 @@ async function importInboundWorkbook(rowsInput: unknown, fileName: string, actor
   const toInsert: Record<string, unknown>[] = [];
   const toUpdate: Record<string, unknown>[] = [];
   const changedNeedIds: string[] = [];
+  const solutionDeliveryEvents: Array<{
+    needId: string;
+    seekerName: string;
+    recipientEmail: string;
+    linkCount: number;
+    links: string[];
+  }> = [];
 
   for (const row of rows) {
     const requestId = requireString(row.request_id);
@@ -10314,6 +10352,18 @@ async function importInboundWorkbook(rowsInput: unknown, fileName: string, actor
 
     const curatorId = await resolveCuratorId(requireString(row.curator_name));
     const patch = await normalizeInboundRow(row, curatorId, fileName);
+    const previousSharedCount = existing ? getSharedSolutionDeliveryCount(existing) : 0;
+    const nextSharedCount = getSharedSolutionDeliveryCount(patch);
+    const deliveryDelta = Math.max(0, nextSharedCount - previousSharedCount);
+    if (deliveryDelta > 0) {
+      solutionDeliveryEvents.push({
+        needId: requestId,
+        seekerName: requireString(patch.contact_person) || requireString(patch.organization_name) || "Seeker",
+        recipientEmail: requireString(patch.seeker_email).toLowerCase(),
+        linkCount: deliveryDelta,
+        links: extractHttpLinks(patch.curation_notes),
+      });
+    }
 
     if (!existing) {
       toInsert.push({
@@ -10345,6 +10395,24 @@ async function importInboundWorkbook(rowsInput: unknown, fileName: string, actor
     const { id, ...patch } = row;
     const { error } = await adminClient.from("gre_mis_needs").update(patch).eq("id", id);
     if (error) throw new Error(error.message);
+  }
+
+  for (const event of solutionDeliveryEvents) {
+    await recordSolutionDeliveryImpact({
+      action: "gre_api_solution_links_sent",
+      actorEmail,
+      actorName: actorEmail || "GRE inbound sync",
+      actorRole: "system",
+      needId: event.needId,
+      seekerName: event.seekerName,
+      recipientEmail: event.recipientEmail,
+      itemLabel: `${event.linkCount} solution link${event.linkCount === 1 ? "" : "s"} sent to ${event.seekerName}`,
+      itemId: event.needId,
+      source: "gre-api",
+      linkCount: event.linkCount,
+      links: event.links,
+      subject: `GRE API delivered ${event.linkCount} solution link${event.linkCount === 1 ? "" : "s"}`,
+    });
   }
 
   let aiUpdatedCount = 0;
@@ -11514,6 +11582,98 @@ async function appendGreMisAuditEntry(
   await upsertGreMisSetting(key, null, { entries }, updatedByEmail || "system:audit");
 }
 
+async function incrementGlobalImpactCounter(
+  counterKey: "solutions_discovered" | "connections_made",
+  delta: number,
+  auditEvent: Record<string, unknown>,
+) {
+  const safeDelta = Math.max(0, Math.trunc(delta));
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("GRE_MIS_ANON_KEY") ?? "";
+  if (!safeDelta || !supabaseUrl || !anonKey) return false;
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/grameee-admin`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+      },
+      body: JSON.stringify({
+        action: "incrementImpactCounter",
+        counterKey,
+        delta: safeDelta,
+        auditEvent,
+      }),
+    });
+    if (!response.ok) {
+      console.warn(`Impact counter update failed: ${response.status} ${await response.text()}`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.warn("Impact counter update failed", error);
+    return false;
+  }
+}
+
+async function recordSolutionDeliveryImpact({
+  action,
+  actorEmail,
+  actorName = "",
+  actorRole = "",
+  needId,
+  seekerName = "",
+  recipientEmail = "",
+  itemLabel,
+  itemId = "",
+  providerName = "",
+  source = "gre-mis",
+  linkCount,
+  links = [],
+  subject = "",
+}: {
+  action: string;
+  actorEmail: string;
+  actorName?: string;
+  actorRole?: string;
+  needId: string;
+  seekerName?: string;
+  recipientEmail?: string;
+  itemLabel: string;
+  itemId?: string;
+  providerName?: string;
+  source?: string;
+  linkCount: number;
+  links?: string[];
+  subject?: string;
+}) {
+  const safeLinkCount = Math.max(0, Math.trunc(linkCount));
+  if (!safeLinkCount) return;
+  const entry = {
+    id: crypto.randomUUID(),
+    logged_at: new Date().toISOString(),
+    kind: "api_delivery",
+    surface: "gre-mis",
+    action,
+    counter_key: "solutions_discovered",
+    actor_email: requireString(actorEmail).toLowerCase() || "system:gre-sync",
+    actor_name: requireString(actorName) || "GRE sync",
+    actor_role: requireString(actorRole) || "system",
+    recipient_email: requireString(recipientEmail).toLowerCase(),
+    subject: requireString(subject),
+    item_id: requireString(itemId) || requireString(needId),
+    item_label: requireString(itemLabel) || `${safeLinkCount} solution link${safeLinkCount === 1 ? "" : "s"} delivered`,
+    item_source: source,
+    need_id: requireString(needId),
+    provider_name: requireString(providerName),
+    seeker_name: requireString(seekerName),
+    solution_link_count: safeLinkCount,
+    solution_links: uniqueStrings(links.map((link) => requireString(link)).filter(Boolean)).slice(0, 20),
+  };
+  await appendGreMisAuditEntry(IMPACT_VIEW_AUDIT_LOG_KEY, entry, requireString(actorEmail) || "system:gre-sync");
+  await incrementGlobalImpactCounter("solutions_discovered", safeLinkCount, entry);
+}
+
 async function getImpactAuditLogs() {
   const [viewRow, emailRow] = await Promise.all([
     getGreMisSetting(IMPACT_VIEW_AUDIT_LOG_KEY),
@@ -11896,6 +12056,22 @@ async function sendSolutionSeekerIntro(
     provider_name: providerLabel,
     seeker_name: seekerLabel,
   }, actorEmail);
+  await recordSolutionDeliveryImpact({
+    action: "solution_link_sent_to_seeker",
+    actorEmail,
+    actorName: actor.name,
+    actorRole: actor.role,
+    needId: requireString(need.id),
+    seekerName: seekerLabel,
+    recipientEmail: toEmail,
+    itemLabel: solutionName,
+    itemId: requireString(offeringId),
+    providerName: providerLabel,
+    source: "gre-mis",
+    linkCount: 1,
+    links: [viewLink],
+    subject,
+  });
 
   const nextNotes = appendSharedSolutionToCurationNotes(
     requireString(need.curation_notes),
@@ -11903,7 +12079,8 @@ async function sendSolutionSeekerIntro(
     providerLabel,
     viewLink,
   );
-  const nextSharedCount = Math.max(parseNumber(need.solutions_shared_count, 0), 1);
+  const previousSharedCount = getSharedSolutionDeliveryCount(need);
+  const nextSharedCount = Math.max(previousSharedCount + 1, getSharedSolutionDeliveryCount({ curation_notes: nextNotes }));
   await adminClient
     .from("gre_mis_needs")
     .update({

@@ -6302,6 +6302,10 @@ function normalizeAuditSearch(entry) {
     entry.need_id,
     entry.provider_name,
     entry.seeker_name,
+    entry.recipient_email,
+    entry.subject,
+    entry.solution_link_count,
+    ensureList(entry.solution_links).join(" "),
     entry.portal_url,
     entry.source_page,
   ].map((value) => normalizeText(value)).join(" ");
@@ -6364,19 +6368,28 @@ function renderImpactAuditPanels() {
     : `<div class="empty-state">No email logs match the current filter.</div>`;
 
   viewList.innerHTML = viewEntries.length
-    ? viewEntries.map((entry) => `
-        <article class="stack-card">
-          <div class="status-row">
-            <span class="status-pill info">${esc(entry.surface || "surface")}</span>
-            <span class="meta-text">${esc(formatAuditDateTime(entry.logged_at))}</span>
-          </div>
-          <p><strong>Action:</strong> ${esc(entry.action || "view")}</p>
-          <p><strong>Viewer:</strong> ${esc(entry.actor_name || entry.actor_email || "Anonymous")} | ${esc(entry.actor_email || "No email")}</p>
-          <p><strong>Solution Viewed:</strong> ${esc(entry.item_label || entry.item_id || "Not recorded")}</p>
-          <p><strong>Portal / Source:</strong> ${esc(entry.item_source || entry.portal_url || "Not recorded")}</p>
-          <p><strong>Led to Email:</strong> ${entry._ledToEmail ? "Yes" : "No"}</p>
-        </article>
-      `).join("")
+    ? viewEntries.map((entry) => {
+        const isDelivery = normalizeText(entry.kind).toLowerCase() === "api_delivery";
+        const linkCount = parseNumber(entry.solution_link_count, 0);
+        return `
+          <article class="stack-card">
+            <div class="status-row">
+              <span class="status-pill info">${esc(entry.surface || "surface")}</span>
+              <span class="meta-text">${esc(formatAuditDateTime(entry.logged_at))}</span>
+            </div>
+            <p><strong>Action:</strong> ${esc(entry.action || (isDelivery ? "solution delivery" : "view"))}</p>
+            <p><strong>${isDelivery ? "Actor" : "Viewer"}:</strong> ${esc(entry.actor_name || entry.actor_email || "Anonymous")} | ${esc(entry.actor_email || "No email")}</p>
+            ${isDelivery ? `<p><strong>To:</strong> ${esc(entry.recipient_email || "Not recorded")}</p>` : ""}
+            <p><strong>${isDelivery ? "Solution Links Delivered" : "Solution Viewed"}:</strong> ${esc(entry.item_label || entry.item_id || "Not recorded")}</p>
+            ${isDelivery ? `<p><strong>Link Count:</strong> ${esc(linkCount || 1)}</p>` : ""}
+            ${isDelivery && ensureList(entry.solution_links).length
+              ? `<p><strong>Links:</strong> ${ensureList(entry.solution_links).slice(0, 3).map((link) => `<a href="${esc(link)}" target="_blank" rel="noreferrer">${esc(link)}</a>`).join(" | ")}</p>`
+              : ""}
+            <p><strong>Portal / Source:</strong> ${esc(entry.item_source || entry.portal_url || "Not recorded")}</p>
+            <p><strong>Led to Email:</strong> ${entry._ledToEmail ? "Yes" : "No"}</p>
+          </article>
+        `;
+      }).join("")
     : `<div class="empty-state">No view logs match the current filter.</div>`;
 }
 
