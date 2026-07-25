@@ -11693,7 +11693,7 @@ async function recordExternalSolutionDeliveryImpact(payload: Record<string, unkn
   }
 
   await recordSolutionDeliveryImpact({
-    action: requireString(payload.action) || "api_solution_links_sent",
+    action: requireString(payload.deliveryAction) || requireString(payload.eventAction) || "api_solution_links_sent",
     actorEmail: requireString(payload.actorEmail) || requireString(payload.senderEmail) || "system:api",
     actorName: requireString(payload.actorName) || requireString(payload.senderName) || "API delivery",
     actorRole: requireString(payload.actorRole) || "api",
