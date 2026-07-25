@@ -11674,6 +11674,44 @@ async function recordSolutionDeliveryImpact({
   await incrementGlobalImpactCounter("solutions_discovered", safeLinkCount, entry);
 }
 
+async function recordExternalSolutionDeliveryImpact(payload: Record<string, unknown>) {
+  const source = requireString(payload.source) || "external-api";
+  const sourceToken = requireString(payload.sourceToken);
+  const requiredToken = Deno.env.get("GRE_MIS_IMPACT_SOURCE_TOKEN") ?? "";
+  if (requiredToken && sourceToken !== requiredToken) {
+    throw new Error("Impact delivery source is not authorised.");
+  }
+
+  const rawLinks = asStringArray(payload.links);
+  const linkCount = Math.max(
+    parseNumber(payload.linkCount, 0),
+    rawLinks.length,
+    Array.isArray(payload.solutions) ? payload.solutions.length : 0,
+  );
+  if (!linkCount) {
+    throw new Error("No solution links were supplied for impact logging.");
+  }
+
+  await recordSolutionDeliveryImpact({
+    action: requireString(payload.action) || "api_solution_links_sent",
+    actorEmail: requireString(payload.actorEmail) || requireString(payload.senderEmail) || "system:api",
+    actorName: requireString(payload.actorName) || requireString(payload.senderName) || "API delivery",
+    actorRole: requireString(payload.actorRole) || "api",
+    needId: requireString(payload.needId) || requireString(payload.keyword) || crypto.randomUUID(),
+    seekerName: requireString(payload.seekerName) || requireString(payload.recipientName) || "User",
+    recipientEmail: requireString(payload.recipientEmail),
+    itemLabel: requireString(payload.itemLabel) || `${linkCount} solution link${linkCount === 1 ? "" : "s"} sent via ${source}`,
+    itemId: requireString(payload.itemId),
+    providerName: requireString(payload.providerName),
+    source,
+    linkCount,
+    links: rawLinks,
+    subject: requireString(payload.subject),
+  });
+
+  return { ok: true, linkCount };
+}
+
 async function getImpactAuditLogs() {
   const [viewRow, emailRow] = await Promise.all([
     getGreMisSetting(IMPACT_VIEW_AUDIT_LOG_KEY),
@@ -13744,6 +13782,10 @@ Deno.serve(async (req) => {
 
     if (action === "__debugNeedSyncService") {
       return jsonResponse(await debugGreNeedSyncService(requireString(payload.needId)));
+    }
+
+    if (action === "recordExternalSolutionDeliveryImpact") {
+      return jsonResponse(await recordExternalSolutionDeliveryImpact(payload));
     }
 
     const userCtx = await requireUserSessionFromRequest(
