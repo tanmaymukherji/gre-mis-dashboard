@@ -1604,13 +1604,12 @@ function buildGreMappedPatch(user: Record<string, unknown>, profile: Record<stri
     .filter(Boolean);
   const roleMatches = roleCodes.includes(expectedRoleCode);
   const patch: Record<string, unknown> = {
-    role: liveRole,
     gre_user_id: parseNumber(profile.id, 0) || null,
     gre_login_name: requireString(profile.Login) || requireString(profile.Contact) || requireString(user.gre_login_name) || null,
-    gre_sync_status: roleMatches && liveRole === misRole ? "synced" : "mapped_role_mismatch",
+    gre_sync_status: roleMatches && liveRole === misRole ? "synced" : "mapped_role_separate",
     gre_sync_message: roleMatches && liveRole === misRole
-      ? `GRE account mapped and ${misRole} role verified.`
-      : `GRE account mapped, and MIS role has been refreshed to ${liveRole}. GRE roles are currently ${requireString(profile.RoleName) || liveRole || "different from MIS"}.`,
+      ? `GRE account mapped and GRE role also matches MIS role ${misRole}.`
+      : `GRE account mapped. MIS role remains ${misRole}; GRE Website role remains ${requireString(profile.RoleName) || liveRole || "separate"}.`,
     gre_synced_at: new Date().toISOString(),
     gre_pending_role: null,
     gre_activation_mod_key: null,
@@ -6626,6 +6625,10 @@ async function bridgeGrameeeSession(grameeeAccessToken: string) {
   let greUser: Record<string, unknown> | null = existingUser as Record<string, unknown> | null;
 
   if (greUser) {
+    const existingMisRole = requireString(greUser.role).toLowerCase();
+    const effectiveRole = ["admin", "moderator", "curator", "user"].includes(existingMisRole)
+      ? existingMisRole
+      : role;
     const { data: updatedUser, error: updateError } = await adminClient
       .from("gre_mis_users")
       .update({
@@ -6634,7 +6637,6 @@ async function bridgeGrameeeSession(grameeeAccessToken: string) {
         first_name: firstName,
         full_name: fullName,
         phone: phone || null,
-        role,
         is_active: true,
         updated_at: syncedAt,
       })
@@ -6642,7 +6644,10 @@ async function bridgeGrameeeSession(grameeeAccessToken: string) {
       .select("id, username, email, first_name, full_name, phone, role, is_active, must_change_password")
       .single();
     if (updateError || !updatedUser) throw new Error(updateError?.message || "GRE MIS user could not be updated.");
-    greUser = updatedUser as Record<string, unknown>;
+    greUser = {
+      ...(updatedUser as Record<string, unknown>),
+      role: effectiveRole,
+    };
   } else {
     const { data: insertedUser, error: insertError } = await adminClient
       .from("gre_mis_users")
@@ -6663,7 +6668,8 @@ async function bridgeGrameeeSession(grameeeAccessToken: string) {
     greUser = insertedUser as Record<string, unknown>;
   }
 
-  await syncRoleArtifactsForUser(greUser, role, "GRE MIS access refreshed from GramEEE session.");
+  const artifactRole = requireString(greUser.role).toLowerCase() || role;
+  await syncRoleArtifactsForUser(greUser, artifactRole, "GRE MIS access refreshed from GramEEE session without changing the MIS role.");
 
   const session = await createUserSession(requireString(greUser.id));
   await adminClient
@@ -7608,7 +7614,6 @@ async function syncRoleArtifactsForUser(user: Record<string, unknown>, nextRole:
 async function updateUserRole(userId: string, targetRoleInput: string) {
   const targetRole = requireString(targetRoleInput).toLowerCase();
   if (!["user", "curator", "moderator", "admin"].includes(targetRole)) throw new Error("Invalid role selected.");
-  const greTargetRole = targetRole === "moderator" ? "user" : targetRole;
 
   const { data: user, error } = await adminClient
     .from("gre_mis_users")
@@ -7636,158 +7641,39 @@ async function updateUserRole(userId: string, targetRoleInput: string) {
     return { ok: true, status: "unchanged", role: targetRole, message: `${user.full_name || user.username} is already user.` };
   }
 
-  const greResolution = await resolveExistingGreUser(user);
-  if ((targetRole === "user" || targetRole === "moderator") && (!greResolution.greUserId || greResolution.status !== "mapped")) {
-    const { error: localOnlyError } = await adminClient
-      .from("gre_mis_users")
-      .update({
-        role: targetRole,
-        gre_pending_role: null,
-        gre_activation_mod_key: null,
-        gre_activation_requested_at: null,
-        gre_sync_status: "local_only",
-        gre_sync_message: "MIS user role updated locally. No GRE sync was required.",
-        gre_synced_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", userId);
-    if (localOnlyError) throw new Error(localOnlyError.message);
-    await adminClient
-      .from("gre_mis_curators")
-      .update({
-        is_active: false,
-        gre_sync_status: "local_only",
-        gre_sync_message: "Curator access removed in MIS. No GRE account mapping was available.",
-        gre_synced_at: null,
-      })
-      .eq("user_id", userId);
-    await adminClient
-      .from("gre_mis_admins")
-      .delete()
-      .eq("email", requireString(user.email).toLowerCase());
-    return {
-      ok: true,
-      status: "local_only",
+  const syncedAt = new Date().toISOString();
+  const hasGreMapping = parseNumber(user.gre_user_id, 0) > 0;
+  const { data: updatedUser, error: updateError } = await adminClient
+    .from("gre_mis_users")
+    .update({
       role: targetRole,
-      message: `${user.full_name || user.username} is now a MIS ${targetRole} only.`,
-    };
-  }
-
-  if ((targetRole === "curator" || targetRole === "admin") && (greResolution.status !== "mapped" || !greResolution.greUserId)) {
-    if (greResolution.status === "needs_gre_account_creation") {
-      const created = await createGreUserForRolePromotion(user, targetRole);
-      await fetchGreTenantUsers(true);
-      const refreshedResolution = await resolveExistingGreUser({
-        ...user,
-        gre_login_name: created.loginName || greResolution.greLoginName,
-      });
-      if (refreshedResolution.status === "mapped" && refreshedResolution.greUserId) {
-        await syncGreRoleAssignment(refreshedResolution.greUserId, targetRole);
-        await persistMisRoleState(
-          user,
-          targetRole,
-          refreshedResolution.greUserId,
-          refreshedResolution.greLoginName,
-          `GRE account created and synced as ${targetRole}.`,
-        );
-        return {
-          ok: true,
-          status: "synced",
-          role: targetRole,
-          greUserId: refreshedResolution.greUserId,
-          greLoginName: refreshedResolution.greLoginName,
-          message: `${user.full_name || user.username} was created on GRE and synced as ${targetRole}.`,
-        };
-      }
-
-      const identityState = await checkGreIdentity(created.loginName || greResolution.greLoginName || normalizePhoneLogin(user.phone));
-      if (identityState === "INACTIVE_USER" && !created.modKey) {
-        await activateInactiveGreUser(created.loginName || greResolution.greLoginName || normalizePhoneLogin(user.phone));
-        await fetchGreTenantUsers(true);
-        const activatedResolution = await resolveExistingGreUser({
-          ...user,
-          gre_login_name: created.loginName || greResolution.greLoginName,
-        });
-        if (activatedResolution.status === "mapped" && activatedResolution.greUserId) {
-          await syncGreRoleAssignment(activatedResolution.greUserId, targetRole);
-          await persistMisRoleState(
-            user,
-            targetRole,
-            activatedResolution.greUserId,
-            activatedResolution.greLoginName,
-            `GRE account activated and synced as ${targetRole}.`,
-          );
-          return {
-            ok: true,
-            status: "synced",
-            role: targetRole,
-            greUserId: activatedResolution.greUserId,
-            greLoginName: activatedResolution.greLoginName,
-            message: `${user.full_name || user.username} was activated on GRE and synced as ${targetRole}.`,
-          };
-        }
-      }
-
-      if (identityState === "INACTIVE_USER" || created.modKey) {
-        const activationUserId = created.greUserId || parseNumber(user.gre_user_id, 0) || null;
-        await updateUserGreSyncFields(userId, {
-          gre_user_id: activationUserId,
-          gre_login_name: created.loginName || greResolution.greLoginName || normalizePhoneLogin(user.phone) || null,
-          gre_sync_status: "awaiting_gre_activation",
-          gre_sync_message: "GRE account created. Enter the OTP received on the user's phone to complete activation.",
-          gre_synced_at: null,
-          gre_pending_role: targetRole,
-          gre_activation_mod_key: created.modKey,
-          gre_activation_requested_at: new Date().toISOString(),
-        });
-        return {
-          ok: true,
-          status: "awaiting_gre_activation",
-          role: user.role,
-          pendingRole: targetRole,
-          greUserId: activationUserId,
-          greLoginName: created.loginName || greResolution.greLoginName,
-          message: "GRE account created. OTP activation is pending.",
-        };
-      }
-    }
-
-    await updateUserGreSyncFields(userId, {
-      gre_user_id: null,
-      gre_login_name: greResolution.greLoginName || null,
-      gre_sync_status: greResolution.status,
-      gre_sync_message: greResolution.message,
-      gre_synced_at: null,
-      gre_pending_role: targetRole,
+      gre_pending_role: null,
       gre_activation_mod_key: null,
       gre_activation_requested_at: null,
-    });
-    return {
-      ok: true,
-      status: greResolution.status,
-      role: user.role,
-      pendingRole: targetRole,
-      greLoginName: greResolution.greLoginName,
-      message: greResolution.message,
-    };
-  }
+      gre_sync_status: hasGreMapping ? "mapped_role_separate" : "local_only",
+      gre_sync_message: hasGreMapping
+        ? `MIS role updated to ${targetRole}. GRE Website role was not changed.`
+        : `MIS role updated to ${targetRole}. No mapped GRE Website user was changed.`,
+      updated_at: syncedAt,
+    })
+    .eq("id", userId)
+    .select("id, username, first_name, full_name, email, phone, role, gre_user_id, gre_login_name")
+    .single();
+  if (updateError || !updatedUser) throw new Error(updateError?.message || "MIS user role could not be updated.");
 
-  await syncGreRoleAssignment(greResolution.greUserId, greTargetRole);
-  await persistMisRoleState(
-    user,
+  await syncRoleArtifactsForUser(
+    updatedUser as Record<string, unknown>,
     targetRole,
-    greResolution.greUserId,
-    greResolution.greLoginName,
-    `GRE role synced as ${targetRole}.`,
+    `MIS role updated to ${targetRole}; GRE Website role intentionally left unchanged.`,
   );
 
   return {
     ok: true,
-    status: "synced",
+    status: parseNumber(updatedUser.gre_user_id, 0) > 0 ? "mapped_role_separate" : "local_only",
     role: targetRole,
-    greUserId: greResolution.greUserId,
-    greLoginName: greResolution.greLoginName,
-    message: `${user.full_name || user.username} is now synced as ${targetRole} on MIS and GRE.`,
+    greUserId: parseNumber(updatedUser.gre_user_id, 0) || null,
+    greLoginName: requireString(updatedUser.gre_login_name),
+    message: `${updatedUser.full_name || updatedUser.username} is now ${targetRole} on GRE MIS. GRE Website role was not changed.`,
   };
 }
 
@@ -7819,22 +7705,39 @@ async function completeUserRoleActivation(userId: string, otpInput: string) {
   const resolvedGreUserId = resolution.greUserId || greUserId;
   const resolvedGreLogin = resolution.greLoginName || requireString(user.gre_login_name) || normalizePhoneLogin(user.phone);
 
-  await syncGreRoleAssignment(resolvedGreUserId, pendingRole);
-  await persistMisRoleState(
-    user,
+  const syncedAt = new Date().toISOString();
+  const { data: updatedUser, error: updateError } = await adminClient
+    .from("gre_mis_users")
+    .update({
+      role: pendingRole,
+      gre_user_id: resolvedGreUserId,
+      gre_login_name: resolvedGreLogin || null,
+      gre_sync_status: "mapped_role_separate",
+      gre_sync_message: `GRE account activated. MIS role updated to ${pendingRole}; GRE Website role was not changed.`,
+      gre_synced_at: syncedAt,
+      gre_pending_role: null,
+      gre_activation_mod_key: null,
+      gre_activation_requested_at: null,
+      updated_at: syncedAt,
+    })
+    .eq("id", requireString(user.id))
+    .select("id, username, first_name, full_name, email, phone, role, gre_user_id, gre_login_name")
+    .single();
+  if (updateError || !updatedUser) throw new Error(updateError?.message || "Activated MIS user could not be updated.");
+
+  await syncRoleArtifactsForUser(
+    updatedUser as Record<string, unknown>,
     pendingRole,
-    resolvedGreUserId,
-    resolvedGreLogin,
-    `GRE account activated and synced as ${pendingRole}.`,
+    `GRE account activated. MIS role updated to ${pendingRole}; GRE Website role intentionally left unchanged.`,
   );
 
   return {
     ok: true,
-    status: "synced",
+    status: "mapped_role_separate",
     role: pendingRole,
     greUserId: resolvedGreUserId,
     greLoginName: resolvedGreLogin,
-    message: `${user.full_name || user.username} is now activated and synced as ${pendingRole} on GRE.`,
+    message: `${updatedUser.full_name || updatedUser.username} is now activated and ${pendingRole} on GRE MIS. GRE Website role was not changed.`,
   };
 }
 
