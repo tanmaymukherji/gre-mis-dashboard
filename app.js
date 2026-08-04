@@ -3064,7 +3064,18 @@ class GreMisStore {
   async callAdmin(action, body = {}, requireAdmin = false) {
     const performRequest = async () => {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const longRunningActions = new Set([
+        "importInboundWorkbook",
+        "syncGreLiveInbounds",
+        "syncGreChatbotData",
+        "uploadChatbotWorkbooks",
+        "uploadChatbotNormalized",
+        "refreshChatbotIntelligence",
+        "refreshNeedIntelligence",
+        "uploadLocalSolutionToGre",
+      ]);
+      const timeoutMs = longRunningActions.has(action) ? 180000 : 30000;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const grameeeAccessToken = await getGrameeeAccessToken().catch(() => "");
         const grameeeUserSummary = readGrameeeSummary();
@@ -3105,7 +3116,7 @@ class GreMisStore {
       } catch (err) {
         clearTimeout(timeoutId);
         if (err && err.name === "AbortError") {
-          throw new Error("Request timed out after 30 seconds. The server may be unavailable.");
+          throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds. The server may still be processing; please retry after a refresh.`);
         }
         throw err;
       }

@@ -9980,6 +9980,7 @@ async function applyChatbotImportBundle(
   if (importError) throw new Error(importError.message);
 
   const importId = importRow.id;
+  const importTouchedAt = new Date().toISOString();
   const offeringIds = bundle.offerings.map((row) => requireString(row.offering_id)).filter(Boolean);
   const offeringIdSet = new Set(offeringIds);
   const { data: offeringIdentityRows, error: offeringIdentityError } = await adminClient
@@ -10005,7 +10006,8 @@ async function applyChatbotImportBundle(
 
   try {
     for (const rows of chunkArray(bundle.traders)) {
-      const { error } = await adminClient.from("traders").upsert(rows, { onConflict: "trader_id" });
+      const rowsWithTimestamps = rows.map((row) => ({ ...row, updated_at: importTouchedAt }));
+      const { error } = await adminClient.from("traders").upsert(rowsWithTimestamps, { onConflict: "trader_id" });
       if (error) throw new Error(error.message);
     }
 
@@ -10019,7 +10021,7 @@ async function applyChatbotImportBundle(
           if (!hasAnyColumn(["SolutionImage", "Solution Image", "Solution Image URL", "Solution Image Url"]))
             delete cleanRow.solution_image_url;
         }
-        return cleanRow;
+        return { ...cleanRow, updated_at: importTouchedAt };
       });
       const { error } = await adminClient.from("solutions").upsert(rowsCleaned, { onConflict: "solution_id" });
       if (error) throw new Error(error.message);
@@ -10079,7 +10081,7 @@ async function applyChatbotImportBundle(
             stripHtml(normalizeCell(rp.AboutOffering)),
             normalizeCell(rp.TraderOrganisation),
           ]) : null;
-          return { ...cleanRow, last_import_id: importId };
+          return { ...cleanRow, last_import_id: importId, updated_at: importTouchedAt };
         });
         const { error } = await adminClient.from("offerings").upsert(rowsWithImport, { onConflict: "offering_id" });
         if (error) throw new Error(error.message);
@@ -10095,7 +10097,7 @@ async function applyChatbotImportBundle(
       for (const ids of chunkArray(unchangedOfferingIds)) {
         const { error } = await adminClient
           .from("offerings")
-          .update({ last_import_id: importId })
+          .update({ last_import_id: importId, updated_at: importTouchedAt })
           .in("offering_id", ids);
         if (error) throw new Error(error.message);
       }
