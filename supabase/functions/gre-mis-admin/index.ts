@@ -1137,9 +1137,9 @@ async function loginToGreForTrader(
   }
 }
 
-async function fetchGreReportWorkbook(reportName: string, limitRowCount: number, filePrefix: string) {
+async function fetchGreReportWorkbook(reportName: string, limitRowCount: number, filePrefix: string, limitOffset = 0) {
   const sessionId = await loginToGre();
-  const params = `MARKET_ID=${greMarketId}--LIMIT_OFFSET=0--LIMIT_ROW_COUNT=${limitRowCount}`;
+  const params = `MARKET_ID=${greMarketId}--LIMIT_OFFSET=${Math.max(0, limitOffset)}--LIMIT_ROW_COUNT=${limitRowCount}`;
   const response = await fetch(
     `${greLoginBaseUrl}/commons-report-service/api/v1/datasets/name/${encodeURIComponent(reportName)}/execute/download?fileType=EXCEL&param=${encodeURIComponent(params)}`,
     {
@@ -9807,8 +9807,8 @@ function dedupeRowsById<T extends Record<string, unknown>>(rows: T[], key: keyof
 }
 
 function buildChatbotImportBundle(solutionBuffer: ArrayBuffer, traderBuffer: ArrayBuffer) {
-  const solutionRows = readWorkbookRows(solutionBuffer);
-  const traderRows = readWorkbookRows(traderBuffer);
+  const solutionRows = solutionBuffer.byteLength ? readWorkbookRows(solutionBuffer) : [];
+  const traderRows = traderBuffer.byteLength ? readWorkbookRows(traderBuffer) : [];
   return {
     traders: dedupeRowsById(traderRows.map(normalizeTraderRowForChatbot), "trader_id"),
     solutions: dedupeRowsById(solutionRows.map(normalizeSolutionRowForChatbot), "solution_id"),
@@ -10155,7 +10155,8 @@ async function applyChatbotImportBundle(
       traders: bundle.traders.length,
       solutions: bundle.solutions.length,
       offerings: bundle.offerings.length,
-      offeringAiUpdated: changedOfferingIds.length,
+      offeringAiUpdated: skipEnrichment ? 0 : changedOfferingIds.length,
+      offeringsChanged: changedOfferingIds.length,
     };
   } catch (error) {
     await adminClient
@@ -10381,12 +10382,40 @@ async function syncGreChatbotData(provider: string) {
   const summary = await applyChatbotImportBundle(bundle, {
     solutionFileName: solutionReport.fileName,
     traderFileName: traderReport.fileName,
-  }, provider);
+  }, provider, true);
   return {
     ok: true,
     summary,
     files: {
       trader: { fileName: traderReport.fileName },
+      solution: { fileName: solutionReport.fileName },
+    },
+  };
+}
+
+async function syncGreChatbotDataPage(provider: string, offsetInput: unknown, limitInput: unknown, includeTradersInput: unknown) {
+  const offset = Math.max(0, Number(offsetInput) || 0);
+  const limit = Math.min(500, Math.max(100, Number(limitInput) || 300));
+  const includeTraders = parseBoolean(includeTradersInput) !== false && offset === 0;
+  const [traderReport, solutionReport] = await Promise.all([
+    includeTraders
+      ? fetchGreReportWorkbook(greTraderReportName, 1000, "trader_data")
+      : Promise.resolve({ buffer: new ArrayBuffer(0), fileName: "trader_data_skipped.xlsx" }),
+    fetchGreReportWorkbook(greSolutionReportName, limit, "solution_data", offset),
+  ]);
+  const bundle = buildChatbotImportBundle(solutionReport.buffer, traderReport.buffer);
+  const summary = await applyChatbotImportBundle(bundle, {
+    solutionFileName: solutionReport.fileName,
+    traderFileName: traderReport.fileName,
+  }, provider, true);
+  return {
+    ok: true,
+    offset,
+    limit,
+    hasMore: bundle.stats.solutionRows > 0 && bundle.stats.solutionRows === limit,
+    summary,
+    files: {
+      trader: { fileName: traderReport.fileName, skipped: !includeTraders },
       solution: { fileName: solutionReport.fileName },
     },
   };
@@ -10411,7 +10440,7 @@ async function uploadChatbotWorkbooks(
   const summary = await applyChatbotImportBundle(bundle, {
     solutionFileName: solutionFileName || "uploaded_solutions.xlsx",
     traderFileName: traderFileName || "uploaded_traders.xlsx",
-  }, provider);
+  }, provider, true);
   return { ok: true, summary };
 }
 
@@ -14006,6 +14035,15 @@ Deno.serve(async (req) => {
 
     if (action === "syncGreChatbotData") {
       return jsonResponse(await syncGreChatbotData(requireString(payload.aiProvider) || defaultAiProvider));
+    }
+
+    if (action === "syncGreChatbotDataPage") {
+      return jsonResponse(await syncGreChatbotDataPage(
+        requireString(payload.aiProvider) || defaultAiProvider,
+        payload.offset,
+        payload.limit,
+        payload.includeTraders,
+      ));
     }
 
     if (action === "downloadGreChatbotReport") {

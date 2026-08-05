@@ -3068,6 +3068,7 @@ class GreMisStore {
         "importInboundWorkbook",
         "syncGreLiveInbounds",
         "syncGreChatbotData",
+        "syncGreChatbotDataPage",
         "uploadChatbotWorkbooks",
         "uploadChatbotNormalized",
         "refreshChatbotIntelligence",
@@ -3600,6 +3601,10 @@ class GreMisStore {
 
   async syncGreChatbotData(aiProvider) {
     return this.callAdmin("syncGreChatbotData", { aiProvider }, true);
+  }
+
+  async syncGreChatbotDataPage(aiProvider, offset = 0, limit = 300, includeTraders = false) {
+    return this.callAdmin("syncGreChatbotDataPage", { aiProvider, offset, limit, includeTraders }, true);
   }
 
   async downloadGreChatbotReport(reportKind) {
@@ -8259,6 +8264,37 @@ async function collectSubmissionPayload(form, submissionType = "need") {
   };
 }
 
+async function runPagedChatbotDatasetSync(statusEl, provider) {
+  const pageSize = 300;
+  let offset = 0;
+  let page = 1;
+  const totals = {
+    traders: 0,
+    solutions: 0,
+    offerings: 0,
+    offeringsChanged: 0,
+    offeringAiUpdated: 0,
+  };
+
+  while (true) {
+    if (statusEl) {
+      statusEl.textContent = `Syncing GRE Solution/Trader data in batches... page ${page}, rows ${offset + 1}-${offset + pageSize}.`;
+    }
+    const result = await store.syncGreChatbotDataPage(provider, offset, pageSize, offset === 0);
+    const summary = result.summary || {};
+    totals.traders += Number(summary.traders || 0);
+    totals.solutions += Number(summary.solutions || 0);
+    totals.offerings += Number(summary.offerings || 0);
+    totals.offeringsChanged += Number(summary.offeringsChanged || 0);
+    totals.offeringAiUpdated += Number(summary.offeringAiUpdated || 0);
+    if (!result.hasMore) break;
+    offset += pageSize;
+    page += 1;
+  }
+
+  return totals;
+}
+
 function bindStaticEvents() {
   document.querySelectorAll(".tab").forEach((button) => {
     button.addEventListener("click", safeAsync(async () => {
@@ -9342,120 +9378,13 @@ function bindStaticEvents() {
     const provider = byId("aiProviderSelect")?.value || "openai";
     const fileDesc = [solutionFile?.name, traderFile?.name].filter(Boolean).join(", ");
 
-    let traders = [];
-    let solutions = [];
-    let offerings = [];
-
-    if (traderFile) {
-      if (statusEl) statusEl.textContent = `Parsing trader workbook...`;
-      const traderBuf = await traderFile.arrayBuffer();
-      const traderBook = window.XLSX.read(traderBuf, { type: "array" });
-      const traderSheet = traderBook.Sheets[traderBook.SheetNames[0]];
-      const traderRows = window.XLSX.utils.sheet_to_json(traderSheet, { defval: "", raw: false });
-      traders = dedupeRowsById(traderRows.map((row) => ({
-        trader_id: String(row.TraderId || "").trim(),
-        trader_name: normalizeCell(row.TraderName),
-        organisation_name: normalizeCell(row.TraderOrganisation),
-        mobile: normalizeCell(row.TraderMobile),
-        email: normalizeCell(row.TraderMail),
-        poc_name: normalizeCell(row.TraderPOC),
-        tenant_id: normalizeCell(row.TraderTenantId),
-        profile_id: normalizeCell(row.TraderProfileId),
-        description: normalizeCell(row.TraderDescription),
-        short_description: normalizeCell(row.TraderShortDescription),
-        tagline: normalizeCell(row.TraderTagLine),
-        website: normalizeCell(row.TraderWebsite),
-        created_at_source: normalizeCell(row.TraderCreatedDate),
-        association_status: normalizeCell(row.TraderAssociationStatus),
-        raw_payload: row,
-      })), "trader_id");
+    if (statusEl) {
+      statusEl.textContent = `Starting backend batch sync using live GRE exports. Selected files: ${fileDesc}.`;
     }
-
-    if (solutionFile) {
-      if (statusEl) statusEl.textContent = `Parsing solution workbook...`;
-      const solBuf = await solutionFile.arrayBuffer();
-      const solBook = window.XLSX.read(solBuf, { type: "array" });
-      const solSheet = solBook.Sheets[solBook.SheetNames[0]];
-      const solRows = window.XLSX.utils.sheet_to_json(solSheet, { defval: "", raw: false });
-
-      solutions = dedupeRowsById(solRows.map((row) => ({
-        solution_id: String(row.SolutionId || "").trim(),
-        trader_id: normalizeCell(row.TraderId),
-        solution_name: normalizeCell(row.SolutionName),
-        solution_status: normalizeCell(row.SolutionStatus),
-        publish_status: normalizeCell(row.SolutionPublishStatus),
-        created_at_source: normalizeCell(row.SolutionCreationDate),
-        about_solution_html: normalizeCell(row.AboutSolution),
-        about_solution_text: stripHtml(normalizeCell(row.AboutSolution)),
-        solution_image_url: normalizeCell(row.SolutionImage),
-        raw_payload: row,
-      })), "solution_id");
-
-      offerings = dedupeRowsById(solRows.map((row) => {
-        const aboutOfferingHtml = normalizeCell(row.AboutOffering);
-        const trainerDetailsHtml = normalizeCell(row["Trainer Details"]);
-        return {
-          offering_id: String(row.OfferingId || "").trim().replace(/\.0$/, ""),
-          solution_id: normalizeCell(row.SolutionId),
-          trader_id: normalizeCell(row.TraderId),
-          offering_name: normalizeCell(row.OfferingName),
-          publish_status: normalizeCell(row.OfferingPublishStatus),
-          created_at_source: normalizeCell(row.OfferingCreationDate),
-          offering_category: normalizeCell(row.OfferingCategory),
-          offering_group: normalizeCell(row.OfferingGroup),
-          offering_type: normalizeCell(row.OfferingType),
-          domain_6m: normalizeCell(row["6M"]),
-          primary_valuechain_id: normalizeCell(row.PrimaryValuechainId),
-          primary_valuechain: normalizeCell(row.PrimaryValuechain),
-          primary_application_id: normalizeCell(row.PrimaryApplicationId),
-          primary_application: normalizeCell(row.PrimaryApplication),
-          valuechains: splitLooseList(normalizeCell(row.Valuechains)),
-          applications: splitLooseList(normalizeCell(row.Applications)),
-          tags: splitLooseList(normalizeCell(row.Tags)),
-          languages: normalizeLanguageArray(normalizeCell(row.Languages)),
-          geographies: splitGeographies(normalizeCell(row.Geographies)),
-          geographies_raw: normalizeCell(row.Geographies),
-          about_offering_html: aboutOfferingHtml,
-          about_offering_text: stripHtml(aboutOfferingHtml),
-          audience: normalizeCell(row["Who Can avail it"]),
-          trainer_name: normalizeCell(row["Trainer Name"]),
-          trainer_email: normalizeCell(row["Trainer Email Address"]),
-          trainer_phone: normalizeCell(row["Trainer Phone Number"]),
-          trainer_details_html: trainerDetailsHtml,
-          trainer_details_text: stripHtml(trainerDetailsHtml),
-          duration: normalizeCell(row.Duration),
-          prerequisites: normalizeCell(row["Prerequisites - Participants and Training"]),
-          service_cost: normalizeCell(row["Cost (Service)"]),
-          support_post_service: normalizeCell(row["Support post Service"]),
-          support_post_service_cost: normalizeCell(row["Support post Service Cost"]),
-          delivery_mode: normalizeCell(row["Is it offered - Online or Offline"]),
-          certification_offered: normalizeCell(row["Certification Offered"]),
-          cost_remarks: normalizeCell(row["Remarks on Cost"]),
-          location_availability: normalizeCell(row["Location Availability"]),
-          service_brochure_url: normalizeCell(row["Service offering Brochure"]),
-          grade_capacity: normalizeCell(row["Grade/Capacity"]),
-          product_cost: normalizeCell(row["Cost (Product)"]),
-          lead_time: normalizeCell(row["Lead Time"]),
-          support_details: normalizeCell(row.Support),
-          product_brochure_url: normalizeCell(row["Product Brochure"]),
-          knowledge_content_url: normalizeCell(row["Knowledge Offering Content"]),
-          contact_details: normalizeCell(row["Contact Details"]),
-          gre_link: normalizeCell(row["Offering Link on GRE"]),
-          raw_payload: row,
-        };
-      }), "offering_id");
-    }
-
-    if (statusEl) statusEl.textContent = `Uploading ${fileDesc} (${offerings.length} offerings, ${traders.length} traders)...`;
-    const result = await store.uploadChatbotNormalized(
-      traders, solutions, offerings,
-      solutionFile?.name || "normalized_solutions.json",
-      traderFile?.name || "normalized_traders.json",
-      provider,
-    );
+    const result = { summary: await runPagedChatbotDatasetSync(statusEl, provider) };
     if (statusEl) {
       statusEl.textContent =
-        `Upload complete. Traders: ${result.summary?.traders || 0}, solutions: ${result.summary?.solutions || 0}, offerings: ${result.summary?.offerings || 0}, offering AI refreshed: ${result.summary?.offeringAiUpdated || 0}.`;
+        `Upload and sync complete. Traders: ${result.summary?.traders || 0}, solutions: ${result.summary?.solutions || 0}, offerings: ${result.summary?.offerings || 0}, changed offerings: ${result.summary?.offeringsChanged || 0}.`;
     }
     toast("Chatbot workbooks uploaded and synced.");
   }));
@@ -9467,11 +9396,11 @@ function bindStaticEvents() {
     }
     const statusEl = byId("chatbotSyncStatus");
     const provider = byId("aiProviderSelect")?.value || "openai";
-    if (statusEl) statusEl.textContent = "Fetching live trader and solution exports from GRE and updating the chatbot dataset...";
-    const result = await store.syncGreChatbotData(provider);
+    if (statusEl) statusEl.textContent = "Fetching live trader and solution exports from GRE in backend batches...";
+    const result = { summary: await runPagedChatbotDatasetSync(statusEl, provider) };
     if (statusEl) {
       statusEl.textContent =
-        `Chatbot dataset refreshed. Traders: ${result.summary?.traders || 0}, solutions: ${result.summary?.solutions || 0}, offerings: ${result.summary?.offerings || 0}, offering AI refreshed: ${result.summary?.offeringAiUpdated || 0}.`;
+        `Chatbot dataset refreshed. Traders: ${result.summary?.traders || 0}, solutions: ${result.summary?.solutions || 0}, offerings: ${result.summary?.offerings || 0}, changed offerings: ${result.summary?.offeringsChanged || 0}.`;
     }
     toast("GRE Chatbot dataset refreshed.");
   }));
