@@ -12733,6 +12733,76 @@ async function fetchMySolutions(userCtx: { user: Record<string, unknown> }, gram
   );
   const isPrivilegedUser = isPrivilegedMySolutionsUser(userCtx, summary);
   const orgMemberships = await getApprovedOrgMemberships(userCtx);
+  const organisationTraderIds = Array.from(new Set(
+    orgMemberships
+      .map((membership) => requireString(membership.gre_trader_id))
+      .filter(Boolean),
+  ));
+
+  let localOfferingQuery = adminClient
+    .from("offerings")
+    .select(`
+      offering_id,
+      solution_id,
+      trader_id,
+      publish_status,
+      offering_name,
+      offering_category,
+      offering_group,
+      offering_type,
+      tags,
+      languages,
+      geographies,
+      about_offering_text,
+      contact_details,
+      raw_payload,
+      trainer_name,
+      trainer_email,
+      trainer_phone,
+      trainer_details_text,
+      duration,
+      prerequisites,
+      location_availability,
+      service_cost,
+      product_cost,
+      lead_time,
+      support_details,
+      support_post_service,
+      support_post_service_cost,
+      delivery_mode,
+      certification_offered,
+      cost_remarks,
+      grade_capacity,
+      service_brochure_url,
+      product_brochure_url,
+      knowledge_content_url,
+      gre_link,
+      created_at_source,
+      updated_at,
+      solution:solutions (
+        solution_id,
+        solution_name,
+        about_solution_text,
+        solution_image_url,
+        raw_payload
+      ),
+      trader:traders (
+        trader_id,
+        trader_name,
+        organisation_name,
+        email,
+        mobile,
+        poc_name,
+        association_status
+      )
+    `)
+    .in("publish_status", ["Published", "MIS Published"]);
+  if (organisationTraderIds.length) {
+    // Scope at the database before loading nested solution/trader payloads.
+    // Filtering after a global limit hid older organisation offerings and made
+    // the request slow enough for the browser to abort it.
+    localOfferingQuery = localOfferingQuery.in("trader_id", organisationTraderIds);
+  }
 
   // Only released solutions are shown here. Edits are stored as pending
   // approval records and should not appear as live My Solutions cards.
@@ -12744,66 +12814,9 @@ async function fetchMySolutions(userCtx: { user: Record<string, unknown> }, gram
       .eq("source_mode", "signed_in")
       .eq("approval_status", "approved")
       .order("created_at", { ascending: false }),
-    adminClient
-      .from("offerings")
-      .select(`
-        offering_id,
-        solution_id,
-        trader_id,
-        publish_status,
-        offering_name,
-        offering_category,
-        offering_group,
-        offering_type,
-        tags,
-        languages,
-        geographies,
-        about_offering_text,
-        contact_details,
-        raw_payload,
-        trainer_name,
-        trainer_email,
-        trainer_phone,
-        trainer_details_text,
-        duration,
-        prerequisites,
-        location_availability,
-        service_cost,
-        product_cost,
-        lead_time,
-        support_details,
-        support_post_service,
-        support_post_service_cost,
-        delivery_mode,
-        certification_offered,
-        cost_remarks,
-        grade_capacity,
-        service_brochure_url,
-        product_brochure_url,
-        knowledge_content_url,
-        gre_link,
-        created_at_source,
-        updated_at,
-        solution:solutions (
-          solution_id,
-          solution_name,
-          about_solution_text,
-          solution_image_url,
-          raw_payload
-        ),
-        trader:traders (
-          trader_id,
-          trader_name,
-          organisation_name,
-          email,
-          mobile,
-          poc_name,
-          association_status
-        )
-      `)
-      .in("publish_status", ["Published", "MIS Published"])
+    localOfferingQuery
       .order("updated_at", { ascending: false })
-      .limit(500),
+      .limit(organisationTraderIds.length ? 1000 : 500),
   ]);
   if (submissionResult.error) throw new Error(submissionResult.error.message);
   if (localOfferingResult.error) throw new Error(localOfferingResult.error.message);
