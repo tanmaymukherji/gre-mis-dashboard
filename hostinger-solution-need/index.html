@@ -1371,8 +1371,8 @@
         heroTitle.textContent = "My Organisation";
         heroLede.textContent = "Manage organisation members and roles for your approved organisation.";
         updateUrl("my-organisation");
-        if (orgAccessLoaded) renderOrganisationAccess();
-        else loadOrganisationAccess();
+        orgAccessLoaded = false;
+        loadOrganisationAccess();
       }
 
       function updateUrl(view) {

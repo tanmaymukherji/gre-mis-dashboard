@@ -6595,15 +6595,25 @@ async function bridgeGrameeeSession(grameeeAccessToken: string) {
   const appMetadata = (authUser.app_metadata || {}) as Record<string, unknown>;
   const userMetadata = (authUser.user_metadata || {}) as Record<string, unknown>;
   const role = requireString(appMetadata.grameee_role).toLowerCase();
-
-  if (!["admin", "moderator", "curator"].includes(role)) {
-    throw new Error("This GramEEE login does not currently have GRE access.");
-  }
-
   const email = requireString(authUser.email).toLowerCase();
   const username = requireString(userMetadata.username).toLowerCase();
   if (!email) {
     throw new Error("Your GramEEE login is missing an email address.");
+  }
+
+  const hasGlobalGreAccess = ["admin", "moderator", "curator"].includes(role);
+  if (!hasGlobalGreAccess) {
+    const { data: organisationMembership, error: membershipError } = await adminClient
+      .from("gre_mis_organisation_memberships")
+      .select("id")
+      .eq("user_email", email)
+      .eq("status", "approved")
+      .limit(1)
+      .maybeSingle();
+    if (membershipError) throw new Error(membershipError.message);
+    if (!organisationMembership?.id) {
+      throw new Error("This GramEEE login does not currently have GRE or approved organisation access.");
+    }
   }
 
   const rawFullName = requireString(userMetadata.full_name) || username || email;
