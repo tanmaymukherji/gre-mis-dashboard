@@ -6433,7 +6433,7 @@ async function validateUserSession(token: string) {
   const tokenHash = await hashToken(normalized);
   const { data, error } = await adminClient
     .from("gre_mis_web_sessions")
-    .select("id, user_id, expires_at, gre_mis_users!inner(id, username, email, first_name, full_name, phone, role, is_active, must_change_password)")
+    .select("id, user_id, expires_at, last_used_at, gre_mis_users!inner(id, username, email, first_name, full_name, phone, role, is_active, must_change_password)")
     .eq("token_hash", tokenHash)
     .maybeSingle();
 
@@ -6444,10 +6444,18 @@ async function validateUserSession(token: string) {
     return null;
   }
 
-  await adminClient
-    .from("gre_mis_web_sessions")
-    .update({ last_used_at: new Date().toISOString() })
-    .eq("id", data.id);
+  // Avoid making parallel Management Desk reads contend on one session row.
+  // Touching last_used_at once every ten minutes is sufficient for activity
+  // tracking and removes a write from the normal read-only request path.
+  const lastUsedAt = new Date(requireString(data.last_used_at)).getTime();
+  const touchCutoff = Date.now() - 10 * 60 * 1000;
+  if (!Number.isFinite(lastUsedAt) || lastUsedAt < touchCutoff) {
+    await adminClient
+      .from("gre_mis_web_sessions")
+      .update({ last_used_at: new Date().toISOString() })
+      .eq("id", data.id)
+      .lt("last_used_at", new Date(touchCutoff).toISOString());
+  }
 
   const userRow = Array.isArray(data.gre_mis_users) ? data.gre_mis_users[0] : data.gre_mis_users;
   if (!userRow?.is_active) return null;
@@ -6465,7 +6473,7 @@ async function validateLegacyAdminSession(token: string) {
   const tokenHash = await hashToken(normalized);
   const { data, error } = await adminClient
     .from("gre_mis_admin_web_sessions")
-    .select("id, username, expires_at")
+    .select("id, username, expires_at, last_used_at")
     .eq("token_hash", tokenHash)
     .maybeSingle();
   if (error || !data) return null;
@@ -6473,10 +6481,15 @@ async function validateLegacyAdminSession(token: string) {
     await adminClient.from("gre_mis_admin_web_sessions").delete().eq("id", data.id);
     return null;
   }
-  await adminClient
-    .from("gre_mis_admin_web_sessions")
-    .update({ last_used_at: new Date().toISOString() })
-    .eq("id", data.id);
+  const lastUsedAt = new Date(requireString(data.last_used_at)).getTime();
+  const touchCutoff = Date.now() - 10 * 60 * 1000;
+  if (!Number.isFinite(lastUsedAt) || lastUsedAt < touchCutoff) {
+    await adminClient
+      .from("gre_mis_admin_web_sessions")
+      .update({ last_used_at: new Date().toISOString() })
+      .eq("id", data.id)
+      .lt("last_used_at", new Date(touchCutoff).toISOString());
+  }
   return data;
 }
 
@@ -7164,18 +7177,12 @@ async function getAdminLocalSolutionsSnapshot() {
       updated_at,
       solution:solutions (
         solution_id,
-        solution_name,
-        about_solution_text,
-        solution_image_url
+        solution_name
       ),
       trader:traders (
         trader_id,
         trader_name,
-        organisation_name,
-        email,
-        mobile,
-        poc_name,
-        association_status
+        organisation_name
       )
     `)
       .eq("publish_status", "MIS Published")
@@ -13927,9 +13934,12 @@ Deno.serve(async (req) => {
       return jsonResponse(await removeManagedUser(requireString(payload.userId), requireString(payload.removalMode) || "org_only"));
     }
 
-    const adminCtx = await requireAdminSessionFromRequest(req, payload, requireString(payload.adminSessionToken));
-    const adminActorEmail = adminCtx.admin.email;
-    const adminActorRole = requireString(adminCtx.user.role).toLowerCase();
+    // userCtx has already validated the session above. Re-validating it here
+    // doubled the database work and wrote the same last_used_at row again for
+    // every admin snapshot request.
+    assertRoles(userCtx, ["admin", "moderator"], "Admin or moderator login required.");
+    const adminActorEmail = requireString(userCtx.user.email).toLowerCase();
+    const adminActorRole = requireString(userCtx.user.role).toLowerCase();
 
     if (action === "adminSnapshot") {
       return jsonResponse(await getAdminSnapshot());

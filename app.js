@@ -8067,14 +8067,15 @@ async function refreshAll() {
     await rerender({ includeMatches: false });
   }
   if (hasAdminLikeAccess()) {
-    const adminResults = await Promise.allSettled([
-      store.loadAdminUsersSnapshot(),
-      store.loadAdminDataSyncSnapshot(),
-      store.loadAdminMailImpactSnapshot(),
-      store.loadAdminLocalSolutionsSnapshot(),
-      store.loadAdminLocalNeedsSnapshot(),
-      store.loadAdminApprovalsSnapshot(),
-    ]);
+    // Management Desk panels are intentionally lazy-loaded. Loading every panel
+    // here created six concurrent Edge Function calls, including multi-megabyte
+    // solution/need snapshots, and caused the active approvals request to time out
+    // behind work for tabs the user had not opened.
+    const adminResults = state.view === "admin"
+      ? await Promise.allSettled([
+          store.loadAdminDeskTabSnapshot(state.adminDeskTab || "data-sync"),
+        ])
+      : [];
     const adminFailures = adminResults.filter((result) => result.status === "rejected");
     if (adminFailures.length) {
       adminFailures.forEach((result) => console.error("Management Desk segment failed", result.reason));
