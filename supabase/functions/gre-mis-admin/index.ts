@@ -8153,21 +8153,22 @@ async function createLocalSolutionFromSubmission(
     console.warn("Offering intelligence enrichment failed:", aiError instanceof Error ? aiError.message : String(aiError));
   });
 
-  Promise.all([
-    uploadAttachmentToGithub(payload.service_brochure_attachment, "service-brochures", `${offeringName || "service-offering"}-${attachmentName(payload.service_brochure_attachment) || "brochure"}`),
-    uploadAttachmentToGithub(payload.product_brochure_attachment, "product-brochures", `${offeringName || "product-offering"}-${attachmentName(payload.product_brochure_attachment) || "brochure"}`),
-    uploadAttachmentToGithub(payload.knowledge_content_attachment, "knowledge-content", `${offeringName || "knowledge-offering"}-${attachmentName(payload.knowledge_content_attachment) || "content"}`),
-    uploadAttachmentToGithub(payload.offering_image_attachment, "offering-images", `${offeringName || "offering"}-${attachmentName(payload.offering_image_attachment) || "image"}`),
-  ]).then(([serviceUrl, productUrl, knowledgeUrl, imageUrl]) => {
+  try {
+    const [serviceUrl, productUrl, knowledgeUrl, imageUrl] = await Promise.all([
+      uploadAttachmentToGithub(payload.service_brochure_attachment, "service-brochures", `${offeringName || "service-offering"}-${attachmentName(payload.service_brochure_attachment) || "brochure"}`),
+      uploadAttachmentToGithub(payload.product_brochure_attachment, "product-brochures", `${offeringName || "product-offering"}-${attachmentName(payload.product_brochure_attachment) || "brochure"}`),
+      uploadAttachmentToGithub(payload.knowledge_content_attachment, "knowledge-content", `${offeringName || "knowledge-offering"}-${attachmentName(payload.knowledge_content_attachment) || "content"}`),
+      uploadAttachmentToGithub(payload.offering_image_attachment, "offering-images", `${offeringName || "offering"}-${attachmentName(payload.offering_image_attachment) || "image"}`),
+    ]);
     const patches = [];
     if (serviceUrl) patches.push(adminClient.from("offerings").update({ service_brochure_url: serviceUrl }).eq("offering_id", offeringId));
     if (productUrl) patches.push(adminClient.from("offerings").update({ product_brochure_url: productUrl }).eq("offering_id", offeringId));
     if (knowledgeUrl) patches.push(adminClient.from("offerings").update({ knowledge_content_url: knowledgeUrl }).eq("offering_id", offeringId));
     if (imageUrl) patches.push(adminClient.from("solutions").update({ solution_image_url: imageUrl }).eq("solution_id", solutionId));
-    return Promise.all(patches);
-  }).catch((uploadError) => {
-    console.warn("Background attachment upload failed:", uploadError instanceof Error ? uploadError.message : String(uploadError));
-  });
+    await Promise.all(patches);
+  } catch (uploadError) {
+    console.warn("Attachment upload failed:", uploadError instanceof Error ? uploadError.message : String(uploadError));
+  }
 
   return {
     traderId,
